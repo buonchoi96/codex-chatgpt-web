@@ -49,7 +49,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          subst E: /D
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
