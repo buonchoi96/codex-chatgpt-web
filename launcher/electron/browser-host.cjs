@@ -571,6 +571,10 @@ class BrowserHost {
       rendererReady: false,
       deviceEmulationViewport: null,
       deviceEmulationDirty: true,
+      // A post-submit CDP rebind can momentarily lose Chromium's effective viewport even while
+      // the launcher tab is visible. Keep explicit emulation forced for the rest of that turn
+      // after recovery starts so a later visibility sync cannot collapse the renderer again.
+      forceOperationalViewport: false,
       bootstrapDeadlineAt: Date.now() + TURN_TAB_BOOTSTRAP_TIMEOUT_MS,
       lastHeartbeatAt: Date.now(),
     };
@@ -1309,8 +1313,10 @@ class BrowserHost {
     tab.lastHeartbeatAt = Date.now();
     if (refreshViewport) {
       // Closing an external Playwright CDP session can clear Chromium's effective emulation while
-      // Electron still remembers the old dimensions. Mark the exact owned tab dirty and reapply
-      // the existing hidden-surface contract before a replacement CDP session is allowed to open.
+      // Electron still remembers the old dimensions. Force explicit device emulation for the
+      // remainder of this turn, including when the affected tab is currently selected/visible,
+      // before a replacement CDP session is allowed to open.
+      tab.forceOperationalViewport = true;
       tab.deviceEmulationDirty = true;
       this.syncViewVisibility();
     }
@@ -1480,7 +1486,8 @@ class BrowserHost {
       tab.view.setVisible(visible || tab.status === "running");
       return;
     }
-    if (visible) {
+    const forceOperationalViewport = tab.forceOperationalViewport === true;
+    if (visible && !forceOperationalViewport) {
       // Establish native on-screen bounds before removing the background viewport contract.
       tab.view.setBounds(this.bounds);
       if (tab.rendererReady && tab.deviceEmulationViewport) {
@@ -1492,16 +1499,25 @@ class BrowserHost {
       // A WebContentsView born outside a hidden BrowserWindow has a 0x0 renderer even when its
       // native bounds and View visibility are non-zero. Device emulation gives background turns
       // an explicit renderer viewport before moving the view outside the launcher surface.
-      const bounds = this.hiddenTurnBounds();
+      //
+      // During post-submit CDP recovery we deliberately keep this contract even for the selected,
+      // visible tab. Closing the stale CDP session can clear Chromium's effective viewport while
+      // Electron still reports valid native bounds; relying on those bounds caused issue #278-style
+      // rebind failures after the renderer woke back up.
+      const nativeBounds = visible ? this.bounds : this.hiddenTurnBounds();
+      const viewport = {
+        width: Math.max(HIDDEN_TURN_VIEWPORT.width, Math.round(nativeBounds.width || 0)),
+        height: Math.max(HIDDEN_TURN_VIEWPORT.height, Math.round(nativeBounds.height || 0)),
+      };
       if (tab.rendererReady
         && (tab.deviceEmulationDirty
-          || tab.deviceEmulationViewport?.width !== bounds.width
-          || tab.deviceEmulationViewport?.height !== bounds.height)) {
-        this.enableHiddenTurnViewport(tab.view.webContents, bounds);
-        tab.deviceEmulationViewport = { width: bounds.width, height: bounds.height };
+          || tab.deviceEmulationViewport?.width !== viewport.width
+          || tab.deviceEmulationViewport?.height !== viewport.height)) {
+        this.enableHiddenTurnViewport(tab.view.webContents, viewport);
+        tab.deviceEmulationViewport = { width: viewport.width, height: viewport.height };
         tab.deviceEmulationDirty = false;
       }
-      tab.view.setBounds(bounds);
+      tab.view.setBounds(nativeBounds);
     }
     tab.view.setVisible(visible || tab.status === "running");
   }
@@ -2300,6 +2316,11 @@ class BrowserHost {
         existing.bootstrapDeadlineAt = Date.now() + TURN_TAB_BOOTSTRAP_TIMEOUT_MS;
       }
       existing.lastHeartbeatAt = Date.now();
+      // A retained tab may have finished its previous turn under forced recovery emulation.
+      // Start the new turn from the ordinary visibility contract; a later recovery heartbeat can
+      // opt back into forced emulation if this renderer stalls again.
+      existing.forceOperationalViewport = false;
+      existing.deviceEmulationDirty = true;
       if (!existing.view.webContents.isDestroyed()) {
         existing.view.webContents.setBackgroundThrottling(false);
       }
@@ -2370,6 +2391,9 @@ class BrowserHost {
       && (!tab.connectorIdentity || connectorBound)) {
       tab.connectorBound = connectorBound === true;
       tab.lastHeartbeatAt = Date.now();
+      tab.forceOperationalViewport = false;
+      tab.deviceEmulationDirty = true;
+      this.syncViewVisibility();
       if (hideAfterTurn && !this.activeTraceId) this.hide();
       this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });
       this.publishState?.(this.snapshot());
