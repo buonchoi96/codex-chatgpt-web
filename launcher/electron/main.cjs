@@ -29,7 +29,7 @@ const {
 const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
-const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
+const { DEVELOPMENT_PROFILE, resolveLauncherProfile, resolvePackagedWindowsDataPaths } = require("./profile.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
 const {
@@ -45,6 +45,15 @@ const {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const SOURCE_ROOT = path.resolve(__dirname, "../..");
+if (process.platform === "win32" && app.isPackaged) {
+  const packagedData = resolvePackagedWindowsDataPaths(process.execPath);
+  if (!process.env.CODEX_CHATGPT_WEB_HOME?.trim()) {
+    process.env.CODEX_CHATGPT_WEB_HOME = packagedData.coreHome;
+  }
+  if (!process.env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR?.trim()) {
+    process.env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR = packagedData.userData;
+  }
+}
 const LAUNCHER_PROFILE = resolveLauncherProfile({ appData: app.getPath("appData") });
 const IS_DEV_PROFILE = LAUNCHER_PROFILE.kind === DEVELOPMENT_PROFILE;
 const CORE_HOME = LAUNCHER_PROFILE.coreHome;

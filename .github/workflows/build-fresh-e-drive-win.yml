@@ -1,0 +1,60 @@
+name: Build v5.0.8 Fresh E Drive Windows
+
+on:
+  push:
+    branches:
+      - custom/v5.0.8-fresh-e-drive
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and regression tests
+        run: bun run verify
+
+      - name: Build Windows launcher
+        run: bun run --cwd launcher package:win
+
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\codex-e-drive"
+
+      - name: Smoke packaged launcher
+        run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: subst E: /D
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-web-gpt-v5.0.8-fresh-e-drive-win-x64
+          path: |
+            launcher/artifacts/*.exe
+            launcher/artifacts/*.zip
+          if-no-files-found: error
