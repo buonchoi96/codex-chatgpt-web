@@ -44,7 +44,7 @@ test("launcher publishes native packages for all supported desktop operating sys
   assert.equal(manifest.build.nsis.allowToChangeInstallationDirectory, true);
   assert.equal(manifest.build.nsis.include, "assets/installer.nsh");
   const customInstaller = fs.readFileSync(path.join(launcherRoot, "assets", "installer.nsh"), "utf8");
-  assert.match(customInstaller, /E:\\\\Codex Web GPT\\\\App/);
+  assert.ok(customInstaller.includes("E:\\Codex Web GPT\\App"));
   assert.match(customInstaller, /InstallLocation/);
   assert.equal(manifest.build.nsis.runAfterFinish, true);
   assert.match(manifest.build.nsis.guid, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
