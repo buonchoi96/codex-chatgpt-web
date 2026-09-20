@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - custom/v5.0.8-fresh-e-drive
+      - fix/v5.0.8-e-drive-viewport-recovery
   workflow_dispatch:
 
 permissions:
