@@ -2408,27 +2408,33 @@ test("an Automatic turn never reuses a retained Zero Risk conversation", async (
   );
 });
 
-test("a connector conversation is not reused until its connector was bound", async () => {
+test("a connector conversation is reused even when its connector proof must be refreshed", async () => {
   const conversationKey = "c".repeat(64);
   const retained = {
     id: "retained",
+    surfaceId: "surface-retained",
     traceId: "trace_old",
     status: "ready",
     conversationKey,
     connectorIdentity: "Codex Native2",
     connectorBound: false,
     interactionMode: "automatic",
+    view: { webContents: { isDestroyed: () => true } },
   };
+  let created = false;
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     manualOperation: null,
     turnTabs: new Map([[retained.id, retained]]),
     userCancelledTurnOwners: new Map(),
-    createTurnTab: () => ({ id: "fresh", surfaceId: "surface-fresh" }),
+    createTurnTab: () => {
+      created = true;
+      return { id: "fresh", surfaceId: "surface-fresh" };
+    },
     writeDescriptor() {},
     syncViewVisibility() {},
     publishState() {},
     snapshot: () => ({ tabs: [] }),
-    logger: { info() {} },
+    logger: { info() {}, warn() {} },
   });
 
   assert.deepEqual(
@@ -2441,12 +2447,13 @@ test("a connector conversation is not reused until its connector was bound", asy
       "Codex Native2",
     ),
     {
-      surfaceId: "surface-fresh",
-      tabId: "fresh",
-      reused: false,
+      surfaceId: "surface-retained",
+      tabId: "retained",
+      reused: true,
       connectorBound: false,
     },
   );
+  assert.equal(created, false);
 });
 
 test("a required retained conversation fails before creating a browser tab", async () => {
