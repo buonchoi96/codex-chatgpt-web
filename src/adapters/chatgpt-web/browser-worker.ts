@@ -3436,12 +3436,11 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConversation = false,
-    reuseConnector = reuseConversation,
+    reuseConnector = false,
     requireThink = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
-    let connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConversation, reuseConnector);
+    let connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector, reuseConnector);
     let composerMutationStarted = false;
     try {
       if (connectorMode === "retained") {
@@ -3754,8 +3753,7 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConversation = false,
-    reuseConnector = reuseConversation,
+    reuseConnector = false,
     requireThink = false,
   ): Promise<void> {
     let retryAvailable = compaction;
@@ -3769,7 +3767,6 @@ export class ChatGptBrowserWorker {
           abortSignal,
           catalogRefreshAvailable,
           connectorAttemptBudget,
-          reuseConversation,
           reuseConnector,
           requireThink,
         );
@@ -4908,7 +4905,6 @@ export class ChatGptBrowserWorker {
                 promptAbortSignal,
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
-                reuseConversation,
                 reuseConnector,
                 mode.thinkEnabled,
               );
