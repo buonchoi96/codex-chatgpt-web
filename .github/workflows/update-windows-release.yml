@@ -43,8 +43,6 @@ jobs:
           set -euo pipefail
           mapfile -t assets < <(find release-assets -maxdepth 2 -type f -name '*.exe' -print | sort)
           assets+=("release-assets/SHA256SUMS.txt")
-          gh release upload "$RELEASE_TAG" "${assets[@]}"             --repo "$GITHUB_REPOSITORY"             --clobber
-
           cat > release-notes.md <<'EOF'
           ## Codex Web GPT v5.0.8 — Custom Windows build
 
@@ -72,4 +70,9 @@ jobs:
           `SHA256SUMS.txt` contains the checksum for the published installer.
           EOF
 
-          gh release edit "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --title "Codex Web GPT v5.0.8 Custom Windows"             --notes-file release-notes.md
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}"               --repo "$GITHUB_REPOSITORY"               --clobber
+            gh release edit "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --title "Codex Web GPT v5.0.8 Custom Windows"               --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}"               --repo "$GITHUB_REPOSITORY"               --target "e2c97150c65aaf7a6f27faf47932e8956337cee6"               --title "Codex Web GPT v5.0.8 Custom Windows"               --notes-file release-notes.md
+          fi
