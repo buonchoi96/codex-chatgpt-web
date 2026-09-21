@@ -130,6 +130,88 @@ export function installCodexInterruptHookCommand(
   };
 }
 
+
+/**
+ * Reclaim one intact codex-chatgpt-web Interrupt hook left behind when the launcher data/journal
+ * was removed before the Codex config. This is intentionally fail-closed: only the exact managed
+ * marker pair, one generated Interrupt definition, and its matching trust-state entry for the
+ * active config path are eligible. Any modification or ambiguity is left for explicit recovery.
+ */
+export function reclaimOrphanedCodexInterruptHook(
+  text: string,
+  configPath: string,
+): { text: string; reclaimed: boolean } {
+  const startCount = managedMarkerCount(text);
+  const endCount = text.split(MANAGED_INTERRUPT_HOOK_END).length - 1;
+  if (startCount === 0 && endCount === 0) return { text, reclaimed: false };
+  if (startCount !== 1 || endCount !== 1) {
+    throw new Error("Codex config contains an ambiguous stale codex-chatgpt-web interrupt hook; refusing automatic repair");
+  }
+  const start = text.indexOf(MANAGED_INTERRUPT_HOOK_START);
+  const endMarker = text.indexOf(MANAGED_INTERRUPT_HOOK_END);
+  if (start < 0 || endMarker < start) {
+    throw new Error("Codex config contains a malformed stale codex-chatgpt-web interrupt hook; refusing automatic repair");
+  }
+  const fragment = text.slice(start, endMarker + MANAGED_INTERRUPT_HOOK_END.length);
+  let parsed: {
+    hooks?: {
+      Interrupt?: Array<{ hooks?: Array<Record<string, unknown>> }>;
+      state?: Record<string, Record<string, unknown>>;
+    };
+  };
+  try {
+    // Prove both the candidate fragment and the full config remain valid TOML before touching it.
+    Bun.TOML.parse(text.replace(/\r\n?/g, "\n"));
+    parsed = Bun.TOML.parse(fragment.replace(/\r\n?/g, "\n")) as typeof parsed;
+  } catch {
+    throw new Error("Codex config contains a malformed stale codex-chatgpt-web interrupt hook; refusing automatic repair");
+  }
+  const interrupts = parsed.hooks?.Interrupt;
+  const state = parsed.hooks?.state;
+  if (!Array.isArray(interrupts) || interrupts.length !== 1
+    || !state || typeof state !== "object" || Array.isArray(state)
+    || Object.keys(state).length !== 1) {
+    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
+  }
+  const hooks = interrupts[0]?.hooks;
+  if (!Array.isArray(hooks) || hooks.length !== 1) {
+    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
+  }
+  const hook = hooks[0]!;
+  const hookKeys = Object.keys(hook).sort();
+  if (JSON.stringify(hookKeys) !== JSON.stringify(["command", "timeout", "type"])) {
+    throw new Error("Codex config stale interrupt hook contains unexpected fields; refusing automatic repair");
+  }
+  const command = hook.command;
+  if (hook.type !== "command" || typeof command !== "string" || command.length === 0 || hook.timeout !== 3) {
+    throw new Error("Codex config stale interrupt hook no longer matches the managed command; refusing automatic repair");
+  }
+  const groupIndex = interruptGroupCount(text.slice(0, start));
+  const stateKey = Object.keys(state)[0]!;
+  const expectedStateKey = `${canonicalConfigPath(configPath)}:interrupt:${groupIndex}:0`;
+  if (stateKey !== expectedStateKey) {
+    throw new Error("Codex config stale interrupt hook belongs to a different config path; refusing automatic repair");
+  }
+  const stateEntry = state[stateKey]!;
+  if (Object.keys(stateEntry).length !== 1 || typeof stateEntry.trusted_hash !== "string") {
+    throw new Error("Codex config stale interrupt hook trust state changed; refusing automatic repair");
+  }
+  const trustedHash = stateEntry.trusted_hash;
+  if (trustedHash !== codexInterruptHookHash(command)) {
+    throw new Error("Codex config stale interrupt hook trust hash changed; refusing automatic repair");
+  }
+  const installed: InstalledCodexInterruptHook = {
+    command,
+    groupIndex,
+    stateKey,
+    trustedHash,
+    fragment,
+  };
+  const repaired = restoreCodexInterruptHook(text, installed);
+  verifyCodexInterruptHookRestored(repaired);
+  return { text: repaired, reclaimed: true };
+}
+
 function hookTextPattern(text: string): string {
   return text.split(/\r\n|\n|\r/)
     .map(line => line.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
