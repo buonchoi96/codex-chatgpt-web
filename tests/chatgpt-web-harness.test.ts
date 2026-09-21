@@ -2736,7 +2736,6 @@ describe("ChatGPT outer-native harness v4", () => {
         "codex_exec",
         "codex_tool_call",
         "codex_tool_inventory",
-        "codex_turn_complete",
         "codex_view_image",
         "codex_write_stdin",
       ]);
