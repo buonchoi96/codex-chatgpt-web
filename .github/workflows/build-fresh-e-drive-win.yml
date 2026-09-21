@@ -7,6 +7,7 @@ on:
       - custom/v5.0.8-fresh-e-drive
       - fix/v5.0.8-e-drive-viewport-recovery
       - fix/v5.0.8-multitask-completion-persistence
+      - fix/native-completion-and-install-models-recovery
   workflow_dispatch:
 
 permissions:
