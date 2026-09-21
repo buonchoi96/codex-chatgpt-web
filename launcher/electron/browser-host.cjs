@@ -786,6 +786,14 @@ class BrowserHost {
       if (!inPlace) {
         tab.rendererReady = false;
         tab.deviceEmulationDirty = true;
+        if (tab.connectorBound) {
+          tab.connectorBound = false;
+          this.logger.info("browser.connector_binding_invalidated", {
+            tabId: tab.id,
+            traceId: tab.traceId,
+            reason: "main_frame_navigation",
+          });
+        }
       }
       this.publishState?.(this.snapshot());
     });
@@ -2286,7 +2294,6 @@ class BrowserHost {
       && tab.status === "ready"
       && tab.conversationKey === conversationKey
       && tab.connectorIdentity === connectorIdentity
-      && (!connectorIdentity || tab.connectorBound === true)
     )) : [];
     if (retainedMatches.length > 1) {
       throw new Error(`ChatGPT retained conversation ${conversationKey} owns multiple browser tabs`);
