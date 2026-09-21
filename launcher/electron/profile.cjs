@@ -4,6 +4,22 @@ const path = require("node:path");
 const PRODUCTION_PROFILE = "production";
 const DEVELOPMENT_PROFILE = "development";
 
+function resolvePackagedWindowsDataPaths(executablePath) {
+  if (typeof executablePath !== "string" || !/^[A-Za-z]:\\/.test(executablePath)) {
+    throw new Error("Packaged Windows data resolution requires an absolute drive path");
+  }
+  const appDir = path.win32.dirname(path.win32.resolve(executablePath));
+  const installRoot = path.win32.basename(appDir).toLowerCase() === "app"
+    ? path.win32.dirname(appDir)
+    : appDir;
+  const coreHome = path.win32.join(installRoot, "Data");
+  return {
+    installRoot,
+    coreHome,
+    userData: path.win32.join(coreHome, "Launcher"),
+  };
+}
+
 function resolveUserPath(value, homeDir = os.homedir()) {
   if (value === "~") return homeDir;
   if (value.startsWith("~/") || value.startsWith("~\\")) {
@@ -64,4 +80,5 @@ module.exports = {
   DEVELOPMENT_PROFILE,
   PRODUCTION_PROFILE,
   resolveLauncherProfile,
+  resolvePackagedWindowsDataPaths,
 };

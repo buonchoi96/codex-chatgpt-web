@@ -51,6 +51,19 @@ const ZERO_RISK_MCP_INSTRUCTIONS = [
   "If a tool returns an error, report that error instead of changing the request_id.",
 ].join(" ");
 
+export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
+  "Use the current turn_token unchanged for every Codex Native call in this response.",
+  "Treat every explicit deliverable in the active Codex request as part of one task completion condition.",
+  "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
+  "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
+  "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
+  "Only stop early for a genuine external blocker that cannot be resolved with the available Codex tools or environment.",
+].join(" ");
+
+export function chatGptMcpInstructions(contract: ChatGptMcpContract): string {
+  return contract === "safe" ? ZERO_RISK_MCP_INSTRUCTIONS : CHATGPT_NATIVE_MCP_INSTRUCTIONS;
+}
+
 function turnReferenceInput(contract: ChatGptMcpContract): Record<string, z.ZodString> {
   return contract === "safe"
     ? { request_id: turnTokenSchema }
@@ -449,7 +462,7 @@ export async function runChatGptMcpServer(options: {
   const contract = options.contract ?? "native";
   const server = new McpServer(
     { name: contract === "safe" ? "codex-safe" : "codex-native", version: VERSION },
-    contract === "safe" ? { instructions: ZERO_RISK_MCP_INSTRUCTIONS } : undefined,
+    { instructions: chatGptMcpInstructions(contract) },
   );
 
   const claimTurn = async (
