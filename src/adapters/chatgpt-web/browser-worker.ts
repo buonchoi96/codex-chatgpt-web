@@ -4960,33 +4960,49 @@ export class ChatGptBrowserWorker {
       ));
       await diagnostics.capture(page, "file-attachment-complete");
       let completionTracker = new ChatGptCompletionTracker();
-      const finalSubmissionEvidence = await this.runStage(
-        turn.traceId,
-        "send",
-        // A multipart commit lands on a conversation already carrying every staged part, so it
-        // needs the same acceptance headroom the stages themselves get.
-        prepared.multipart ? browserStageTimeouts.multipartStageSend : browserStageTimeouts.send,
-        (stageSignal) => this.sendAttachedPrompt(
-          page,
-          submissionBaseline,
-          checkpoint => diagnostics.capture(page, checkpoint),
-          turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
-          turn.externalProgress,
-          { ...turn, onSendActivated: async () => {
-            await this.assertSelectedEffort(page, mode);
-            submissionRejection.begin(page);
-            await turn.onSendActivated?.();
-          } },
-          completionTracker,
-          launcherObservationRecovery
-            ? async (...args) => {
-              const recovered = await recoverSubmissionObservation(...args);
-              submissionBaseline = recovered.baseline;
-              return recovered;
-            }
-            : undefined,
-        ),
-      );
+      let finalSubmissionEvidence: ChatGptSubmissionEvidence;
+      try {
+        finalSubmissionEvidence = await this.runStage(
+          turn.traceId,
+          "send",
+          // A multipart commit lands on a conversation already carrying every staged part, so it
+          // needs the same acceptance headroom the stages themselves get.
+          prepared.multipart ? browserStageTimeouts.multipartStageSend : browserStageTimeouts.send,
+          (stageSignal) => this.sendAttachedPrompt(
+            page,
+            submissionBaseline,
+            checkpoint => diagnostics.capture(page, checkpoint),
+            turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+            turn.externalProgress,
+            { ...turn, onSendActivated: async () => {
+              await this.assertSelectedEffort(page, mode);
+              submissionRejection.begin(page);
+              await turn.onSendActivated?.();
+            } },
+            completionTracker,
+            launcherObservationRecovery
+              ? async (...args) => {
+                const recovered = await recoverSubmissionObservation(...args);
+                submissionBaseline = recovered.baseline;
+                return recovered;
+              }
+              : undefined,
+          ),
+        );
+      } catch (error) {
+        const timedOut = error instanceof Error && error.message === "ChatGPT browser stage timed out: send";
+        if (!timedOut || turn.abortSignal?.aborted) throw error;
+        const lateEvidence = await withChatGptBrowserObservationTimeout(
+          this.currentSubmissionEvidence(page, submissionBaseline, turn.abortSignal),
+        ).catch(() => undefined);
+        if (!lateEvidence) throw error;
+        finalSubmissionEvidence = lateEvidence;
+        turn.onSubmitted?.();
+        await diagnostics.capture(page, "send-timeout-late-evidence");
+        console.warn(
+          `[chatgpt-web] browser turn ${turn.traceId} recovered a timed-out send from DOM evidence=${lateEvidence}; refusing to replay the prompt`,
+        );
+      }
       console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);
       let responseTurn = await this.waitForNewAssistantTurn(
         page,
