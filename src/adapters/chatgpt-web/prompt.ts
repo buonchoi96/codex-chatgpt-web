@@ -516,9 +516,15 @@ export function compileChatGptWebPrompt(
       "An intermediate implementation milestone, focused test pass, checkpoint, commit, partial success, or newly discovered remaining-work list is not completion of a larger request unless the user explicitly asked to stop there.",
       "Before producing the final answer, re-check the latest active user request against work actually completed and verified through the available evidence. If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.",
       "Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution with the available tools or environment; report that blocker precisely rather than treating partial progress as success.",
-      "For Full Harness execution, codex_turn_complete is the mandatory completion receipt. Do not emit a final answer until that tool has accepted a receipt with remaining_actionable_requirements empty. If it rejects the receipt, continue working.",
+      ...(!manualControl ? [
+        "For Full Harness execution, codex_turn_complete is the mandatory completion receipt. Do not emit a final answer until that tool has accepted a receipt with remaining_actionable_requirements empty. If it rejects the receipt, continue working.",
+      ] : []),
       "Continue using the available tools until the requested work is complete and verified.",
-      "Write the user-facing final answer only after the last required tool result has settled, codex_turn_complete has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
+      ...(!manualControl ? [
+        "Write the user-facing final answer only after the last required tool result has settled, codex_turn_complete has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
+      ] : [
+        "Write the user-facing final answer only after the last required tool result has settled and the full-request completion check above passes.",
+      ]),
     ]
     : [
       `This is ChatGPT Web ${mode.displayLabel} with no Codex Native bridge to the user's local computer attached to this response. This restriction applies only to local Codex files, commands, processes, and computer mutations.`,
