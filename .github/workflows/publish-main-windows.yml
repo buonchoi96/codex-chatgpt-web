@@ -1,0 +1,109 @@
+name: Publish main Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-main-windows.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-main-windows
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          Push-Location launcher
+          try {
+            bun install --frozen-lockfile
+          } finally {
+            Pop-Location
+          }
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and launcher
+        shell: pwsh
+        run: bun run verify
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: bun run app:package
+
+      - name: Smoke packaged Windows installer
+        shell: pwsh
+        run: bun run app:smoke
+
+      - name: Prepare release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem launcher/artifacts -Filter "*-win-x64.exe" -File
+          if ($installer.Count -ne 1) {
+            throw "Expected exactly one Windows installer; found $($installer.Count)"
+          }
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item -LiteralPath $installer[0].FullName -Destination release-assets
+          $hash = (Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer[0].Name)" | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding ascii
+          "installer=$($installer[0].Name)" >> $env:GITHUB_OUTPUT
+          Get-Content release-assets/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-main-${{ github.sha }}
+          path: |
+            release-assets/*.exe
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish custom Windows release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v5.0.8-custom-windows
+        run: |
+          set -euo pipefail
+          installer="release-assets/${{ steps.assets.outputs.installer }}"
+          test -f "$installer"
+          test -f release-assets/SHA256SUMS.txt
+
+          cat > release-notes.md <<EOF
+          ## Codex Web GPT v5.0.8 — Custom Windows build
+
+          Rebuilt from the current `main` branch at commit `${GITHUB_SHA}`.
+
+          Validation completed on GitHub Actions Windows:
+          - `bun run verify`
+          - `bun run app:package`
+          - `bun run app:smoke`
+          - AVX2-independent Bun 1.4.0 runtime prepared before packaging
+
+          Installer:
+          - `${{ steps.assets.outputs.installer }}`
+          - `SHA256SUMS.txt` contains its SHA-256 checksum.
+
+          This build includes the current `main` stale retained-connector recovery and the previously merged launcher/runtime hardening.
+          EOF
+
+          gh release upload "$RELEASE_TAG"             "$installer" release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --clobber
+
+          gh release edit "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Codex Web GPT v5.0.8 Custom Windows"             --notes-file release-notes.md
