@@ -115,45 +115,16 @@ jobs:
           - '${{ steps.assets.outputs.installer }}'
           - 'SHA256SUMS.txt' contains its SHA-256 checksum.
 
-          This build includes the current 'main' stale retained-connector recovery and the previously merged launcher/runtime hardening.
+          This build includes:
+          - stale retained-connector recovery;
+          - compaction handoff protection so accepted automatic compaction does not press Stop answering;
+          - ordinary prompt send budget raised to 120 seconds;
+          - 30-second send-enable grace and 60-second large composer insertion budget;
+          - late DOM submission-evidence recovery without replaying an ambiguous prompt;
+          - previously merged launcher/runtime hardening.
           EOF
 
           gh release upload "$RELEASE_TAG"             "$installer" release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --clobber
 
           gh release edit "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Codex Web GPT v5.0.8 Custom Windows"             --notes-file release-notes.md
 
-
-      - name: Record Windows build receipt
-        if: always()
-        shell: pwsh
-        env:
-          BUILD_STATUS: ${{ job.status }}
-          RUN_ID: ${{ github.run_id }}
-          SOURCE_SHA: ${{ github.sha }}
-          INSTALLER_NAME: ${{ steps.assets.outputs.installer }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force docs/testing/evidence | Out-Null
-          $checksum = ""
-          if (Test-Path release-assets/SHA256SUMS.txt) {
-            $checksum = (Get-Content release-assets/SHA256SUMS.txt -Raw).Trim()
-          }
-          $receipt = [ordered]@{
-            workflow = "Publish main Windows installer"
-            run_id = $env:RUN_ID
-            source_sha = $env:SOURCE_SHA
-            status = $env:BUILD_STATUS
-            release_tag = "v5.0.8-custom-windows"
-            installer = $env:INSTALLER_NAME
-            sha256 = $checksum
-            recorded_at_utc = (Get-Date).ToUniversalTime().ToString("o")
-          }
-          $receipt | ConvertTo-Json | Set-Content docs/testing/evidence/windows-main-release.json -Encoding utf8
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/testing/evidence/windows-main-release.json
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "release: record Windows installer build"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          }
