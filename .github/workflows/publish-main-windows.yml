@@ -47,9 +47,23 @@ jobs:
         shell: pwsh
         run: bun run app:package
 
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\\codex-e-drive"
+
       - name: Smoke packaged Windows installer
         shell: pwsh
         run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
 
       - name: Prepare release assets
         id: assets
