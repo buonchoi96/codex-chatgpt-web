@@ -12,6 +12,7 @@ import {
   type BrokerToolResult,
 } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint } from "../src/config";
+import { chatGptMcpInstructions } from "../src/adapters/chatgpt-web/mcp-server";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const testTempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
@@ -41,6 +42,21 @@ function toolResult(value: Record<string, unknown>): BrokerToolResult {
     structuredContent: value,
   };
 }
+
+test("MCP instructions keep native multi-task execution active until the full request is complete", () => {
+  const native = chatGptMcpInstructions("native");
+  expect(native).toContain("every explicit deliverable in the active Codex request");
+  expect(native).toContain("Do not stop after one successful subtask");
+  expect(native).toContain("continue to the next unfinished requested requirement without asking whether to proceed");
+  expect(native).toContain("If any actionable explicit deliverable remains, continue using Codex Native tools");
+  expect(native).toContain("Only stop early for a genuine external blocker");
+
+  const safe = chatGptMcpInstructions("safe");
+  expect(safe).toContain("begin with codex_turn_start using the request_id");
+  expect(safe).toContain("send the complete answer with codex_turn_complete");
+  expect(safe).not.toContain("turn_token");
+});
+
 
 describe("Zero Risk turn broker lifecycle", () => {
   test("requires both Launcher Sent and connector start before tools can run", async () => {
