@@ -1387,9 +1387,10 @@ export type ChatGptConnectorAttachmentMode = "none" | "mention" | "retained";
 export function chatGptConnectorAttachmentMode(
   localTools: boolean,
   reuseConversation: boolean,
+  reuseConnector = reuseConversation,
 ): ChatGptConnectorAttachmentMode {
   if (!localTools) return "none";
-  return reuseConversation ? "retained" : "mention";
+  return reuseConversation && reuseConnector ? "retained" : "mention";
 }
 
 export async function setChatGptThinkMode(
@@ -3435,13 +3436,26 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConnector = false,
+    reuseConversation = false,
+    reuseConnector = reuseConversation,
     requireThink = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
-    const connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector);
+    let connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConversation, reuseConnector);
     let composerMutationStarted = false;
     try {
+      if (connectorMode === "retained") {
+        const retainedComposer = await this.activeComposer(page, 30_000, abortSignal);
+        if (!await this.connectorIsSelected(retainedComposer, abortSignal)) {
+          console.warn(
+            `[chatgpt-web] retained connector binding for ${JSON.stringify(this.config.appName)} is stale; reselecting with ${CHATGPT_CONNECTOR_MENTION_QUERY}`,
+          );
+          await captureDiagnostic?.("connector-binding-stale");
+          connectorMode = "mention";
+        } else {
+          await captureDiagnostic?.("connector-retained-verified");
+        }
+      }
       if (connectorMode !== "mention") {
         const composer = await this.activeComposer(page, 30_000, abortSignal);
         // Playwright's multiline fill maps through an input action that ChatGPT's Lexical editor can
@@ -3740,7 +3754,8 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConnector = false,
+    reuseConversation = false,
+    reuseConnector = reuseConversation,
     requireThink = false,
   ): Promise<void> {
     let retryAvailable = compaction;
@@ -3754,6 +3769,7 @@ export class ChatGptBrowserWorker {
           abortSignal,
           catalogRefreshAvailable,
           connectorAttemptBudget,
+          reuseConversation,
           reuseConnector,
           requireThink,
         );
@@ -4418,6 +4434,7 @@ export class ChatGptBrowserWorker {
     });
     const surfaceId = lease.surfaceId;
     const reused = lease.reused === true;
+    const reuseConnector = reused && lease.connectorBound === true;
     let terminal: "completed" | "failed" | "aborted" = "completed";
     let terminalMessage: string | undefined;
     let originalError: unknown;
@@ -4453,7 +4470,7 @@ export class ChatGptBrowserWorker {
       await turn.onPreparedSelected?.(reused);
       heartbeatTimer = setInterval(sendHeartbeat, LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS);
       heartbeatTimer.unref?.();
-      return await this.runBrowserTurn(turn, surfaceId, undefined, reused);
+      return await this.runBrowserTurn(turn, surfaceId, undefined, reused, reuseConnector);
     } catch (error) {
       originalError = error;
       terminal = error instanceof ChatGptCompactionHandoffAccepted
@@ -4496,6 +4513,7 @@ export class ChatGptBrowserWorker {
     launcherSurfaceId?: string,
     maintenancePage?: Page,
     reuseConversation = false,
+    reuseConnector = reuseConversation,
   ): Promise<string> {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if ((turn.externalProgress !== undefined) !== (turn.completionFence !== undefined)) {
@@ -4891,6 +4909,7 @@ export class ChatGptBrowserWorker {
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
                 reuseConversation,
+                reuseConnector,
                 mode.thinkEnabled,
               );
             },
