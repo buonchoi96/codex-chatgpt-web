@@ -244,10 +244,61 @@ test("response caching rechecks CSS visibility without requiring a DOM mutation"
   }
 });
 
-test("a retained MCP conversation reuses its proven connector binding", () => {
-  expect(chatGptConnectorAttachmentMode(true, false)).toBe("mention");
-  expect(chatGptConnectorAttachmentMode(true, true)).toBe("retained");
-  expect(chatGptConnectorAttachmentMode(false, false)).toBe("none");
+test("a retained MCP conversation reuses only a still-proven connector binding", () => {
+  expect(chatGptConnectorAttachmentMode(true, false, false)).toBe("mention");
+  expect(chatGptConnectorAttachmentMode(true, true, true)).toBe("retained");
+  expect(chatGptConnectorAttachmentMode(true, true, false)).toBe("mention");
+  expect(chatGptConnectorAttachmentMode(false, true, true)).toBe("none");
+});
+
+test("a stale retained connector pill falls back to a fresh @codex selection before prompt attachment", async () => {
+  const calls: string[] = [];
+  const retainedComposer = {};
+  const selectedComposer = {
+    focus: async () => { calls.push("selected-focus"); },
+    press: async (key: string) => { calls.push(`selected-press:${key}`); },
+  };
+  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt(
+      page: unknown,
+      prompt: string,
+      localTools: boolean,
+      capture?: (checkpoint: string) => Promise<void>,
+      signal?: AbortSignal,
+      catalogRefreshAvailable?: boolean,
+      attemptBudget?: { triggerAttempts: number },
+      reuseConversation?: boolean,
+      reuseConnector?: boolean,
+      requireThink?: boolean,
+    ): Promise<void>;
+  }).attachPrompt;
+
+  await attachPrompt.call({
+    config: { appName: "Codex Native2" },
+    activeComposer: async () => retainedComposer,
+    connectorIsSelected: async () => false,
+    selectConnector: async () => {
+      calls.push("reselect:@codex");
+      return selectedComposer;
+    },
+    insertPromptText: async (_page: unknown, text: string) => { calls.push(`insert:${text}`); },
+    assertPromptAttached: async (_page: unknown, text: string) => { calls.push(`assert:${text}`); },
+    clearChatGptComposerState: async () => { calls.push("clear"); },
+  }, {}, "continue task", true, async checkpoint => { calls.push(`checkpoint:${checkpoint}`); },
+  undefined, false, { triggerAttempts: 0 }, true, true, false);
+
+  expect(calls).toContain("checkpoint:connector-binding-stale");
+  expect(calls).toContain("reselect:@codex");
+  expect(calls).toContain(`selected-press:${CHATGPT_COMPOSER_DOCUMENT_END_KEY}`);
+  expect(calls).toContain("insert: continue task");
+  expect(calls).toContain("assert:continue task");
+  expect(calls).not.toContain("clear");
+});
+
+test("launcher lease keeps conversation reuse distinct from connector reuse", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  expect(workerSource).toContain("const reuseConnector = reused && lease.connectorBound === true;");
+  expect(workerSource).toContain("return await this.runBrowserTurn(turn, surfaceId, undefined, reused, reuseConnector);");
 });
 
 test("browser turns run concurrently up to the five-tab limit", async () => {
