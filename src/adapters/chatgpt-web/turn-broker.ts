@@ -70,6 +70,8 @@ interface TurnChannel {
   deliveredCallIds: Set<string>;
   invocations: Map<string, PendingInvocation>;
   waiters: Set<ToolWaiter>;
+  toolCallsQueued: number;
+  toolCallsCompleted: number;
   compactionRequested: boolean;
   compactionResult?: BrokerToolResult;
   compactionDeliveryCount: number;
@@ -300,6 +302,8 @@ export class TurnBroker implements TurnBrokerOwner {
       deliveredCallIds: new Set(),
       invocations: new Map(),
       waiters: new Set(),
+      toolCallsQueued: 0,
+      toolCallsCompleted: 0,
       compactionRequested: false,
       compactionDeliveryCount: 0,
       activities: new Set(),
@@ -429,7 +433,10 @@ export class TurnBroker implements TurnBrokerOwner {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
     channel.invocations.delete(callId);
-    console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size}`);
+    channel.toolCallsCompleted += 1;
+    console.info(
+      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
+    );
     invocation.resolve(result);
   }
 
@@ -456,7 +463,7 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision}`,
+      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision} toolsQueued=${channel.toolCallsQueued} toolsCompleted=${channel.toolCallsCompleted}`,
     );
     return true;
   }
@@ -1124,8 +1131,9 @@ export class TurnBroker implements TurnBrokerOwner {
     return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
       binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke });
       binding.channel.queuedCallIds.push(callId);
+      binding.channel.toolCallsQueued += 1;
       console.info(
-        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size}`,
+        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}`,
       );
       this.scheduleToolWaiters(binding.channel);
     });
