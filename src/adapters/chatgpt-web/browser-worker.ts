@@ -1272,12 +1272,32 @@ export interface BrowserTurn {
   completionFence?: {
     begin(): Promise<number | undefined>;
     commit(revision: number): Promise<boolean>;
+    /** Full Harness requires an accepted semantic completion receipt before DOM completion is terminal. */
+    receiptReady?(): Promise<boolean>;
   };
   /** Allow one clean pre-submit composer retry for isolated history compaction only. */
   compaction?: boolean;
   /** Require and remove the private Luna checkpoint tail from the visible Markdown stream. */
   captureLunaCheckpoint?: boolean;
   onLunaCheckpoint?: (captured: CapturedChatGptLunaCheckpoint) => void;
+}
+
+export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 2;
+
+export function chatGptCompletionReceiptRecoveryPrompt(
+  attempt: number,
+  maxAttempts = MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
+): string {
+  return [
+    "<codex_completion_recovery>",
+    `Your previous response reached a final-answer boundary without an accepted Full Harness completion receipt (recovery ${attempt}/${maxAttempts}).`,
+    "Do not repeat the progress report as a final answer.",
+    "Re-read the entire active user request and continue every remaining independently actionable requirement with Codex Native tools.",
+    "A missing asset or blocker for one branch does not permit stopping while independent research, implementation, tests, validation, or documentation can still be completed.",
+    "When every independently actionable requirement is complete, call codex_turn_complete with remaining_actionable_requirements=[] and only then provide the final user-facing answer.",
+    "If the task is genuinely blocked, first complete every independent branch, then use state=blocked with a concrete blocker and the exact blocked requirements.",
+    "</codex_completion_recovery>",
+  ].join("\n");
 }
 
 interface ChatGptSubmissionBaseline {
@@ -4910,7 +4930,7 @@ export class ChatGptBrowserWorker {
         this.attachFiles(page, prepared)
       ));
       await diagnostics.capture(page, "file-attachment-complete");
-      const completionTracker = new ChatGptCompletionTracker();
+      let completionTracker = new ChatGptCompletionTracker();
       const finalSubmissionEvidence = await this.runStage(
         turn.traceId,
         "send",
@@ -4962,15 +4982,24 @@ export class ChatGptBrowserWorker {
       let sawRunning = false;
       let loggedCompletionWait = false;
       let capturedResponse = false;
+      let completionReceiptRecoveries = 0;
       const sentAt = Date.now();
-      const visibleTrace = new ChatGptVisibleTraceTracker();
-      const markdownBuffer = new ChatGptMarkdownBuffer();
+      let visibleTrace = new ChatGptVisibleTraceTracker();
+      let markdownBuffer = new ChatGptMarkdownBuffer();
       const checkpointStream = turn.captureLunaCheckpoint
         ? new ChatGptLunaCheckpointStream()
         : undefined;
+      const receiptRequired = turn.completionFence?.receiptReady !== undefined;
+      let bufferedFinalDeltas: string[] = [];
       const emitMarkdownDelta = (delta: string): void => {
         const visible = checkpointStream ? checkpointStream.push(delta) : delta;
-        if (visible) turn.onTextDelta(visible);
+        if (!visible) return;
+        if (receiptRequired) bufferedFinalDeltas.push(visible);
+        else turn.onTextDelta(visible);
+      };
+      const flushBufferedFinalDeltas = (): void => {
+        for (const delta of bufferedFinalDeltas) turn.onTextDelta(delta);
+        bufferedFinalDeltas = [];
       };
       const throwMarkdownConsistencyError = (error: unknown): never => {
         if (!(error instanceof ChatGptMarkdownConsistencyError)) throw error;
@@ -4986,7 +5015,7 @@ export class ChatGptBrowserWorker {
           retryable: false,
         });
       };
-      const domHealthTracker = new ChatGptTurnDomHealthTracker();
+      let domHealthTracker = new ChatGptTurnDomHealthTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -5140,6 +5169,96 @@ export class ChatGptBrowserWorker {
           });
           if (!completionReady) completionFenceRevision = undefined;
           if (completionReady) {
+            if (turn.completionFence?.receiptReady && !await turn.completionFence.receiptReady()) {
+              completionReceiptRecoveries += 1;
+              if (completionReceiptRecoveries > MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES) {
+                throw new ChatGptWebAdapterError(
+                  "ChatGPT repeatedly tried to finish the Codex task without an accepted full-task completion receipt.",
+                  {
+                    status: 502,
+                    errorType: "server_error",
+                    code: "chatgpt_completion_receipt_missing",
+                    retryable: false,
+                  },
+                );
+              }
+              await diagnostics.capture(page, `completion-receipt-recovery-${completionReceiptRecoveries}`);
+              console.warn(
+                `[chatgpt-web] browser turn ${turn.traceId} rejected premature DOM completion; requesting continuation ${completionReceiptRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES}`,
+              );
+              turn.onCommentary?.(
+                "ChatGPT reached a final boundary before certifying the full request; continuing unfinished work automatically.",
+              );
+              bufferedFinalDeltas = [];
+              submissionBaseline = await this.captureSubmissionBaseline(page);
+              completionTracker = new ChatGptCompletionTracker();
+              await this.runStage(
+                turn.traceId,
+                `completion_receipt_recovery_${completionReceiptRecoveries}_attachment`,
+                browserStageTimeouts.promptAttachment,
+                (stageSignal) => this.attachPrompt(
+                  page,
+                  chatGptCompletionReceiptRecoveryPrompt(completionReceiptRecoveries),
+                  true,
+                  checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
+                  turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+                  false,
+                  connectorAttemptBudget,
+                  true,
+                  mode.thinkEnabled,
+                ),
+                chatGptSuspensionClock,
+                true,
+              );
+              await this.runStage(
+                turn.traceId,
+                `completion_receipt_recovery_${completionReceiptRecoveries}_send`,
+                browserStageTimeouts.send,
+                (stageSignal) => this.sendAttachedPrompt(
+                  page,
+                  submissionBaseline,
+                  checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
+                  turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+                  turn.externalProgress,
+                  { onSendActivated: () => { submissionRejection.begin(page); } },
+                  completionTracker,
+                  launcherObservationRecovery
+                    ? async (...args) => {
+                      const recovered = await recoverSubmissionObservation(...args);
+                      submissionBaseline = recovered.baseline;
+                      return recovered;
+                    }
+                    : undefined,
+                ),
+              );
+              responseTurn = await this.waitForNewAssistantTurn(
+                page,
+                submissionBaseline,
+                deadline,
+                turn.abortSignal,
+                turn.externalProgress,
+                CHATGPT_RESPONSE_DOM_GRACE_MS,
+                completionTracker,
+                launcherObservationRecovery
+                  ? async (...args) => {
+                    const recovered = await recoverAssistantObservation(...args);
+                    submissionBaseline = recovered.baseline;
+                    return recovered;
+                  }
+                  : undefined,
+              );
+              visibleTrace = new ChatGptVisibleTraceTracker();
+              markdownBuffer = new ChatGptMarkdownBuffer();
+              domHealthTracker = new ChatGptTurnDomHealthTracker();
+              responseDomCache.key = undefined;
+              responseDomCache.snapshot = undefined;
+              completionFenceRevision = undefined;
+              capturedResponse = false;
+              loggedCompletionWait = false;
+              sawRunning = false;
+              await diagnostics.capture(page, `completion-receipt-recovery-${completionReceiptRecoveries}-accepted`);
+              continue;
+            }
             if (turn.completionFence) {
               if (completionFenceRevision === undefined) {
                 const revision = await turn.completionFence.begin();
@@ -5178,6 +5297,7 @@ export class ChatGptBrowserWorker {
               throw new Error("ChatGPT completed with visible text that could not be serialized as Markdown");
             }
             if (final.delta) emitMarkdownDelta(final.delta);
+            if (receiptRequired) flushBufferedFinalDeltas();
             if (checkpointStream) {
               const completed = checkpointStream.finishOptional(snapshot.visibleText);
               if (completed.visibleRemainder) turn.onTextDelta(completed.visibleRemainder);
