@@ -1461,7 +1461,7 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
         + ` (${error instanceof Error ? error.message : String(error)})`,
       );
     }
-    if (status.protocolVersion !== 5) {
+    if (status.protocolVersion !== 6) {
       throw new Error(`Unsupported DEV turn-owner protocol version: ${String(status.protocolVersion)}`);
     }
     if (status.acceptingExternalOwners !== true) {
