@@ -2448,6 +2448,7 @@ test("Think attachment runs after fresh connector selection and rechecks retaine
     let connectorSelections = 0;
     const submitted: boolean[] = [];
     const worker = {
+      config: { appName: "Codex Native2" },
       activeComposer: async () => ui.composer,
       connectorIsSelected: async () => ui.state.connectors.includes("Codex Native2"),
       selectConnector: async () => { connectorSelections += 1; ui.state.connectors = ["Codex Native2"]; return ui.composer; },
@@ -2463,7 +2464,7 @@ test("Think attachment runs after fresh connector selection and rechecks retaine
       await attach.call(worker, ui.page, "follow-up task", localTools, undefined, undefined, false, undefined, retained, true);
       expect(submitted).toEqual([true, true]);
       expect(ui.state.commands).toEqual(["/think", "/think"]);
-      expect(connectorSelections).toBe(0);
+      expect(connectorSelections).toBe(1);
     }
   }
 });
