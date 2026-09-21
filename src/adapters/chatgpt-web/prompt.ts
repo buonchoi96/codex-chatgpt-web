@@ -517,11 +517,11 @@ export function compileChatGptWebPrompt(
       "Before producing the final answer, re-check the latest active user request against work actually completed and verified through the available evidence. If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.",
       "Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution with the available tools or environment; report that blocker precisely rather than treating partial progress as success.",
       ...(!manualControl ? [
-        "For Full Harness execution, codex_turn_complete is the mandatory completion receipt. Do not emit a final answer until that tool has accepted a receipt with remaining_actionable_requirements empty. If it rejects the receipt, continue working.",
+        "For Full Harness execution, the mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete. Do not emit a final answer until that control call has accepted a receipt with remaining_actionable_requirements empty. If it rejects the receipt, continue working.",
       ] : []),
       "Continue using the available tools until the requested work is complete and verified.",
       ...(!manualControl ? [
-        "Write the user-facing final answer only after the last required tool result has settled, codex_turn_complete has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
+        "Write the user-facing final answer only after the last required tool result has settled, codex.control.turn_complete has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
       ] : [
         "Write the user-facing final answer only after the last required tool result has settled and the full-request completion check above passes.",
       ]),
@@ -595,7 +595,7 @@ export function compileChatGptWebPrompt(
       "<codex_transport_resume>",
       `The task context is complete. Pass turn_token ${turnToken} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`,
       "Immediately before finalizing, compare the entire latest active user request with the work completed in this response. If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.",
-      "When all independently actionable deliverables are complete, call codex_turn_complete with remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
+      "When all independently actionable deliverables are complete, call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
       "</codex_transport_resume>",
     ]
     : [
