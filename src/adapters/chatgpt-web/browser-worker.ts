@@ -137,7 +137,7 @@ const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
  * editor has taken the previous one. This is headroom for that, not a readiness check.
  */
 export const CHATGPT_UI_SETTLE_MS = 250;
-export const CHATGPT_SEND_ENABLE_GRACE_MS = 5_000;
+export const CHATGPT_SEND_ENABLE_GRACE_MS = 30_000;
 
 const CHATGPT_DOM_REVISION_ATTRIBUTES = [
   "aria-hidden",
@@ -1098,7 +1098,10 @@ export const browserStageTimeouts = {
   effortSelection: 120_000,
   promptAttachment: 60_000,
   fileAttachment: 120_000,
-  send: 20_000,
+  // Ordinary prompts can spend substantial time in ChatGPT composer ingestion before the user turn
+  // becomes observable. Keep this well above the old 20-second budget so Codex does not enter a
+  // reconnect loop while ChatGPT is still accepting a large prompt.
+  send: 120_000,
   // A Bigger Context stage posts a much larger payload onto a conversation that already holds the
   // earlier parts. This budget covers ChatGPT accepting the submission, not just the click.
   multipartStageSend: 180_000,
@@ -1225,6 +1228,15 @@ export const CHATGPT_COMPOSER_SELECT_ALL_KEY = process.platform === "darwin"
 
 function throwIfPromptAttachmentAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("ChatGPT prompt attachment aborted", "AbortError");
+}
+
+export function chatGptAbortShouldStopGeneration(signal?: AbortSignal): boolean {
+  return Boolean(signal?.aborted && !(signal.reason instanceof ChatGptCompactionHandoffAccepted));
+}
+
+function chatGptAbortError(signal: AbortSignal | undefined, fallbackMessage: string): Error {
+  if (signal?.reason instanceof ChatGptCompactionHandoffAccepted) return signal.reason;
+  return new DOMException(fallbackMessage, "AbortError");
 }
 
 function withBrowserTurnAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -3623,9 +3635,11 @@ export class ChatGptBrowserWorker {
     for (;;) {
       if (page.isClosed()) throw chatGptBrowserTabClosedError();
       if (abortSignal?.aborted) {
-        const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
-        if (await stop.isVisible().catch(() => false)) await stop.press("Enter").catch(() => {});
-        throw new DOMException("ChatGPT multipart stage aborted", "AbortError");
+        if (chatGptAbortShouldStopGeneration(abortSignal)) {
+          const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
+          if (await stop.isVisible().catch(() => false)) await stop.press("Enter").catch(() => {});
+        }
+        throw chatGptAbortError(abortSignal, "ChatGPT multipart stage aborted");
       }
       if (deadline !== undefined && Date.now() >= deadline) {
         throw new Error("ChatGPT Bigger Context transaction timed out while awaiting a stage acknowledgement");
@@ -3797,7 +3811,7 @@ export class ChatGptBrowserWorker {
     // browser's plain-text editing command updates the same focused contenteditable atomically
     // without running those Markdown shortcuts. Exact readback below remains the authority.
     const inserted = await composer.evaluate(insertPlainTextIntoComposer, text, {
-      timeout: 20_000,
+      timeout: 60_000,
       signal: abortSignal,
     });
     throwIfPromptAttachmentAborted(abortSignal);
@@ -5049,9 +5063,11 @@ export class ChatGptBrowserWorker {
           throw chatGptBrowserTabClosedError();
         }
         if (turn.abortSignal?.aborted) {
-          const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
-          if (await stop.isVisible().catch(() => false)) await stop.press("Enter").catch(() => {});
-          throw new DOMException("ChatGPT web turn aborted", "AbortError");
+          if (chatGptAbortShouldStopGeneration(turn.abortSignal)) {
+            const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
+            if (await stop.isVisible().catch(() => false)) await stop.press("Enter").catch(() => {});
+          }
+          throw chatGptAbortError(turn.abortSignal, "ChatGPT web turn aborted");
         }
         if (deadline !== undefined && Date.now() >= deadline) {
           throw new Error("ChatGPT web turn timed out");
