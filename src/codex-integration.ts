@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AppConfig } from "./config";
 import { getConfigPath, loadConfig, saveConfig } from "./config";
-import { installCodexInterruptHook, installCodexInterruptHookCommand } from "./codex-interrupt-hook";
+import { installCodexInterruptHook, installCodexInterruptHookCommand, reclaimOrphanedCodexInterruptHook } from "./codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   getCodexConfigPath,
@@ -212,6 +212,13 @@ export function preflightCodexIntegration(
     return;
   }
   let baseline = currentText;
+  if (!existing && options.replaceExistingRoute === true) {
+    const reclaimed = reclaimOrphanedCodexInterruptHook(baseline, configPath);
+    baseline = reclaimed.text;
+    if (reclaimed.reclaimed) {
+      console.info("[codex-chatgpt-web] reclaimed stale managed Codex interrupt hook left by a previous installation");
+    }
+  }
   if (existing?.version === 2) {
     if (existsSync(existing.catalogPath) && sha256(readFileSync(existing.catalogPath)) !== existing.catalogSha256) {
       throw new Error(`Managed legacy catalog changed after setup; refusing migration: ${existing.catalogPath}`);
@@ -301,6 +308,13 @@ export function installCodexIntegration(
   }
 
   let baseline = currentText;
+  if (!existing && options.replaceExistingRoute === true) {
+    const reclaimed = reclaimOrphanedCodexInterruptHook(baseline, configPath);
+    baseline = reclaimed.text;
+    if (reclaimed.reclaimed) {
+      console.info("[codex-chatgpt-web] automatically removed an intact stale Codex interrupt hook from a previous installation");
+    }
+  }
   if (existing?.version === 2) {
     if (existsSync(existing.catalogPath) && sha256(readFileSync(existing.catalogPath)) !== existing.catalogSha256) {
       throw new Error(`Managed legacy catalog changed after setup; refusing migration: ${existing.catalogPath}`);
