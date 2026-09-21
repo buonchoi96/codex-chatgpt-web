@@ -1,0 +1,10 @@
+{
+  "workflow": "Publish main Windows installer",
+  "run_id": "35649326623",
+  "source_sha": "76e68a40ef356666dc4f488b44fc82f2e671e879",
+  "status": "failure",
+  "release_tag": "v5.0.8-custom-windows",
+  "installer": "",
+  "sha256": "",
+  "recorded_at_utc": "2026-09-21T20:16:46.7347035Z"
+}
