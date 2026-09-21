@@ -671,6 +671,39 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(configPath, "utf8")).toBe(original);
   });
 
+  test("Install Models repairs an intact stale managed hook after previous app data was deleted", () => {
+    const { codexHome, appHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = 'model = "gpt-5.6-sol"\n\n[features]\ngoals = true\n';
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+    saveConfig(config);
+
+    const first = installCodexIntegration(config, { replaceExistingRoute: true });
+    const stale = readFileSync(configPath, "utf8");
+    expect(stale).toContain(first.interruptHook.fragment);
+    expect(existsSync(getCodexJournalPath())).toBe(true);
+
+    // Reproduce the reinstall failure: application data/journal is gone, but ~/.codex/config.toml
+    // still contains the bridge's previous managed route and intact Interrupt hook.
+    rmSync(appHome, { recursive: true, force: true });
+    expect(existsSync(getCodexJournalPath())).toBe(false);
+    expect(readFileSync(configPath, "utf8")).toBe(stale);
+
+    expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).not.toThrow();
+    // Preflight must remain side-effect free even when it proves the stale hook is reclaimable.
+    expect(readFileSync(configPath, "utf8")).toBe(stale);
+
+    const repaired = installCodexIntegration(config, { replaceExistingRoute: true });
+    const repairedText = readFileSync(configPath, "utf8");
+    expect(repairedText.match(/^\[\[hooks\.Interrupt\]\]/gm)).toHaveLength(1);
+    expect(repairedText).toContain(repaired.interruptHook.fragment);
+    expect(repaired.interruptHook.command).toBe(first.interruptHook.command);
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    expect(existsSync(getCodexJournalPath())).toBe(true);
+    expect(existsSync(getCodexJournalRecoveryPath())).toBe(true);
+  });
+
   test("explicit setup restores a removed hook without discarding the current Codex config", () => {
     for (const ending of ["\n", "\r\n"]) {
       for (const keepRoute of [true, false]) {
