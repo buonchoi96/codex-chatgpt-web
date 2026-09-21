@@ -1195,7 +1195,7 @@ test("large Markdown-rich context uses one plain-text editing command before exa
   expect(calls[0]).toEqual(["fill", ""]);
   expect(calls.filter(call => call[0] === "evaluate")).toEqual([["evaluate", prompt]]);
   expect(calls.filter(call => call[0] === "evaluateOptions")).toEqual([
-    ["evaluateOptions", { timeout: 20_000 }],
+    ["evaluateOptions", { timeout: 60_000 }],
   ]);
   expect(asserted).toBe(prompt);
 });
