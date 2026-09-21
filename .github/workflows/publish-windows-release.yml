@@ -1,0 +1,73 @@
+name: Publish Windows release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-windows-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download validated Windows artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: "10653733491"
+        run: |
+          set -euo pipefail
+          curl --fail --location             -H "Accept: application/vnd.github+json"             -H "Authorization: Bearer $GH_TOKEN"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip"             --output windows-artifact.zip
+          mkdir -p release-assets
+          unzip -q windows-artifact.zip -d release-assets
+          echo "Release assets:"
+          find release-assets -maxdepth 2 -type f -print
+          test -n "$(find release-assets -maxdepth 2 -type f -name '*.exe' -print -quit)"
+          (
+            cd release-assets
+            find . -maxdepth 2 -type f ! -name SHA256SUMS.txt -print0               | sort -z               | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: "v5.0.8-custom-windows"
+          RELEASE_TARGET: "acc28a4c299e25dbd135347402ee4ba23e32f1fb"
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          ## Codex Web GPT v5.0.8 — Custom Windows build
+
+          Public Windows release built from the consolidated `main` branch.
+
+          Included customizations:
+          - Windows installer targeting `E:\Codex Web GPT\App`.
+          - Launcher/runtime data under `E:\Codex Web GPT\Data`.
+          - Fresh-conversation-per-turn support.
+          - CDP/viewport recovery hardening.
+          - Multi-task completion persistence for Codex Native2.
+          - Broker tool-call completion telemetry.
+
+          Validation:
+          - Dedicated Windows E-drive build workflow passed.
+          - Source/regression verification passed.
+          - Packaged launcher smoke test passed.
+
+          Source commit: `acc28a4c299e25dbd135347402ee4ba23e32f1fb`
+          Build workflow run: https://github.com/buonchoi96/codex-chatgpt-web/actions/runs/35629478155
+
+          `SHA256SUMS.txt` contains checksums for the published Windows assets.
+          EOF
+
+          mapfile -t assets < <(find release-assets -maxdepth 2 -type f \( -name '*.exe' -o -name '*.zip' \) -print | sort)
+          assets+=("release-assets/SHA256SUMS.txt")
+
+          gh release create "$RELEASE_TAG" "${assets[@]}"             --repo "$GITHUB_REPOSITORY"             --target "$RELEASE_TARGET"             --title "Codex Web GPT v5.0.8 Custom Windows"             --notes-file release-notes.md
