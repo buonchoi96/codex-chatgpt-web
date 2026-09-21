@@ -75,11 +75,14 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("An intermediate implementation milestone, focused test pass, checkpoint, commit, partial success, or newly discovered remaining-work list is not completion");
   expect(transportOnly).toContain("If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.");
   expect(transportOnly).toContain("Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution");
+  expect(transportOnly).toContain("For Full Harness execution, codex_turn_complete is the mandatory completion receipt.");
+  expect(transportOnly).toContain("remaining_actionable_requirements empty");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
-  expect(transportOnly).toContain("Write the user-facing final answer only after the last required tool result has settled and the full-request completion check above passes.");
+  expect(transportOnly).toContain("codex_turn_complete has accepted the full-task receipt");
   expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
   expect(transportOnly).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
   expect(transportOnly).toContain("If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.");
+  expect(transportOnly).toContain("call codex_turn_complete with remaining_actionable_requirements=[] before writing the final answer");
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
   expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory|codex\.control\.turn_complete/);
   expect(transportOnly).not.toMatch(/expired|invalid|revoked|blocked|safety|security layer|permission gate/i);
