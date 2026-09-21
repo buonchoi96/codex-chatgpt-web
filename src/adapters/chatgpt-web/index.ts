@@ -728,12 +728,21 @@ export function createChatGptWebAdapter(
     let tokenSettled = false;
     let activeToken: string | undefined;
     const prepareWith = async (input: CodexParsedRequest) => {
-      const turnToken = activeToken ?? await broker.register(
-        environment,
-        timeoutMs === undefined ? undefined : timeoutMs + 60_000,
-        traceId,
-      );
-      activeToken = turnToken;
+      let turnToken = activeToken;
+      if (!turnToken) {
+        turnToken = await broker.register(
+          environment,
+          timeoutMs === undefined ? undefined : timeoutMs + 60_000,
+          traceId,
+        );
+        try {
+          await broker.requireNativeCompletionReceipt(turnToken);
+        } catch (error) {
+          await broker.revoke(turnToken);
+          throw error;
+        }
+        activeToken = turnToken;
+      }
       try {
         const compiled = compileChatGptWebPrompt(
           input,
@@ -774,6 +783,7 @@ export function createChatGptWebAdapter(
       completionFence: {
         begin: async () => broker.beginCompletionFence(await token.promise),
         commit: async revision => broker.commitCompletionFence(await token.promise, revision),
+        receiptReady: async () => broker.nativeCompletionReceiptAccepted(await token.promise),
       },
       ...(captureLunaCheckpoint ? {
         captureLunaCheckpoint: true,
