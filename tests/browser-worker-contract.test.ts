@@ -285,7 +285,7 @@ test("a stale retained connector pill falls back to a fresh @codex selection bef
     assertPromptAttached: async (_page: unknown, text: string) => { calls.push(`assert:${text}`); },
     clearChatGptComposerState: async () => { calls.push("clear"); },
   }, {}, "continue task", true, async checkpoint => { calls.push(`checkpoint:${checkpoint}`); },
-  undefined, false, { triggerAttempts: 0 }, true, true, false);
+  undefined, false, { triggerAttempts: 0 }, true, false);
 
   expect(calls).toContain("checkpoint:connector-binding-stale");
   expect(calls).toContain("reselect:@codex");
@@ -2253,6 +2253,7 @@ test("retained tool turns insert into the connector-bound composer without selec
   };
   await attachPrompt.call({
     activeComposer: async () => composer,
+    connectorIsSelected: async () => true,
     selectConnector: async () => { throw new Error("retained connector must not be selected again"); },
     insertPromptText: async (_page: unknown, text: string) => { expect(text).toBe("retained context"); calls.push("insert"); },
     assertPromptAttached: async () => { calls.push("assert"); },
@@ -2443,10 +2444,12 @@ test("Think attachment runs after fresh connector selection and rechecks retaine
   const attach = (ChatGptBrowserWorker.prototype as unknown as { attachPrompt: (...args: unknown[]) => Promise<void> }).attachPrompt;
   for (const [localTools, retained] of [[true, false], [true, true], [false, false]]) {
     const ui = thinkSlashFixture();
+    if (retained) ui.state.connectors = ["Codex Native2"];
     let connectorSelections = 0;
     const submitted: boolean[] = [];
     const worker = {
       activeComposer: async () => ui.composer,
+      connectorIsSelected: async () => ui.state.connectors.includes("Codex Native2"),
       selectConnector: async () => { connectorSelections += 1; ui.state.connectors = ["Codex Native2"]; return ui.composer; },
       insertPromptText: async () => { submitted.push(ui.state.pressed); },
       assertPromptAttached: async () => {}, clearChatGptComposerState: async () => { ui.state.draft = ""; ui.state.connectors = []; },
@@ -2471,6 +2474,7 @@ test("Think attachment rolls back a lost connector and never inserts the prompt"
   let insertions = 0;
   let cleanup = 0;
   const worker = {
+    connectorIsSelected: async () => ui.state.connectors.includes("Codex Native2"),
     selectConnector: async () => { ui.state.connectors = ["Codex Native2"]; return ui.composer; },
     insertPromptText: async () => { insertions += 1; },
     clearChatGptComposerState: async () => { cleanup += 1; ui.state.draft = ""; ui.state.connectors = []; },
