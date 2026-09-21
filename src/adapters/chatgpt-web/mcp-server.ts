@@ -57,6 +57,8 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
+  "For Full Harness turns, codex_turn_complete is a mandatory completion receipt. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty. A blocked receipt is valid only after all independent work is complete and the blocker genuinely prevents the listed blocked requirements.",
+  "After codex_turn_complete is accepted, provide the final user-facing answer. If the completion tool rejects the receipt, continue the task and call it again only when the rejection is resolved.",
   "Only stop early for a genuine external blocker that cannot be resolved with the available Codex tools or environment.",
 ].join(" ");
 
@@ -977,6 +979,53 @@ export async function runChatGptMcpServer(options: {
         }, null, extra.signal);
         return result(response);
       },
+    );
+  } else {
+    server.registerTool(
+      "codex_turn_complete",
+      {
+        title: "Certify the full Codex task is complete",
+        description: [
+          "Mandatory Full Harness completion receipt. Call this only after re-reading the entire active user request.",
+          "Every independently actionable requested deliverable must already be completed and verified.",
+          "remaining_actionable_requirements MUST be empty; if it is not empty the receipt is rejected and you must continue working.",
+          "Use state=blocked only after all independent work is complete and a concrete external/environment blocker prevents the listed blocked requirements.",
+          "After this tool succeeds, return the final user-facing answer without starting new work.",
+        ].join(" "),
+        inputSchema: {
+          turn_token: turnTokenSchema,
+          state: z.enum(["complete", "blocked"]),
+          summary: z.string().min(1).max(20_000),
+          completed_requirements: z.array(z.string().min(1).max(2_000)).max(200).default([]),
+          blocked_requirements: z.array(z.string().min(1).max(2_000)).max(200).default([]),
+          remaining_actionable_requirements: z.array(z.string().min(1).max(2_000)).max(200).default([]),
+          blocker: z.string().min(1).max(20_000).optional(),
+        },
+        outputSchema: {
+          accepted: z.literal(true),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async (input, extra) => withClaimedTurn(
+        "codex_turn_complete",
+        input.turn_token,
+        extra,
+        async claimed => {
+          console.error(`[chatgpt-web-mcp] codex_turn_complete scope=${requestScopeSummary(extra)}`);
+          const response = await callTurnBroker<{ accepted: true }>(options.brokerSocketPath, {
+            method: "native_complete",
+            token: input.turn_token,
+            activityId: claimed.activityId,
+            completionState: input.state,
+            completionSummary: input.summary,
+            completedRequirements: input.completed_requirements,
+            blockedRequirements: input.blocked_requirements,
+            remainingActionableRequirements: input.remaining_actionable_requirements,
+            ...(input.blocker ? { blocker: input.blocker } : {}),
+          }, 5_000, extra.signal);
+          return result(response);
+        },
+      ),
     );
   }
 
