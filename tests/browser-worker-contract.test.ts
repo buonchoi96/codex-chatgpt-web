@@ -81,7 +81,8 @@ test("missing native completion receipt gets a bounded same-turn continuation pr
   const prompt = chatGptCompletionReceiptRecoveryPrompt(1);
   expect(prompt).toContain("without an accepted Full Harness completion receipt");
   expect(prompt).toContain("continue every remaining independently actionable requirement");
-  expect(prompt).toContain("codex_turn_complete");
+  expect(prompt).toContain("codex_tool_call");
+  expect(prompt).toContain("codex.control.turn_complete");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("recovery 1/2");
 });
