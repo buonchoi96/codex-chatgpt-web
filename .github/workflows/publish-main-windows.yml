@@ -124,7 +124,22 @@ jobs:
           - previously merged launcher/runtime hardening.
           EOF
 
-          gh release upload "$RELEASE_TAG"             "$installer" release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --clobber
-
-          gh release edit "$RELEASE_TAG"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Codex Web GPT v5.0.8 Custom Windows"             --notes-file release-notes.md
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "$installer" release-assets/SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" \
+              "$installer" release-assets/SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --notes-file release-notes.md
+          fi
 
