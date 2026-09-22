@@ -1086,9 +1086,13 @@ export function createChatGptWebAdapter(
                         "Structured compaction failed and its retained conversation could not be retired",
                       );
                     }
-                    if (handoffError instanceof ChatGptWebAdapterError
-                      && handoffError.code === "compaction_source_unavailable") {
-                      return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                    if (handoffError instanceof ChatGptWebAdapterError) {
+                      if (handoffError.code === "compaction_source_unavailable") {
+                        return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                      }
+                      if (handoffError.code === "compaction_source_stalled") {
+                        return await runFreshCompactionFallback("active_source_stalled_before_handoff");
+                      }
                     }
                     throw handoffError;
                   } finally {
