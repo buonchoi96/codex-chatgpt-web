@@ -343,7 +343,7 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(turn.capabilities.localToolsEnabled).toBe(true);
       const prepared = await turn.prepare();
       expect(prepared.text).toContain("<codex_context_json>");
-      expect(prepared.text).toMatch(/turn_token turn_[A-Za-z0-9_-]+/);
+      expect(prepared.text).toMatch(/"turn_token":"turn_[A-Za-z0-9_-]+"/);
       const answer = "Canonical metadata accepted";
       turn.onTextDelta(answer);
       return answer;
