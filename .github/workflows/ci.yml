@@ -63,7 +63,20 @@ jobs:
       - name: Ensure virtual display is available
         if: runner.os == 'Linux'
         run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+      - name: Provide an E drive for Windows package smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\codex-e-drive"
       - run: bun run app:smoke
+      - name: Remove temporary E drive
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
 
   actionlint:
     runs-on: ubuntu-latest
