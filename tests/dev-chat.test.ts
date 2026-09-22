@@ -387,7 +387,7 @@ test("DEV driver uses shared browser methods and its own broker while an unrelat
     browserStarts += 1;
     const prepared = await turn.prepare();
     try {
-      const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
+      const token = prepared.text.match(/"turn_token":"(turn_[A-Za-z0-9_-]+)"/)?.[1];
       if (!token) throw new Error("missing DEV broker token");
       const claimed = await callTurnBroker<{ bindingId: string }>(config.brokerSocketPath, { method: "claim", token });
       turn.onReasoningSummary?.("Exercising the real broker round");

@@ -79,7 +79,8 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("remaining_actionable_requirements empty");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
   expect(transportOnly).toContain("codex.control.turn_complete has accepted the full-task receipt");
-  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
+  expect(transportOnly).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
+  expect(transportOnly).toContain("The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.");
   expect(transportOnly).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
   expect(transportOnly).toContain("If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.");
   expect(transportOnly).toContain("call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] before writing the final answer");
@@ -98,7 +99,8 @@ test("Pro preserves the same native Codex delegation contract as Extra High", ()
 
   for (const compiled of [pro, extraHigh]) {
     expect(compiled.text).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
-    expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every Codex Native call in this response`);
+    expect(compiled.text).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
+    expect(compiled.text).toContain("Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response");
     expect(compiled.text).not.toContain("Complete this task directly in the current parent response.");
     expect(compiled.text).not.toContain("Do not create, spawn, delegate to, or wait on sub-agents");
     expect(compiled.text).not.toContain("Use non-agent tools directly instead.");
