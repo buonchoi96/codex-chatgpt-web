@@ -565,13 +565,19 @@ export function compileChatGptWebPrompt(
       "The outer bridge removes this marker and checkpoint from the user-facing stream. Never refer to the checkpoint in the visible answer.",
     ]
     : [];
-  const manualControlContract = manualControl
+  const turnControlContract = manualControl
     ? [
       "<codex_zero_risk_request_json>",
       JSON.stringify({ request_id: turnToken }),
       "</codex_zero_risk_request_json>",
     ]
-    : [];
+    : mode.localTools
+      ? [
+        "<codex_native_turn_json>",
+        JSON.stringify({ turn_token: turnToken }),
+        "</codex_native_turn_json>",
+      ]
+      : [];
   const transportResume = parsed._compactionRequest
     ? manualControl
       ? [
@@ -593,7 +599,7 @@ export function compileChatGptWebPrompt(
     : mode.localTools
     ? [
       "<codex_transport_resume>",
-      `The task context is complete. Pass turn_token ${turnToken} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`,
+      "The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.",
       "Immediately before finalizing, compare the entire latest active user request with the work completed in this response. If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.",
       "When all independently actionable deliverables are complete, call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
       "</codex_transport_resume>",
@@ -644,7 +650,7 @@ export function compileChatGptWebPrompt(
           ...skillContract,
           ...transportContract,
           ...outputControlContract,
-          ...manualControlContract,
+          ...turnControlContract,
           ...checkpointContract,
           answerContract,
           ...transportResume,
@@ -681,7 +687,7 @@ export function compileChatGptWebPrompt(
       ...skillContract,
       ...transportContract,
       ...outputControlContract,
-      ...manualControlContract,
+      ...turnControlContract,
       ...checkpointContract,
       answerContract,
       "<codex_context_json>",

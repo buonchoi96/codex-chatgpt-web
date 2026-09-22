@@ -784,6 +784,7 @@ export function createChatGptWebAdapter(
         begin: async () => broker.beginCompletionFence(await token.promise),
         commit: async revision => broker.commitCompletionFence(await token.promise, revision),
         receiptReady: async () => broker.nativeCompletionReceiptAccepted(await token.promise),
+        recoveryTurnToken: async () => await token.promise,
       },
       ...(captureLunaCheckpoint ? {
         captureLunaCheckpoint: true,

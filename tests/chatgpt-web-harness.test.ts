@@ -1565,6 +1565,8 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(compiled.text).toContain("use the attached Codex Native tools directly according to their declared descriptions and schemas");
     expect(compiled.text).toContain("Use actual Codex Native results as evidence");
     expect(compiled.text).toContain("Write the user-facing final answer only after the last required tool result has settled");
+    expect(compiled.text).toContain('<codex_native_turn_json>\n{"turn_token":"turn_123456789012345678901234"}\n</codex_native_turn_json>');
+    expect(compiled.text).toContain("Use the exact turn_token from <codex_native_turn_json> unchanged");
     expect(compiled.text.match(/turn_123456789012345678901234/g)).toHaveLength(1);
     expect(compiled.text).not.toContain("codex_bind_turn");
     expect(compiled.text).not.toContain("binding_id");

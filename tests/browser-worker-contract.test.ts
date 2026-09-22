@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, chatGptCompletionReceiptRecoveryPrompt, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, chatGptCompletionReceiptRecoveryPrompt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -78,13 +78,20 @@ test("unavailable Pro detail reads only its linked tooltip in any language", asy
 
 test("missing native completion receipt gets a bounded same-turn continuation prompt", () => {
   expect(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES).toBe(2);
-  const prompt = chatGptCompletionReceiptRecoveryPrompt(1);
+  const turnToken = "turn_12345678901234567890123456789012";
+  const prompt = chatGptCompletionReceiptRecoveryPrompt(
+    1,
+    MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
+    turnToken,
+  );
   expect(prompt).toContain("without an accepted Full Harness completion receipt");
   expect(prompt).toContain("continue every remaining independently actionable requirement");
   expect(prompt).toContain("codex_tool_call");
   expect(prompt).toContain("codex.control.turn_complete");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("recovery 1/2");
+  expect(prompt).toContain(JSON.stringify({ turn_token: turnToken }));
+  expect(prompt).toContain("Do not reconstruct it, alter it, or reuse a token from earlier task history");
 });
 
 test("conversation turn identity survives ChatGPT DOM virtualization", () => {
@@ -3787,6 +3794,28 @@ test("both response loops check explicit Stopped thinking before acknowledging f
     expect(acknowledgement).toBeGreaterThan(failure);
   }
   expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(2);
+});
+
+test("a ready composer is terminal UI evidence when ChatGPT omits its completed-turn action", () => {
+  const state = {
+    responsePresent: true,
+    running: false,
+    currentText: "complete answer",
+    currentHtml: "<p>complete answer</p>",
+    completionActionVisible: false,
+    composerReady: true,
+  };
+  expect(chatGptTurnIsComplete(state)).toBeTrue();
+  expect(chatGptTurnIsComplete({ ...state, composerReady: false })).toBeFalse();
+  expect(chatGptTurnIsComplete({ ...state, running: true })).toBeFalse();
+
+  const completion = new ChatGptCompletionTracker(500);
+  expect(completion.update(state, 1_000)).toBeFalse();
+  expect(completion.update(state, 1_500)).toBeTrue();
+
+  const health = new ChatGptTurnDomHealthTracker(1_000, 500, 750);
+  expect(health.update(state, 1_000)).toBeUndefined();
+  expect(health.update(state, 10_000)).toBeUndefined();
 });
 
 test("proven MCP progress vetoes every terminal DOM conclusion, not just a missing response", () => {

@@ -1286,6 +1286,8 @@ export interface BrowserTurn {
     commit(revision: number): Promise<boolean>;
     /** Full Harness requires an accepted semantic completion receipt before DOM completion is terminal. */
     receiptReady?(): Promise<boolean>;
+    /** Re-supply the exact current capability only inside a bounded missing-receipt recovery turn. */
+    recoveryTurnToken?(): Promise<string>;
   };
   /** Allow one clean pre-submit composer retry for isolated history compaction only. */
   compaction?: boolean;
@@ -1299,10 +1301,17 @@ export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 2;
 export function chatGptCompletionReceiptRecoveryPrompt(
   attempt: number,
   maxAttempts = MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
+  turnToken?: string,
 ): string {
   return [
     "<codex_completion_recovery>",
     `Your previous response reached a final-answer boundary without an accepted Full Harness completion receipt (recovery ${attempt}/${maxAttempts}).`,
+    ...(turnToken ? [
+      "<codex_native_turn_recovery_json>",
+      JSON.stringify({ turn_token: turnToken }),
+      "</codex_native_turn_recovery_json>",
+      "Use exactly the turn_token above for every Codex Native call in this recovery. Do not reconstruct it, alter it, or reuse a token from earlier task history.",
+    ] : []),
     "Do not repeat the progress report as a final answer.",
     "Re-read the entire active user request and continue every remaining independently actionable requirement with Codex Native tools.",
     "A missing asset or blocker for one branch does not permit stopping while independent research, implementation, tests, validation, or documentation can still be completed.",
@@ -1372,11 +1381,12 @@ export function chatGptTurnIsComplete(state: {
   currentText: string;
   currentHtml?: string;
   completionActionVisible: boolean;
+  composerReady?: boolean;
 }): boolean {
   return state.responsePresent
     && !state.running
     && state.currentText.length > 0
-    && state.completionActionVisible;
+    && (state.completionActionVisible || state.composerReady === true);
 }
 
 export type ChatGptSubmissionEvidence = "user_turn" | "assistant_turn" | "generation_running" | "mcp_tool_call";
@@ -1603,6 +1613,7 @@ export class ChatGptTurnDomHealthTracker {
     running: boolean;
     currentText: string;
     completionActionVisible: boolean;
+    composerReady?: boolean;
     externalProgressLive?: boolean;
   }, now = Date.now()): string | undefined {
     if (state.responsePresent) this.sawResponse = true;
@@ -1626,10 +1637,11 @@ export class ChatGptTurnDomHealthTracker {
       }
     }
 
+    const terminalUiReady = state.completionActionVisible || state.composerReady === true;
     const emptyCompletion = state.responsePresent
       && !state.running
       && state.currentText.length === 0
-      && state.completionActionVisible;
+      && terminalUiReady;
     if (!emptyCompletion) {
       this.emptyCompletionSince = undefined;
     } else {
@@ -1642,7 +1654,7 @@ export class ChatGptTurnDomHealthTracker {
     const missingCompletionAction = state.responsePresent
       && !state.running
       && state.currentText.length > 0
-      && !state.completionActionVisible;
+      && !terminalUiReady;
     if (!missingCompletionAction) {
       this.missingCompletionAction = undefined;
     } else if (this.missingCompletionAction?.text !== state.currentText) {
@@ -3685,11 +3697,15 @@ export class ChatGptBrowserWorker {
         continue;
       }
       const running = await page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last().isVisible().catch(() => false);
+      const composerReady = !running && snapshot.responsePresent && snapshot.visibleText.length > 0
+        ? await this.composerReadyForNextMessage(page)
+        : false;
       const domError = domHealthTracker.update({
         responsePresent: snapshot.responsePresent,
         running,
         currentText: snapshot.visibleText,
         completionActionVisible: snapshot.completionActionVisible,
+        composerReady,
         externalProgressLive,
       });
       if (domError) throw new Error(domError);
@@ -3699,6 +3715,7 @@ export class ChatGptBrowserWorker {
         currentText: snapshot.visibleText,
         currentHtml: snapshot.fullHtml,
         completionActionVisible: snapshot.completionActionVisible,
+        composerReady,
         externalToolCallsInFlight,
       })) {
         const actual = snapshot.visibleText.trim();
@@ -3925,6 +3942,19 @@ export class ChatGptBrowserWorker {
       await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
     }
     throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
+  }
+
+  private async composerReadyForNextMessage(page: Page): Promise<boolean> {
+    const composers = page.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true });
+    if (await composers.count().catch(() => 0) !== 1) return false;
+    return composers.first().evaluate(element => {
+      const candidate = element as HTMLElement;
+      if (candidate.getAttribute("aria-disabled") === "true") return false;
+      if (candidate instanceof HTMLTextAreaElement || candidate instanceof HTMLInputElement) {
+        return !candidate.disabled && !candidate.readOnly;
+      }
+      return candidate.isContentEditable || candidate.getAttribute("contenteditable") === "true";
+    }).catch(() => false);
   }
 
   private async responseDomSnapshot(
@@ -5180,6 +5210,10 @@ export class ChatGptBrowserWorker {
         }
         const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
         const running = await stop.isVisible().catch(() => false);
+        const composerReady = !running && snapshot.responsePresent && snapshot.visibleText.length > 0
+          ? await this.composerReadyForNextMessage(page)
+          : false;
+        const terminalUiReady = snapshot.completionActionVisible || composerReady;
         if (running) sawRunning = true;
         if (snapshot.responsePresent) {
           if (!capturedResponse) {
@@ -5193,7 +5227,7 @@ export class ChatGptBrowserWorker {
               return throwMarkdownConsistencyError(error);
             }
           })();
-          for (const trace of visibleTrace.observe(snapshot.traceBlocks, snapshot.completionActionVisible)) {
+          for (const trace of visibleTrace.observe(snapshot.traceBlocks, terminalUiReady)) {
             if (trace.kind === "commentary") turn.onCommentary?.(trace.text, trace.continuation === true);
             else turn.onReasoningSummary?.(trace.text, trace.continuation === true);
           }
@@ -5203,6 +5237,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: snapshot.visibleText,
             completionActionVisible: snapshot.completionActionVisible,
+            composerReady,
             externalProgressLive,
           });
           if (domError) throw new Error(domError);
@@ -5212,6 +5247,7 @@ export class ChatGptBrowserWorker {
             currentText: snapshot.visibleText,
             currentHtml: snapshot.fullHtml,
             completionActionVisible: snapshot.completionActionVisible,
+            composerReady,
             externalToolCallsInFlight,
           });
           if (!completionReady) completionFenceRevision = undefined;
@@ -5239,13 +5275,18 @@ export class ChatGptBrowserWorker {
               bufferedFinalDeltas = [];
               submissionBaseline = await this.captureSubmissionBaseline(page);
               completionTracker = new ChatGptCompletionTracker();
+              const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();
               await this.runStage(
                 turn.traceId,
                 `completion_receipt_recovery_${completionReceiptRecoveries}_attachment`,
                 browserStageTimeouts.promptAttachment,
                 (stageSignal) => this.attachPrompt(
                   page,
-                  chatGptCompletionReceiptRecoveryPrompt(completionReceiptRecoveries),
+                  chatGptCompletionReceiptRecoveryPrompt(
+                    completionReceiptRecoveries,
+                    MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
+                    recoveryTurnToken,
+                  ),
                   true,
                   checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
                   turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
@@ -5363,7 +5404,7 @@ export class ChatGptBrowserWorker {
               diagnosticError: error instanceof Error ? error.message : String(error),
             }));
             console.warn(
-              `[chatgpt-web] waiting for completed-turn evidence (running=${running}, sawRunning=${sawRunning}, textChars=${snapshot.visibleText.length}, completionActionVisible=${snapshot.completionActionVisible}, ui=${diagnostic})`,
+              `[chatgpt-web] waiting for completed-turn evidence (running=${running}, sawRunning=${sawRunning}, textChars=${snapshot.visibleText.length}, completionActionVisible=${snapshot.completionActionVisible}, composerReady=${composerReady}, ui=${diagnostic})`,
             );
           }
         } else {
