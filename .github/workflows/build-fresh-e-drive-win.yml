@@ -60,8 +60,8 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: codex-web-gpt-v5.0.8-fresh-e-drive-win-x64
-          path: |
-            launcher/artifacts/*.exe
-            launcher/artifacts/*.zip
+          name: windows-installer-main-${{ github.sha }}
+          path: launcher/artifacts/*.exe
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 3

@@ -1,97 +1,67 @@
 name: Publish main Windows installer
 
 on:
-  workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ["Build v5.0.8 Fresh E Drive Windows"]
+    types: [completed]
     branches: [main]
-    paths-ignore:
-      - docs/testing/evidence/windows-main-release.json
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
   group: publish-main-windows
-  # Never cancel a publisher while it is replacing fixed-name release assets.
-  # A cancelled gh release upload --clobber can leave the next run holding a stale asset id.
+  # Fixed-name release assets are replaced serially so two completed builds cannot race.
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
-    runs-on: windows-latest
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: oven-sh/setup-bun@v2
+      - name: Check out the exact validated commit
+        uses: actions/checkout@v6
         with:
-          bun-version: 1.4.0
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Install dependencies
-        shell: pwsh
-        run: |
-          bun install --frozen-lockfile
-          Push-Location launcher
-          try {
-            bun install --frozen-lockfile
-          } finally {
-            Pop-Location
-          }
-
-      - name: Prepare AVX2-independent Windows runtime
-        shell: pwsh
-        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
-
-      - name: Verify source and launcher
-        shell: pwsh
-        run: bun run verify
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: bun run app:package
-
-      - name: Provide an E drive for installer smoke
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\\codex-e-drive" | Out-Null
-          subst E: "$env:RUNNER_TEMP\\codex-e-drive"
-
-      - name: Smoke packaged Windows installer
-        shell: pwsh
-        run: bun run app:smoke
-
-      - name: Remove temporary E drive
-        if: always()
-        shell: pwsh
-        run: |
-          subst E: /D 2>$null
-          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
-          exit 0
+      - name: Download validated Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-main-${{ github.event.workflow_run.head_sha }}
+          path: upstream-artifact
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
 
       - name: Prepare release assets
         id: assets
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $installer = Get-ChildItem launcher/artifacts -Filter "*-win-x64.exe" -File
-          if ($installer.Count -ne 1) {
-            throw "Expected exactly one Windows installer; found $($installer.Count)"
-          }
-          New-Item -ItemType Directory -Force release-assets | Out-Null
-          Copy-Item -LiteralPath $installer[0].FullName -Destination release-assets
-          $hash = (Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($installer[0].Name)" | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding ascii
-          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
-          "installer=$($installer[0].Name)" >> $env:GITHUB_OUTPUT
-          "version=$($package.version)" >> $env:GITHUB_OUTPUT
-          Get-Content release-assets/SHA256SUMS.txt
+          set -euo pipefail
+          mapfile -t installers < <(find upstream-artifact -maxdepth 1 -type f -name '*-win-x64.exe' -print)
+          if [[ "${#installers[@]}" -ne 1 ]]; then
+            echo "Expected exactly one Windows installer; found ${#installers[@]}" >&2
+            find upstream-artifact -maxdepth 2 -type f -print >&2 || true
+            exit 1
+          fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer-main-${{ github.sha }}
-          path: |
-            release-assets/*.exe
-            release-assets/SHA256SUMS.txt
-          if-no-files-found: error
+          mkdir -p release-assets
+          installer="${installers[0]}"
+          installer_name="$(basename "$installer")"
+          cp "$installer" "release-assets/$installer_name"
+          sha256sum "release-assets/$installer_name" | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
+
+          version="$(jq -r '.version' package.json)"
+          test -n "$version"
+          test "$version" != "null"
+
+          echo "installer=$installer_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cat release-assets/SHA256SUMS.txt
 
       - name: Publish custom Windows release
         shell: bash
@@ -107,25 +77,19 @@ jobs:
           cat > release-notes.md <<EOF
           ## Codex Web GPT v${{ steps.assets.outputs.version }} — Custom Windows build
 
-          Rebuilt from the current 'main' branch at commit '${GITHUB_SHA}'.
+          Built and validated from main commit '${SOURCE_SHA}' by workflow run '${SOURCE_RUN_ID}'.
 
-          Validation completed on GitHub Actions Windows:
+          Validation completed before this publish job:
           - 'bun run verify'
-          - 'bun run app:package'
+          - Windows packaging
           - 'bun run app:smoke'
-          - AVX2-independent Bun 1.4.0 runtime prepared before packaging
+          - AVX2-independent Bun 1.4.0 runtime preparation
 
           Installer:
           - '${{ steps.assets.outputs.installer }}'
           - 'SHA256SUMS.txt' contains its SHA-256 checksum.
 
-          This build includes:
-          - stale retained-connector recovery;
-          - compaction handoff protection so accepted automatic compaction does not press Stop answering;
-          - ordinary prompt send budget raised to 120 seconds;
-          - 30-second send-enable grace and 60-second large composer insertion budget;
-          - late DOM submission-evidence recovery without replaying an ambiguous prompt;
-          - previously merged launcher/runtime hardening.
+          The publish stage reuses the already validated Actions artifact and does not rebuild the installer.
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -136,8 +100,7 @@ jobs:
               local attempt asset_id still_present
 
               for attempt in 1 2 3 4 5; do
-                asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
-                  --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
+                asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"                   --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
 
                 if [[ -z "$asset_id" ]]; then
                   return 0
@@ -145,8 +108,7 @@ jobs:
 
                 if gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"; then
                   for _ in 1 2 3 4 5; do
-                    still_present="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
-                      --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
+                    still_present="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"                       --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
                     if [[ -z "$still_present" ]]; then
                       return 0
                     fi
@@ -165,21 +127,9 @@ jobs:
             delete_asset_by_name "$(basename "$installer")"
             delete_asset_by_name "SHA256SUMS.txt"
 
-            gh release upload "$RELEASE_TAG" \
-              "$installer" release-assets/SHA256SUMS.txt \
-              --repo "$GITHUB_REPOSITORY"
+            gh release upload "$RELEASE_TAG"               "$installer" release-assets/SHA256SUMS.txt               --repo "$GITHUB_REPOSITORY"
 
-            gh release edit "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows" \
-              --notes-file release-notes.md
+            gh release edit "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$SOURCE_SHA"               --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows"               --notes-file release-notes.md
           else
-            gh release create "$RELEASE_TAG" \
-              "$installer" release-assets/SHA256SUMS.txt \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows" \
-              --notes-file release-notes.md
+            gh release create "$RELEASE_TAG"               "$installer" release-assets/SHA256SUMS.txt               --repo "$GITHUB_REPOSITORY"               --target "$SOURCE_SHA"               --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows"               --notes-file release-notes.md
           fi
-
