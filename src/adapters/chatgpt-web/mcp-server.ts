@@ -26,6 +26,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_tool_inventory",
   "codex_readonly_tool_call",
   "codex_windows_computer_use_observe",
+  "codex_windows_computer_use_action",
   "codex_windows_computer_use_call",
   "codex_tool_call",
   "codex_turn_complete",
@@ -56,6 +57,20 @@ const WINDOWS_COMPUTER_USE_OBSERVATION_TOOLS: Record<string, string> = {
   find: "mcp__windows_computer_use__windows_computer_use_find",
   element_info: "mcp__windows_computer_use__windows_computer_use_element_info",
   wait: "mcp__windows_computer_use__windows_computer_use_wait",
+};
+
+const WINDOWS_COMPUTER_USE_ACTION_TOOLS: Record<string, string> = {
+  click: "mcp__windows_computer_use__windows_computer_use_click",
+  double_click: "mcp__windows_computer_use__windows_computer_use_double_click",
+  move: "mcp__windows_computer_use__windows_computer_use_move",
+  drag: "mcp__windows_computer_use__windows_computer_use_drag",
+  scroll: "mcp__windows_computer_use__windows_computer_use_scroll",
+  type_text: "mcp__windows_computer_use__windows_computer_use_type_text",
+  keypress: "mcp__windows_computer_use__windows_computer_use_keypress",
+  focus: "mcp__windows_computer_use__windows_computer_use_focus",
+  invoke: "mcp__windows_computer_use__windows_computer_use_invoke",
+  set_value: "mcp__windows_computer_use__windows_computer_use_set_value",
+  activate_window: "mcp__windows_computer_use__windows_computer_use_activate_window",
 };
 
 function isWindowsComputerUseWireName(name: string): boolean {
@@ -99,7 +114,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For Windows Computer Use observation, use codex_windows_computer_use_observe with the matching operation. Do not route Windows observation through the generic codex_readonly_tool_call unless the dedicated observation bridge is unavailable.",
-  "For Windows Computer Use interaction tools, invoke the exact loaded wire_name through codex_windows_computer_use_call.",
+  "For Windows Computer Use interaction, use codex_windows_computer_use_action with the matching fixed operation. Use codex_windows_computer_use_call only as a compatibility fallback when the dedicated action bridge is unavailable.",
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
@@ -1003,12 +1018,55 @@ export async function runChatGptMcpServer(options: {
   );
 
   server.registerTool(
+    "codex_windows_computer_use_action",
+    {
+      title: "Perform a Windows UI action through Codex",
+      description: "Perform one fixed Windows Computer Use interaction operation through an already-loaded local Windows UI tool. Observation-only work belongs on codex_windows_computer_use_observe.",
+      inputSchema: {
+        turn_token: turnTokenSchema,
+        operation: z.enum([
+          "click",
+          "double_click",
+          "move",
+          "drag",
+          "scroll",
+          "type_text",
+          "keypress",
+          "focus",
+          "invoke",
+          "set_value",
+          "activate_window",
+        ]),
+        arguments: jsonArgumentsSchema.optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (toolInput, extra) => withClaimedTurn(
+      "codex_windows_computer_use_action",
+      toolInput.turn_token,
+      extra,
+      async claimed => {
+        const wire = WINDOWS_COMPUTER_USE_ACTION_TOOLS[toolInput.operation];
+        if (!wire) throw new Error(`Unsupported Windows Computer Use action operation: ${toolInput.operation}`);
+        const tool = exactVisibleStructuredTool(claimed.environment, contract, wire);
+        return invoke(
+          claimed.bindingId,
+          claimed.environment,
+          tool,
+          { arguments: toolInput.arguments ?? {} },
+          extra.signal,
+        );
+      },
+    ),
+  );
+
+  server.registerTool(
     "codex_windows_computer_use_call",
     {
-      title: "Control Windows through Codex",
+      title: "Control Windows through Codex (compatibility fallback)",
       description: afterSafeStart(
         contract,
-        "Invoke an exact Windows Computer Use tool that was loaded into the current outer Codex turn. Use codex_windows_computer_use_observe for observation-only operations; use this tool for desktop interaction actions.",
+        "Compatibility fallback for an exact loaded Windows Computer Use wire_name. Prefer codex_windows_computer_use_action for interaction and codex_windows_computer_use_observe for observation.",
       ),
       inputSchema: {
         ...turnReferenceInput(contract),
