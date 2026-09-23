@@ -1303,6 +1303,21 @@ export interface BrowserTurn {
 }
 
 export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 2;
+export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 2_000;
+const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
+
+export async function waitForChatGptCompletionReceipt(
+  receiptReady: () => Promise<boolean>,
+  timeoutMs = CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    if (await receiptReady()) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await new Promise(resolve => setTimeout(resolve, Math.min(CHATGPT_COMPLETION_RECEIPT_POLL_MS, remaining)));
+  }
+}
 
 export function chatGptCompletionReceiptRecoveryPrompt(
   attempt: number,
@@ -5400,7 +5415,10 @@ export class ChatGptBrowserWorker {
           });
           if (!completionReady) completionFenceRevision = undefined;
           if (completionReady) {
-            if (turn.completionFence?.receiptReady && !await turn.completionFence.receiptReady()) {
+            const completionReceiptReady = turn.completionFence?.receiptReady
+              ? await waitForChatGptCompletionReceipt(turn.completionFence.receiptReady)
+              : true;
+            if (!completionReceiptReady) {
               if (chatGptFinalIndicatesSafetyBlocked(snapshot.visibleText)) {
                 throw new ChatGptWebAdapterError(
                   "ChatGPT reported a safety-blocked terminal outcome before an accepted Full Harness completion receipt.",
