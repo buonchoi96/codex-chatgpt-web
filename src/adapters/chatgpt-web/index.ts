@@ -359,6 +359,10 @@ export function createChatGptWebAdapter(
   if (experimentalBiggerContext !== undefined && typeof experimentalBiggerContext !== "boolean") {
     throw new Error("ChatGPT Bigger Context preference must be a boolean");
   }
+  const freshConversationPerTurn = provider.chatgptWeb?.experimentalFreshConversationPerTurn;
+  if (freshConversationPerTurn !== undefined && typeof freshConversationPerTurn !== "boolean") {
+    throw new Error("ChatGPT fresh-conversation preference must be a boolean");
+  }
   const configuredCapabilities: ChatGptWebCapabilities = {
     localToolsEnabled: provider.chatgptWeb?.localToolsEnabled === true,
     solAvailable: provider.chatgptWeb?.solAvailable !== false,
@@ -420,7 +424,10 @@ export function createChatGptWebAdapter(
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
       : { parsed, applied: false };
+    // Withholding the key opts out of retained reuse: the Launcher cannot match an
+    // existing tab, so every turn opens a fresh chat and receives the full prompt.
     const conversationKey = !parsed._compactionRequest
+      && !freshConversationPerTurn
       && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
       && mode.localTools
       && retainedLauncherDescriptor
@@ -721,12 +728,21 @@ export function createChatGptWebAdapter(
     let tokenSettled = false;
     let activeToken: string | undefined;
     const prepareWith = async (input: CodexParsedRequest) => {
-      const turnToken = activeToken ?? await broker.register(
-        environment,
-        timeoutMs === undefined ? undefined : timeoutMs + 60_000,
-        traceId,
-      );
-      activeToken = turnToken;
+      let turnToken = activeToken;
+      if (!turnToken) {
+        turnToken = await broker.register(
+          environment,
+          timeoutMs === undefined ? undefined : timeoutMs + 60_000,
+          traceId,
+        );
+        try {
+          await broker.requireNativeCompletionReceipt(turnToken);
+        } catch (error) {
+          await broker.revoke(turnToken);
+          throw error;
+        }
+        activeToken = turnToken;
+      }
       try {
         const compiled = compileChatGptWebPrompt(
           input,
@@ -767,6 +783,8 @@ export function createChatGptWebAdapter(
       completionFence: {
         begin: async () => broker.beginCompletionFence(await token.promise),
         commit: async revision => broker.commitCompletionFence(await token.promise, revision),
+        receiptReady: async () => broker.nativeCompletionReceiptAccepted(await token.promise),
+        recoveryTurnToken: async () => await token.promise,
       },
       ...(captureLunaCheckpoint ? {
         captureLunaCheckpoint: true,
@@ -1069,9 +1087,13 @@ export function createChatGptWebAdapter(
                         "Structured compaction failed and its retained conversation could not be retired",
                       );
                     }
-                    if (handoffError instanceof ChatGptWebAdapterError
-                      && handoffError.code === "compaction_source_unavailable") {
-                      return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                    if (handoffError instanceof ChatGptWebAdapterError) {
+                      if (handoffError.code === "compaction_source_unavailable") {
+                        return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                      }
+                      if (handoffError.code === "compaction_source_stalled") {
+                        return await runFreshCompactionFallback("active_source_stalled_before_handoff");
+                      }
                     }
                     throw handoffError;
                   } finally {

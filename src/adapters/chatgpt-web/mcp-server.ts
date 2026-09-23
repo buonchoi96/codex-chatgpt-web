@@ -43,6 +43,7 @@ const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly 
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
+export const CODEX_COMPLETION_CONTROL_WIRE_NAME = "codex.control.turn_complete";
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
   "For each pasted Codex Web GPT request, begin with codex_turn_start using the request_id in its request block.",
@@ -50,6 +51,22 @@ const ZERO_RISK_MCP_INSTRUCTIONS = [
   "When the task is finished, send the complete answer with codex_turn_complete.",
   "If a tool returns an error, report that error instead of changing the request_id.",
 ].join(" ");
+
+export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
+  "Use the current turn_token unchanged for every Codex Native call in this response.",
+  "Treat every explicit deliverable in the active Codex request as part of one task completion condition.",
+  "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
+  "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
+  "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
+  "For Full Harness turns, the mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty. A blocked receipt is valid only after all independent work is complete and the blocker genuinely prevents the listed blocked requirements.",
+  "Pass the completion receipt fields in codex_tool_call.arguments: state, summary, completed_requirements, blocked_requirements, remaining_actionable_requirements, and optional blocker.",
+  "After the codex.control.turn_complete receipt is accepted, provide the final user-facing answer. If it is rejected, continue the task and submit a new receipt only when the rejection is resolved.",
+  "Only stop early for a genuine external blocker that cannot be resolved with the available Codex tools or environment.",
+].join(" ");
+
+export function chatGptMcpInstructions(contract: ChatGptMcpContract): string {
+  return contract === "safe" ? ZERO_RISK_MCP_INSTRUCTIONS : CHATGPT_NATIVE_MCP_INSTRUCTIONS;
+}
 
 function turnReferenceInput(contract: ChatGptMcpContract): Record<string, z.ZodString> {
   return contract === "safe"
@@ -449,7 +466,7 @@ export async function runChatGptMcpServer(options: {
   const contract = options.contract ?? "native";
   const server = new McpServer(
     { name: contract === "safe" ? "codex-safe" : "codex-native", version: VERSION },
-    contract === "safe" ? { instructions: ZERO_RISK_MCP_INSTRUCTIONS } : undefined,
+    { instructions: chatGptMcpInstructions(contract) },
   );
 
   const claimTurn = async (
@@ -901,6 +918,48 @@ export async function runChatGptMcpServer(options: {
         return result({ submitted: true });
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
+        if (contract === "native" && wire_name === CODEX_COMPLETION_CONTROL_WIRE_NAME) {
+          if (input !== undefined) {
+            throw new Error("Completion receipt does not accept freeform input");
+          }
+          const receipt = args ?? {};
+          const state = receipt.state;
+          const summary = receipt.summary;
+          const completedRequirements = receipt.completed_requirements;
+          const blockedRequirements = receipt.blocked_requirements;
+          const remainingActionableRequirements = receipt.remaining_actionable_requirements;
+          const blocker = receipt.blocker;
+          const stringArray = (value: unknown, name: string): string[] => {
+            if (!Array.isArray(value) || value.some(item => typeof item !== "string" || item.trim().length === 0)) {
+              throw new Error(`Completion receipt ${name} must be an array of non-empty strings`);
+            }
+            return value;
+          };
+          if (state !== "complete" && state !== "blocked") {
+            throw new Error("Completion receipt state must be complete or blocked");
+          }
+          if (typeof summary !== "string" || summary.trim().length === 0) {
+            throw new Error("Completion receipt summary must be a non-empty string");
+          }
+          if (blocker !== undefined && (typeof blocker !== "string" || blocker.trim().length === 0)) {
+            throw new Error("Completion receipt blocker must be a non-empty string when present");
+          }
+          const response = await callTurnBroker<{ accepted: true }>(options.brokerSocketPath, {
+            method: "native_complete",
+            token: requestId,
+            activityId: claimed.activityId,
+            completionState: state,
+            completionSummary: summary,
+            completedRequirements: stringArray(completedRequirements ?? [], "completed_requirements"),
+            blockedRequirements: stringArray(blockedRequirements ?? [], "blocked_requirements"),
+            remainingActionableRequirements: stringArray(
+              remainingActionableRequirements ?? [],
+              "remaining_actionable_requirements",
+            ),
+            ...(typeof blocker === "string" ? { blocker } : {}),
+          }, 5_000, extra.signal);
+          return result(response);
+        }
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);

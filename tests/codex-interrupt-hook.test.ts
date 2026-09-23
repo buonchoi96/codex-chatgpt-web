@@ -7,6 +7,7 @@ import {
   codexInterruptHookCommand,
   codexInterruptHookHash,
   installCodexInterruptHook,
+  reclaimOrphanedCodexInterruptHook,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
@@ -43,6 +44,52 @@ test("trusts the canonical Codex config path before a new config file exists", (
     expect(installed.installed.stateKey).toBe(
       `${join(realpathSync.native(directory), "config.toml")}:interrupt:0:0`,
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reclaims an intact orphaned managed hook after launcher data is removed", () => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-orphaned-hook-"));
+  try {
+    const configPath = join(directory, "config.toml");
+    const original = 'model = "gpt-5.6-sol"\n[features]\ngoals = true\n';
+    const installed = installCodexInterruptHook(original, configPath, {
+      runtimeCommand: [join(directory, "old-runtime", "bun.exe")],
+    });
+    const repaired = reclaimOrphanedCodexInterruptHook(installed.text, configPath);
+    expect(repaired.reclaimed).toBe(true);
+    expect(repaired.text).not.toContain(MANAGED_INTERRUPT_HOOK_END);
+    expect(Bun.TOML.parse(repaired.text)).toEqual(Bun.TOML.parse(original));
+
+    const reinstalled = installCodexInterruptHook(repaired.text, configPath, {
+      runtimeCommand: [join(directory, "new-runtime", "bun.exe")],
+    });
+    verifyCodexInterruptHook(reinstalled.text, reinstalled.installed);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("orphaned hook recovery remains fail-closed for modified or foreign managed state", () => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-orphaned-hook-"));
+  try {
+    const configPath = join(directory, "config.toml");
+    const installed = installCodexInterruptHook('model = "gpt-5.6-sol"\n', configPath, {
+      runtimeCommand: [join(directory, "runtime", "bun.exe")],
+    });
+    expect(() => reclaimOrphanedCodexInterruptHook(
+      installed.text.replace(installed.installed.trustedHash, "sha256:" + "0".repeat(64)),
+      configPath,
+    )).toThrow("trust hash changed");
+    expect(() => reclaimOrphanedCodexInterruptHook(
+      installed.text,
+      join(directory, "other-config.toml"),
+    )).toThrow("different config path");
+    expect(() => reclaimOrphanedCodexInterruptHook(
+      installed.text + "\n" + MANAGED_INTERRUPT_HOOK_END + "\n",
+      configPath,
+    )).toThrow("ambiguous stale");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -1685,6 +1685,62 @@ test("a viewport-refresh heartbeat reapplies hidden emulation before CDP reconne
   assert.equal(tab.deviceEmulationDirty, false);
 });
 
+
+test("viewport recovery keeps explicit emulation on a selected visible turn", () => {
+  const events = [];
+  const tab = {
+    id: "tab-visible-recovery",
+    traceId: "trace_visible_recovery",
+    helperPid: 447,
+    status: "running",
+    lastHeartbeatAt: 1,
+    rendererReady: true,
+    deviceEmulationViewport: null,
+    deviceEmulationDirty: false,
+    forceOperationalViewport: false,
+    view: {
+      setBounds: bounds => events.push(["bounds", bounds]),
+      setVisible: visible => events.push(["visible", visible]),
+      webContents: {
+        enableDeviceEmulation: options => events.push(["emulate", options]),
+        disableDeviceEmulation: () => events.push(["disable-emulation"]),
+      },
+    },
+  };
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    visible: true,
+    surfaceActive: true,
+    boundsReady: true,
+    bounds: { x: 280, y: 64, width: 840, height: 656 },
+    selectedTabId: tab.id,
+    turnTabs: new Map([[tab.id, tab]]),
+    closedTurnOwners: new Map(),
+    authView: null,
+    window: {
+      getContentSize: () => [1120, 720],
+      isMinimized: () => false,
+      isVisible: () => true,
+    },
+    view: {
+      setBounds: bounds => events.push(["home-bounds", bounds]),
+      setVisible: visible => events.push(["home-visible", visible]),
+    },
+    snapshot: () => ({ activeTabId: tab.id }),
+  });
+
+  BrowserHost.prototype.heartbeatTurn.call(fixture, tab.traceId, tab.helperPid, true);
+
+  assert.equal(tab.forceOperationalViewport, true);
+  assert.deepEqual(tab.deviceEmulationViewport, { width: 840, height: 656 });
+  assert.equal(tab.deviceEmulationDirty, false);
+  assert.equal(events.some(([kind]) => kind === "disable-emulation"), false);
+  assert.equal(events.filter(([kind]) => kind === "emulate").length, 1);
+  assert.deepEqual(
+    events.find(([kind]) => kind === "bounds"),
+    ["bounds", { x: 280, y: 64, width: 840, height: 656 }],
+  );
+});
+
 test("an expired browser surface cancels its runtime before releasing the tab", async () => {
   const closed = [];
   const warnings = [];
@@ -2352,27 +2408,33 @@ test("an Automatic turn never reuses a retained Zero Risk conversation", async (
   );
 });
 
-test("a connector conversation is not reused until its connector was bound", async () => {
+test("a connector conversation is reused even when its connector proof must be refreshed", async () => {
   const conversationKey = "c".repeat(64);
   const retained = {
     id: "retained",
+    surfaceId: "surface-retained",
     traceId: "trace_old",
     status: "ready",
     conversationKey,
     connectorIdentity: "Codex Native2",
     connectorBound: false,
     interactionMode: "automatic",
+    view: { webContents: { isDestroyed: () => true } },
   };
+  let created = false;
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     manualOperation: null,
     turnTabs: new Map([[retained.id, retained]]),
     userCancelledTurnOwners: new Map(),
-    createTurnTab: () => ({ id: "fresh", surfaceId: "surface-fresh" }),
+    createTurnTab: () => {
+      created = true;
+      return { id: "fresh", surfaceId: "surface-fresh" };
+    },
     writeDescriptor() {},
     syncViewVisibility() {},
     publishState() {},
     snapshot: () => ({ tabs: [] }),
-    logger: { info() {} },
+    logger: { info() {}, warn() {} },
   });
 
   assert.deepEqual(
@@ -2385,12 +2447,13 @@ test("a connector conversation is not reused until its connector was bound", asy
       "Codex Native2",
     ),
     {
-      surfaceId: "surface-fresh",
-      tabId: "fresh",
-      reused: false,
+      surfaceId: "surface-retained",
+      tabId: "retained",
+      reused: true,
       connectorBound: false,
     },
   );
+  assert.equal(created, false);
 });
 
 test("a required retained conversation fails before creating a browser tab", async () => {

@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
-import { chatGptBrowserTabClosedError } from "../src/adapters/chatgpt-web/adapter-error";
+import { CHATGPT_SEND_ENABLE_GRACE_MS, ChatGptBrowserWorker, browserStageTimeouts, chatGptAbortShouldStopGeneration } from "../src/adapters/chatgpt-web/browser-worker";
+import { ChatGptCompactionHandoffAccepted, chatGptBrowserTabClosedError } from "../src/adapters/chatgpt-web/adapter-error";
 import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
 
@@ -99,7 +99,7 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
       `effort:${effort}`,
       tools ? "attach:tools" : "attach:plain", "files", "send", "observe",
     ]);
-    expect(sendBudgets).toEqual(multipart ? Array(6).fill(180_000) : [20_000]);
+    expect(sendBudgets).toEqual(multipart ? Array(6).fill(180_000) : [120_000]);
     expect(released).toBe(true);
     expect(activated).toBe(1);
     expect(page.listenerCount("request")).toBe(0);
@@ -107,4 +107,20 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
   } finally {
     rmSync(diagnostics, { recursive: true, force: true });
   }
+});
+
+
+test("accepted compaction handoff never presses Stop while real cancellation still does", () => {
+  const handoff = new AbortController();
+  handoff.abort(new ChatGptCompactionHandoffAccepted());
+  expect(chatGptAbortShouldStopGeneration(handoff.signal)).toBeFalse();
+
+  const cancelled = new AbortController();
+  cancelled.abort(new DOMException("operator cancelled", "AbortError"));
+  expect(chatGptAbortShouldStopGeneration(cancelled.signal)).toBeTrue();
+});
+
+test("ordinary prompt submission has headroom for large composer ingestion", () => {
+  expect(browserStageTimeouts.send).toBe(120_000);
+  expect(CHATGPT_SEND_ENABLE_GRACE_MS).toBe(30_000);
 });

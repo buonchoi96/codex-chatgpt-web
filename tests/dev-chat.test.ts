@@ -323,7 +323,7 @@ test("DEV chat attaches its broker to the launcher-owned tunnel without a Respon
     });
     expect(transport.config).toBe(config);
     expect(await callTurnBroker(transport.config.brokerSocketPath, { method: "owner_status" }))
-      .toMatchObject({ protocolVersion: 5 });
+      .toMatchObject({ protocolVersion: 6 });
     expect(await (await fetch(`http://127.0.0.1:${occupied.port}`)).text()).toBe("normal Codex route");
   } finally {
     await transport?.close();
@@ -387,7 +387,7 @@ test("DEV driver uses shared browser methods and its own broker while an unrelat
     browserStarts += 1;
     const prepared = await turn.prepare();
     try {
-      const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
+      const token = prepared.text.match(/"turn_token":"(turn_[A-Za-z0-9_-]+)"/)?.[1];
       if (!token) throw new Error("missing DEV broker token");
       const claimed = await callTurnBroker<{ bindingId: string }>(config.brokerSocketPath, { method: "claim", token });
       turn.onReasoningSummary?.("Exercising the real broker round");

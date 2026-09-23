@@ -77,6 +77,26 @@ test("launcher descriptor is owner-only, loopback-only, and process-bound", () =
   }
 });
 
+test("launcher retained tabs preserve conversation identity but invalidate connector proof on full navigation", () => {
+  const source = readFileSync(new URL("../launcher/electron/browser-host.cjs", import.meta.url), "utf8");
+  const retainedStart = source.indexOf("const retainedMatches = conversationKey");
+  const retainedEnd = source.indexOf(")) : [];", retainedStart);
+  expect(retainedStart).toBeGreaterThan(-1);
+  expect(retainedEnd).toBeGreaterThan(retainedStart);
+  const retainedFilter = source.slice(retainedStart, retainedEnd);
+  expect(retainedFilter).toContain("tab.conversationKey === conversationKey");
+  expect(retainedFilter).toContain("tab.connectorIdentity === connectorIdentity");
+  expect(retainedFilter).not.toContain("tab.connectorBound === true");
+
+  const bindStart = source.indexOf("  bindTurnContents(tab) {");
+  const manualStart = source.indexOf("  async markTurnTabSurface(tab)", bindStart);
+  const automaticBinding = source.slice(bindStart, manualStart);
+  expect(automaticBinding).toContain('if (tab.connectorBound) {');
+  expect(automaticBinding).toContain("tab.connectorBound = false;");
+  expect(automaticBinding).toContain('"browser.connector_binding_invalidated"');
+  expect(automaticBinding).toContain('reason: "main_frame_navigation"');
+});
+
 test("launcher turn control sends authenticated lifecycle events", async () => {
   let received: { authorization?: string; body?: unknown } = {};
   const server = createServer(async (request, response) => {

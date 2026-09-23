@@ -28,6 +28,17 @@ export interface BrokerToolResult {
   _meta?: unknown;
 }
 
+export type NativeCompletionState = "complete" | "blocked";
+
+export interface NativeCompletionReceipt {
+  state: NativeCompletionState;
+  summary: string;
+  completedRequirements: string[];
+  blockedRequirements: string[];
+  remainingActionableRequirements: string[];
+  blocker?: string;
+}
+
 interface PendingInvocation {
   request: BrokerToolRequest;
   resolve: (result: BrokerToolResult) => void;
@@ -70,6 +81,11 @@ interface TurnChannel {
   deliveredCallIds: Set<string>;
   invocations: Map<string, PendingInvocation>;
   waiters: Set<ToolWaiter>;
+  toolCallsQueued: number;
+  toolCallsCompleted: number;
+  requireNativeCompletionReceipt: boolean;
+  pendingNativeCompletionReceipt?: { activityId: string; receipt: NativeCompletionReceipt };
+  nativeCompletionReceipt?: { receipt: NativeCompletionReceipt; revision: number };
   compactionRequested: boolean;
   compactionResult?: BrokerToolResult;
   compactionDeliveryCount: number;
@@ -102,6 +118,8 @@ interface BrokerRequest {
     | "owner_complete"
     | "owner_completion_fence_begin"
     | "owner_completion_fence_commit"
+    | "owner_completion_receipt_status"
+    | "owner_require_completion_receipt"
     | "owner_wait_retirement"
     | "owner_revoke"
     | "owner_safe_wait_start"
@@ -110,6 +128,7 @@ interface BrokerRequest {
     | "owner_compaction_delivery_count"
     | "safe_start"
     | "safe_complete"
+    | "native_complete"
     | "activity_complete"
     | "submit_compaction_handoff";
   token?: string;
@@ -129,6 +148,12 @@ interface BrokerRequest {
   summary?: string;
   surfaceNonce?: string;
   finalAnswer?: string;
+  completionState?: NativeCompletionState;
+  completionSummary?: string;
+  completedRequirements?: string[];
+  blockedRequirements?: string[];
+  remainingActionableRequirements?: string[];
+  blocker?: string;
   contract?: "native" | "safe";
 }
 
@@ -227,6 +252,8 @@ export interface TurnBrokerOwner {
   compactionDeliveryCount(token: string): number | Promise<number>;
   beginCompletionFence(token: string): number | undefined | Promise<number | undefined>;
   commitCompletionFence(token: string, revision: number): boolean | Promise<boolean>;
+  requireNativeCompletionReceipt(token: string): void | Promise<void>;
+  nativeCompletionReceiptAccepted(token: string): boolean | Promise<boolean>;
   waitForRetirement(token: string, signal?: AbortSignal): Promise<void>;
   revoke(token: string, reason?: Error): void | Promise<void>;
 }
@@ -300,6 +327,9 @@ export class TurnBroker implements TurnBrokerOwner {
       deliveredCallIds: new Set(),
       invocations: new Map(),
       waiters: new Set(),
+      toolCallsQueued: 0,
+      toolCallsCompleted: 0,
+      requireNativeCompletionReceipt: false,
       compactionRequested: false,
       compactionDeliveryCount: 0,
       activities: new Set(),
@@ -435,8 +465,65 @@ export class TurnBroker implements TurnBrokerOwner {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
     channel.invocations.delete(callId);
-    console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size}`);
+    channel.toolCallsCompleted += 1;
+    console.info(
+      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
+    );
     invocation.resolve(result);
+  }
+
+  requireNativeCompletionReceipt(token: string): void {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    if (channel.safe) throw new Error("Zero Risk uses its explicit completion contract");
+    channel.requireNativeCompletionReceipt = true;
+  }
+
+  nativeCompletionReceiptAccepted(token: string): boolean {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    return !channel.requireNativeCompletionReceipt || channel.nativeCompletionReceipt !== undefined;
+  }
+
+  submitNativeCompletion(
+    token: string,
+    activityId: string,
+    receipt: NativeCompletionReceipt,
+  ): { accepted: true } {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    if (channel.safe) throw new Error("Zero Risk completion must use its request_id contract");
+    if (!channel.activities.has(activityId)) {
+      throw new Error("Native completion receipt must be submitted from the active MCP completion call");
+    }
+    if (channel.invocations.size > 0 || channel.deliveredCallIds.size > 0) {
+      throw new Error("Completion rejected: Codex tool invocations are still pending");
+    }
+    if (receipt.remainingActionableRequirements.length > 0) {
+      throw new Error(
+        "Completion rejected: actionable requirements remain: "
+        + receipt.remainingActionableRequirements.join("; "),
+      );
+    }
+    if (receipt.state === "blocked") {
+      if (!receipt.blocker?.trim()) {
+        throw new Error("Completion rejected: blocked completion requires a concrete blocker");
+      }
+      if (receipt.blockedRequirements.length === 0) {
+        throw new Error("Completion rejected: blocked completion must identify blocked requirements");
+      }
+    } else if (receipt.blocker !== undefined || receipt.blockedRequirements.length > 0) {
+      throw new Error("Completion rejected: complete status cannot include blocked requirements");
+    }
+    if (!receipt.summary.trim()) throw new Error("Completion rejected: completion summary must not be empty");
+    channel.pendingNativeCompletionReceipt = {
+      activityId,
+      receipt: structuredClone(receipt),
+    };
+    return { accepted: true };
   }
 
   beginCompletionFence(token: string): number | undefined {
@@ -445,6 +532,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!channel) throw new Error("turn token is invalid or expired");
     if (channel.completionCommitted) return channel.completionRevision;
     if (channel.activities.size > 0 || channel.invocations.size > 0) return undefined;
+    if (channel.requireNativeCompletionReceipt && !channel.nativeCompletionReceipt) return undefined;
     return channel.activityRevision;
   }
 
@@ -456,13 +544,14 @@ export class TurnBroker implements TurnBrokerOwner {
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
     if (channel.completionCommitted) return channel.completionRevision === revision;
+    if (channel.requireNativeCompletionReceipt && !channel.nativeCompletionReceipt) return false;
     if (channel.activityRevision !== revision
       || channel.activities.size > 0
       || channel.invocations.size > 0) return false;
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision}`,
+      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision} toolsQueued=${channel.toolCallsQueued} toolsCompleted=${channel.toolCallsCompleted}`,
     );
     return true;
   }
@@ -884,7 +973,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -906,6 +995,30 @@ export class TurnBroker implements TurnBrokerOwner {
       }
       return this.completeSafeTurn(request.token, request.finalAnswer);
     }
+    if (request.method === "native_complete") {
+      if (!request.token) throw new Error("Native completion turn_token is required");
+      if (typeof request.activityId !== "string") throw new Error("Native completion activity id is required");
+      if (request.completionState !== "complete" && request.completionState !== "blocked") {
+        throw new Error("Native completion state is invalid");
+      }
+      const strings = (value: unknown, name: string): string[] => {
+        if (!Array.isArray(value) || value.some(item => typeof item !== "string" || item.trim().length === 0)) {
+          throw new Error(`Native completion ${name} is invalid`);
+        }
+        return value;
+      };
+      return this.submitNativeCompletion(request.token, request.activityId, {
+        state: request.completionState,
+        summary: typeof request.completionSummary === "string" ? request.completionSummary : "",
+        completedRequirements: strings(request.completedRequirements ?? [], "completed requirements"),
+        blockedRequirements: strings(request.blockedRequirements ?? [], "blocked requirements"),
+        remainingActionableRequirements: strings(
+          request.remainingActionableRequirements ?? [],
+          "remaining actionable requirements",
+        ),
+        ...(typeof request.blocker === "string" ? { blocker: request.blocker } : {}),
+      });
+    }
     if (request.method === "submit_compaction_handoff") {
       if (typeof request.token !== "string" || request.token.length === 0) {
         throw new Error("compaction control token is required");
@@ -920,7 +1033,7 @@ export class TurnBroker implements TurnBrokerOwner {
       return { submitted: true };
     }
     if (request.method === "owner_status") {
-      return { protocolVersion: 5, acceptingExternalOwners: this.acceptingExternalOwners };
+      return { protocolVersion: 6, acceptingExternalOwners: this.acceptingExternalOwners };
     }
     if (request.method === "owner_register") {
       const environment = ownerEnvironment(request.environment);
@@ -976,6 +1089,15 @@ export class TurnBroker implements TurnBrokerOwner {
         throw new Error("turn completion fence revision is invalid");
       }
       return { committed: this.commitCompletionFence(request.token, request.revision!) };
+    }
+    if (request.method === "owner_require_completion_receipt") {
+      if (!request.token) throw new Error("turn owner token is required");
+      this.requireNativeCompletionReceipt(request.token);
+      return { required: true };
+    }
+    if (request.method === "owner_completion_receipt_status") {
+      if (!request.token) throw new Error("turn owner token is required");
+      return { accepted: this.nativeCompletionReceiptAccepted(request.token) };
     }
     if (request.method === "owner_wait_retirement") {
       if (!request.token) throw new Error("turn owner token is required");
@@ -1049,6 +1171,14 @@ export class TurnBroker implements TurnBrokerOwner {
         throw new Error("turn activity was already completed before this claim settled");
       }
       if (!activeChannel.activities.has(activityId)) {
+        if (activeChannel.nativeCompletionReceipt) {
+          activeChannel.nativeCompletionReceipt = undefined;
+          console.info(`[chatgpt-web] broker trace=${activeChannel.traceId} invalidated native completion receipt after new MCP activity`);
+        }
+        if (activeChannel.pendingNativeCompletionReceipt
+          && activeChannel.pendingNativeCompletionReceipt.activityId !== activityId) {
+          activeChannel.pendingNativeCompletionReceipt = undefined;
+        }
         activeChannel.activities.add(activityId);
         activeChannel.activityRevision += 1;
       }
@@ -1085,6 +1215,16 @@ export class TurnBroker implements TurnBrokerOwner {
       // A cleanup that overtakes an ambiguously delivered claim is still a causal event. Its
       // tombstone makes the delayed claim fail instead of resurrecting activity after a fence.
       channel.activityRevision += 1;
+      if (channel.pendingNativeCompletionReceipt?.activityId === request.activityId) {
+        channel.nativeCompletionReceipt = {
+          receipt: channel.pendingNativeCompletionReceipt.receipt,
+          revision: channel.activityRevision,
+        };
+        channel.pendingNativeCompletionReceipt = undefined;
+        console.info(
+          `[chatgpt-web] broker trace=${channel.traceId} accepted native completion receipt revision=${channel.activityRevision}`,
+        );
+      }
       return { completed: wasActive };
     }
 
@@ -1131,8 +1271,9 @@ export class TurnBroker implements TurnBrokerOwner {
     return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
       binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke });
       binding.channel.queuedCallIds.push(callId);
+      binding.channel.toolCallsQueued += 1;
       console.info(
-        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size}`,
+        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}`,
       );
       this.scheduleToolWaiters(binding.channel);
     });
@@ -1320,7 +1461,7 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
         + ` (${error instanceof Error ? error.message : String(error)})`,
       );
     }
-    if (status.protocolVersion !== 5) {
+    if (status.protocolVersion !== 6) {
       throw new Error(`Unsupported DEV turn-owner protocol version: ${String(status.protocolVersion)}`);
     }
     if (status.acceptingExternalOwners !== true) {
@@ -1476,6 +1617,25 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
       throw new Error("DEV turn owner received an invalid completion fence result");
     }
     return response.committed;
+  }
+
+  async requireNativeCompletionReceipt(token: string): Promise<void> {
+    const response = await callTurnBroker<{ required?: unknown }>(this.socketPath, {
+      method: "owner_require_completion_receipt",
+      token,
+    });
+    if (response.required !== true) throw new Error("DEV turn owner could not require native completion receipt");
+  }
+
+  async nativeCompletionReceiptAccepted(token: string): Promise<boolean> {
+    const response = await callTurnBroker<{ accepted?: unknown }>(this.socketPath, {
+      method: "owner_completion_receipt_status",
+      token,
+    });
+    if (typeof response.accepted !== "boolean") {
+      throw new Error("DEV turn owner received an invalid native completion receipt status");
+    }
+    return response.accepted;
   }
 
   async waitForRetirement(token: string, signal?: AbortSignal): Promise<void> {

@@ -6,7 +6,7 @@ import type {
 } from "../../types";
 import { extractChatGptCompactionSourceRevision } from "./environment";
 import type { ChatGptBrowserWorker } from "./browser-worker";
-import { ChatGptCompactionHandoffAccepted } from "./adapter-error";
+import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "./adapter-error";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 import type { ChatGptWebCapabilities } from "./model";
 import {
@@ -129,6 +129,19 @@ function currentToolResults(
 }
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 5 * 60_000;
+export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 15_000;
+
+function activeCompactionSourceStalledError(timeoutMs: number): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    `The active ChatGPT source did not settle within ${timeoutMs}ms after automatic compaction started`,
+    {
+      status: 409,
+      errorType: "invalid_request_error",
+      code: "compaction_source_stalled",
+      retryable: true,
+    },
+  );
+}
 
 function boundedCompactionTimeout(timeoutMs: number): number {
   return Math.min(timeoutMs, MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
@@ -164,6 +177,7 @@ export async function settleActiveCompactionSource(
   source: ChatGptTurnSession,
   broker: TurnBroker,
   signal?: AbortSignal,
+  sourceSettleGraceMs = ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS,
 ): Promise<{ answer: string; compactionInstructionDelivered: boolean }> {
   return source.runExclusive(async () => {
     if (signal?.aborted) {
@@ -181,6 +195,7 @@ export async function settleActiveCompactionSource(
       );
     }
     let token: string | undefined;
+    let sourceSettleTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       token = await source.runtime.token;
       broker.requestCompaction(token, interruptedByActiveCompaction());
@@ -194,14 +209,39 @@ export async function settleActiveCompactionSource(
         source.runtime.externalProgress.recordToolResult();
         source.markResultDelivered(request.callId);
       }
-      const browserOutcome = await withCompactionAbort(source.browserOutcome, signal);
+
+      // Automatic compaction supersedes the old Web response. Waiting the entire five-minute
+      // handoff deadline for that response to expose a terminal DOM boundary strands Codex on
+      // "Context automatically compacting" when ChatGPT visually stops but its completion DOM
+      // never settles. Give the retained source a short grace period; after that, cancel only the
+      // superseded source so the caller can retire it and rebuild the checkpoint from canonical
+      // Codex history on a fresh browser surface.
+      const sourceStalled = new Promise<never>((_resolve, reject) => {
+        sourceSettleTimer = setTimeout(() => {
+          const error = activeCompactionSourceStalledError(sourceSettleGraceMs);
+          console.warn(
+            `[chatgpt-web] active compaction source exceeded settle grace (${sourceSettleGraceMs}ms); cancelling retained source and rebuilding compaction`,
+          );
+          source.cancel(error);
+          reject(error);
+        }, sourceSettleGraceMs);
+        sourceSettleTimer.unref?.();
+      });
+
+      const browserOutcome = await withCompactionAbort(
+        Promise.race([source.browserOutcome, sourceStalled]),
+        signal,
+      );
       if (browserOutcome.type === "error") throw browserOutcome.error;
       const compactionInstructionDelivered = broker.compactionDeliveryCount(token) > 0;
       // The one structured checkpoint message reuses this exact retained tab. It must not race the
       // helper's /turn/end handshake for the response that consumed the canonical tool results.
       // `requestCompaction` leaves those results untouched and only intercepts a later tool call, so
       // a zero delivery count proves that this is an ordinary publishable terminal response.
-      await withCompactionAbort(source.physicalSettlement, signal);
+      await withCompactionAbort(
+        Promise.race([source.physicalSettlement, sourceStalled]),
+        signal,
+      );
       return {
         answer: browserOutcome.answer,
         compactionInstructionDelivered,
@@ -210,6 +250,7 @@ export async function settleActiveCompactionSource(
       if (signal?.aborted) source.cancel(abortReason(signal));
       throw error;
     } finally {
+      if (sourceSettleTimer) clearTimeout(sourceSettleTimer);
       if (token) await broker.revoke(token);
     }
   });

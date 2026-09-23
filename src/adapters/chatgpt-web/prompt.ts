@@ -512,8 +512,19 @@ export function compileChatGptWebPrompt(
       "Use actual Codex Native results as evidence for local observations and effects.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
+      "Treat every explicit deliverable in the latest active user request as part of one completion condition. If the request contains multiple tasks, continue autonomously from one unfinished task to the next without asking whether to proceed.",
+      "An intermediate implementation milestone, focused test pass, checkpoint, commit, partial success, or newly discovered remaining-work list is not completion of a larger request unless the user explicitly asked to stop there.",
+      "Before producing the final answer, re-check the latest active user request against work actually completed and verified through the available evidence. If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.",
+      "Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution with the available tools or environment; report that blocker precisely rather than treating partial progress as success.",
+      ...(!manualControl ? [
+        "For Full Harness execution, the mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete. Do not emit a final answer until that control call has accepted a receipt with remaining_actionable_requirements empty. If it rejects the receipt, continue working.",
+      ] : []),
       "Continue using the available tools until the requested work is complete and verified.",
-      "Write the user-facing final answer only after the last required tool result has settled. Do not call another tool after beginning that final answer.",
+      ...(!manualControl ? [
+        "Write the user-facing final answer only after the last required tool result has settled, codex.control.turn_complete has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
+      ] : [
+        "Write the user-facing final answer only after the last required tool result has settled and the full-request completion check above passes.",
+      ]),
     ]
     : [
       `This is ChatGPT Web ${mode.displayLabel} with no Codex Native bridge to the user's local computer attached to this response. This restriction applies only to local Codex files, commands, processes, and computer mutations.`,
@@ -554,13 +565,19 @@ export function compileChatGptWebPrompt(
       "The outer bridge removes this marker and checkpoint from the user-facing stream. Never refer to the checkpoint in the visible answer.",
     ]
     : [];
-  const manualControlContract = manualControl
+  const turnControlContract = manualControl
     ? [
       "<codex_zero_risk_request_json>",
       JSON.stringify({ request_id: turnToken }),
       "</codex_zero_risk_request_json>",
     ]
-    : [];
+    : mode.localTools
+      ? [
+        "<codex_native_turn_json>",
+        JSON.stringify({ turn_token: turnToken }),
+        "</codex_native_turn_json>",
+      ]
+      : [];
   const transportResume = parsed._compactionRequest
     ? manualControl
       ? [
@@ -582,7 +599,9 @@ export function compileChatGptWebPrompt(
     : mode.localTools
     ? [
       "<codex_transport_resume>",
-      `The task context is complete. Pass turn_token ${turnToken} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`,
+      "The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.",
+      "Immediately before finalizing, compare the entire latest active user request with the work completed in this response. If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.",
+      "When all independently actionable deliverables are complete, call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
       "</codex_transport_resume>",
     ]
     : [
@@ -631,7 +650,7 @@ export function compileChatGptWebPrompt(
           ...skillContract,
           ...transportContract,
           ...outputControlContract,
-          ...manualControlContract,
+          ...turnControlContract,
           ...checkpointContract,
           answerContract,
           ...transportResume,
@@ -668,7 +687,7 @@ export function compileChatGptWebPrompt(
       ...skillContract,
       ...transportContract,
       ...outputControlContract,
-      ...manualControlContract,
+      ...turnControlContract,
       ...checkpointContract,
       answerContract,
       "<codex_context_json>",

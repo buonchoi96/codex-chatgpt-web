@@ -71,11 +71,21 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.");
   expect(transportOnly).toContain("After a deterministic tool failure, update the working hypothesis from that result");
   expect(transportOnly).toContain("do not repeat the same call unless its inputs or observable state changed.");
+  expect(transportOnly).toContain("Treat every explicit deliverable in the latest active user request as part of one completion condition.");
+  expect(transportOnly).toContain("An intermediate implementation milestone, focused test pass, checkpoint, commit, partial success, or newly discovered remaining-work list is not completion");
+  expect(transportOnly).toContain("If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.");
+  expect(transportOnly).toContain("Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution");
+  expect(transportOnly).toContain("mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete");
+  expect(transportOnly).toContain("remaining_actionable_requirements empty");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
-  expect(transportOnly).toContain("Write the user-facing final answer only after the last required tool result has settled.");
-  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
+  expect(transportOnly).toContain("codex.control.turn_complete has accepted the full-task receipt");
+  expect(transportOnly).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
+  expect(transportOnly).toContain("The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.");
+  expect(transportOnly).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
+  expect(transportOnly).toContain("If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.");
+  expect(transportOnly).toContain("call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] before writing the final answer");
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
-  expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory|codex\.control\.turn_complete/);
+  expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory/);
   expect(transportOnly).not.toMatch(/expired|invalid|revoked|blocked|safety|security layer|permission gate/i);
   expect(compiled.text).not.toContain("CODEX_INTERNAL_CONTEXT_COMPACT");
   expect(compiled.text).not.toContain("internally compacts this response");
@@ -89,7 +99,8 @@ test("Pro preserves the same native Codex delegation contract as Extra High", ()
 
   for (const compiled of [pro, extraHigh]) {
     expect(compiled.text).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
-    expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every Codex Native call in this response`);
+    expect(compiled.text).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
+    expect(compiled.text).toContain("Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response");
     expect(compiled.text).not.toContain("Complete this task directly in the current parent response.");
     expect(compiled.text).not.toContain("Do not create, spawn, delegate to, or wait on sub-agents");
     expect(compiled.text).not.toContain("Use non-agent tools directly instead.");
@@ -143,6 +154,8 @@ test("Bigger Context sends six semantic record envelopes and starts work from th
   ))).toEqual(["developer", "user", "assistant", "user"]);
   expect(compiled.multipart!.parts.join("\n")).not.toContain(token);
   expect(compiled.multipart!.commit.match(new RegExp(token, "g"))).toHaveLength(1);
+  expect(compiled.multipart!.commit).toContain("Treat every explicit deliverable in the latest active user request as part of one completion condition.");
+  expect(compiled.multipart!.commit).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
   expect(compiled.text).toBe(compiled.multipart!.commit);
   expect(compiled.text).not.toContain("<codex_context_json>");
 

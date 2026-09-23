@@ -1,0 +1,145 @@
+name: Publish main Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - docs/testing/evidence/windows-main-release.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-main-windows
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          Push-Location launcher
+          try {
+            bun install --frozen-lockfile
+          } finally {
+            Pop-Location
+          }
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and launcher
+        shell: pwsh
+        run: bun run verify
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: bun run app:package
+
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\\codex-e-drive"
+
+      - name: Smoke packaged Windows installer
+        shell: pwsh
+        run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
+
+      - name: Prepare release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem launcher/artifacts -Filter "*-win-x64.exe" -File
+          if ($installer.Count -ne 1) {
+            throw "Expected exactly one Windows installer; found $($installer.Count)"
+          }
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item -LiteralPath $installer[0].FullName -Destination release-assets
+          $hash = (Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer[0].Name)" | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding ascii
+          "installer=$($installer[0].Name)" >> $env:GITHUB_OUTPUT
+          Get-Content release-assets/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-main-${{ github.sha }}
+          path: |
+            release-assets/*.exe
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish custom Windows release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v5.0.8-custom-windows
+        run: |
+          set -euo pipefail
+          installer="release-assets/${{ steps.assets.outputs.installer }}"
+          test -f "$installer"
+          test -f release-assets/SHA256SUMS.txt
+
+          cat > release-notes.md <<EOF
+          ## Codex Web GPT v5.0.8 — Custom Windows build
+
+          Rebuilt from the current 'main' branch at commit '${GITHUB_SHA}'.
+
+          Validation completed on GitHub Actions Windows:
+          - 'bun run verify'
+          - 'bun run app:package'
+          - 'bun run app:smoke'
+          - AVX2-independent Bun 1.4.0 runtime prepared before packaging
+
+          Installer:
+          - '${{ steps.assets.outputs.installer }}'
+          - 'SHA256SUMS.txt' contains its SHA-256 checksum.
+
+          This build includes:
+          - stale retained-connector recovery;
+          - compaction handoff protection so accepted automatic compaction does not press Stop answering;
+          - ordinary prompt send budget raised to 120 seconds;
+          - 30-second send-enable grace and 60-second large composer insertion budget;
+          - late DOM submission-evidence recovery without replaying an ambiguous prompt;
+          - previously merged launcher/runtime hardening.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "$installer" release-assets/SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" \
+              "$installer" release-assets/SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --notes-file release-notes.md
+          fi
+

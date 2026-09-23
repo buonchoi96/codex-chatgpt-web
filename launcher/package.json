@@ -88,6 +88,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "assets/installer.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true

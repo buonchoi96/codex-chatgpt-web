@@ -12,6 +12,7 @@ import {
   type BrokerToolResult,
 } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint } from "../src/config";
+import { CODEX_COMPLETION_CONTROL_WIRE_NAME, chatGptMcpInstructions } from "../src/adapters/chatgpt-web/mcp-server";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const testTempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
@@ -41,6 +42,24 @@ function toolResult(value: Record<string, unknown>): BrokerToolResult {
     structuredContent: value,
   };
 }
+
+test("MCP instructions keep native multi-task execution active until the full request is complete", () => {
+  const native = chatGptMcpInstructions("native");
+  expect(native).toContain("every explicit deliverable in the active Codex request");
+  expect(native).toContain("Do not stop after one successful subtask");
+  expect(native).toContain("continue to the next unfinished requested requirement without asking whether to proceed");
+  expect(native).toContain("If any actionable explicit deliverable remains, continue using Codex Native tools");
+  expect(native).toContain("mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete");
+  expect(native).toContain("remaining_actionable_requirements is empty");
+  expect(native).toContain("If it is rejected, continue the task");
+  expect(native).toContain("Only stop early for a genuine external blocker");
+
+  const safe = chatGptMcpInstructions("safe");
+  expect(safe).toContain("begin with codex_turn_start using the request_id");
+  expect(safe).toContain("send the complete answer with codex_turn_complete");
+  expect(safe).not.toContain("turn_token");
+});
+
 
 describe("Zero Risk turn broker lifecycle", () => {
   test("requires both Launcher Sent and connector start before tools can run", async () => {
@@ -264,6 +283,132 @@ describe("Zero Risk turn broker lifecycle", () => {
       await broker.close();
     }
   }, 15_000);
+});
+
+describe("Full Harness native completion receipt", () => {
+  test("rejects partial completion, invalidates a receipt on later activity, and fences only the final receipt", async () => {
+    const socketPath = endpoint("native-completion-receipt");
+    const broker = TurnBroker.forSocket(socketPath);
+    const token = await broker.register(environment(), undefined, "native-completion-receipt");
+    broker.requireNativeCompletionReceipt(token);
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["src/cli.ts", "mcp", "--contract", "native", "--broker-socket", socketPath],
+      cwd: process.cwd(),
+      stderr: "pipe",
+    });
+    const client = new Client({ name: "codex-native-completion-test", version: "1.0.0" });
+    try {
+      await client.connect(transport);
+      expect(client.getInstructions()).toContain("wire_name codex.control.turn_complete");
+      const listed = await client.listTools();
+      expect(listed.tools.some(tool => tool.name === "codex_turn_complete")).toBe(false);
+      expect(listed.tools.some(tool => tool.name === "codex_tool_call")).toBe(true);
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(false);
+      expect(broker.beginCompletionFence(token)).toBeUndefined();
+
+      const partial = await client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_COMPLETION_CONTROL_WIRE_NAME,
+          arguments: {
+            state: "complete",
+            summary: "only the first implementation step is done",
+            completed_requirements: ["step A"],
+            blocked_requirements: [],
+            remaining_actionable_requirements: ["step B", "final regression"],
+          },
+        },
+      });
+      expect(partial.isError).toBe(true);
+      expect(JSON.stringify(partial.content)).toContain("Completion rejected: actionable requirements remain");
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(false);
+
+      const accepted = await client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_COMPLETION_CONTROL_WIRE_NAME,
+          arguments: {
+            state: "complete",
+            summary: "all requested requirements are complete and verified",
+            completed_requirements: ["step A", "step B", "final regression"],
+            blocked_requirements: [],
+            remaining_actionable_requirements: [],
+          },
+        },
+      });
+      expect(accepted.structuredContent).toEqual({ accepted: true });
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(true);
+
+      // Any later MCP activity proves the task continued after certification and invalidates it.
+      await client.callTool({
+        name: "codex_tool_inventory",
+        arguments: { turn_token: token, query: "nothing", limit: 1, include_schema: false },
+      });
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(false);
+      expect(broker.beginCompletionFence(token)).toBeUndefined();
+
+      const final = await client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_COMPLETION_CONTROL_WIRE_NAME,
+          arguments: {
+            state: "complete",
+            summary: "all requested requirements remain complete after final verification",
+            completed_requirements: ["step A", "step B", "final regression"],
+            blocked_requirements: [],
+            remaining_actionable_requirements: [],
+          },
+        },
+      });
+      expect(final.structuredContent).toEqual({ accepted: true });
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(true);
+      const revision = broker.beginCompletionFence(token);
+      expect(revision).toBeNumber();
+      expect(broker.commitCompletionFence(token, revision!)).toBe(true);
+    } finally {
+      await client.close().catch(() => {});
+      broker.revoke(token);
+      await broker.close();
+    }
+  }, 30_000);
+
+  test("blocked receipts require a concrete blocker and exact blocked requirements", async () => {
+    const socketPath = endpoint("native-blocked-receipt");
+    const broker = TurnBroker.forSocket(socketPath);
+    const token = await broker.register(environment(), undefined, "native-blocked-receipt");
+    broker.requireNativeCompletionReceipt(token);
+    try {
+      const claimed = await callTurnBroker<{ bindingId: string; activityId: string }>(socketPath, {
+        method: "claim",
+        token,
+        contract: "native",
+        activityId: "activity_native_blocked_receipt_0123456789",
+      });
+      await expect(callTurnBroker(socketPath, {
+        method: "native_complete",
+        token,
+        activityId: claimed.activityId,
+        completionState: "blocked",
+        completionSummary: "independent work completed",
+        completedRequirements: ["independent tooling"],
+        blockedRequirements: ["MMD runtime render"],
+        remainingActionableRequirements: [],
+      })).rejects.toThrow("blocked completion requires a concrete blocker");
+      await callTurnBroker(socketPath, {
+        method: "activity_complete",
+        token,
+        activityId: claimed.activityId,
+      });
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(false);
+    } finally {
+      broker.revoke(token);
+      await broker.close();
+    }
+  });
 });
 
 describe("Zero Risk public MCP ABI", () => {

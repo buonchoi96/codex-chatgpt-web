@@ -1,0 +1,27 @@
+name: Cleanup non-main branches
+
+on:
+  push:
+    branches:
+      - upgrade/upstream-v6.0.0
+    paths:
+      - .github/workflows/one-shot-upstream-windows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Delete non-main branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin --delete vendor/eaf-base
+          git push origin --delete vendor/upstream-v6.0.0
+          git push origin --delete upgrade/upstream-v6.0.0
