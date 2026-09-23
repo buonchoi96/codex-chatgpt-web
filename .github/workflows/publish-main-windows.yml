@@ -144,7 +144,7 @@ jobs:
                 fi
 
                 if gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"; then
-                  for verify_attempt in 1 2 3 4 5; do
+                  for _ in 1 2 3 4 5; do
                     still_present="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
                       --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
                     if [[ -z "$still_present" ]]; then
