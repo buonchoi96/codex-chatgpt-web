@@ -30,6 +30,8 @@ type HelperMessage =
   | { type: "event"; id: string; event: "multipart_stage_acknowledged"; stageIndex: number }
   | { type: "event"; id: string; event: "completion_fence_begin"; requestId: number }
   | { type: "event"; id: string; event: "completion_fence_commit"; requestId: number; revision: number }
+  | { type: "event"; id: string; event: "completion_receipt_status"; requestId: number }
+  | { type: "event"; id: string; event: "completion_recovery_token"; requestId: number }
   | { type: "event"; id: string; event: "prepared_selected"; reused: boolean }
   | { type: "event"; id: string; event: "luna_checkpoint"; checkpoint: ChatGptLunaCheckpoint; answerHash: string }
   | { type: "result"; id: string; text: string }
@@ -93,6 +95,12 @@ function parseHelperMessage(line: string): HelperMessage {
         requestId: message.requestId as number,
         revision: message.revision as number,
       };
+    }
+    if (event === "completion_receipt_status" || event === "completion_recovery_token") {
+      if (!Number.isSafeInteger(message.requestId) || (message.requestId as number) <= 0) {
+        throw new Error("Launcher browser helper completion receipt request id is invalid");
+      }
+      return { type: "event", id: message.id, event, requestId: message.requestId as number };
     }
     if (event === "luna_checkpoint") {
       if (typeof message.answerHash !== "string" || !/^[a-f0-9]{64}$/.test(message.answerHash)) {
@@ -227,6 +235,12 @@ export class LauncherBrowserHelperClient {
         "Launcher browser helper does not support the MCP completion fence; update or restart the launcher",
       );
     }
+    if ((turn.completionFence?.receiptReady || turn.completionFence?.recoveryTurnToken)
+      && !this.helperFeatures.has("completion-receipt")) {
+      throw new Error(
+        "Launcher browser helper does not support completion receipt recovery; update or restart the launcher",
+      );
+    }
     return await new Promise<string>((resolveResult, rejectResult) => {
         if (this.pending.has(turn.traceId)) {
           rejectResult(new Error(`Duplicate launcher browser turn: ${turn.traceId}`));
@@ -293,6 +307,9 @@ export class LauncherBrowserHelperClient {
             ...(turn.compaction ? { compaction: true } : {}),
             ...(turn.captureLunaCheckpoint ? { captureLunaCheckpoint: true } : {}),
             ...(turn.externalProgress ? { externalProgress: true } : {}),
+            ...((turn.completionFence?.receiptReady || turn.completionFence?.recoveryTurnToken)
+              ? { completionReceipt: true }
+              : {}),
           },
         })
           // Only mirror once the run frame is on the wire, so the helper never sees progress for a
@@ -473,6 +490,54 @@ export class LauncherBrowserHelperClient {
             id: message.id,
             requestId: message.requestId,
             committed,
+          });
+        }).catch(error => this.abortWithLocalFailure(
+          message.id,
+          error instanceof Error ? error : new Error(String(error)),
+          pending,
+        ));
+      }
+      else if (message.event === "completion_receipt_status") {
+        const receiptReady = pending.turn.completionFence?.receiptReady;
+        if (!receiptReady) {
+          this.abortWithLocalFailure(
+            message.id,
+            new Error("Launcher browser helper requested completion receipt status for a turn without receipt control"),
+            pending,
+          );
+          return;
+        }
+        void receiptReady().then(accepted => {
+          if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
+          return this.send({
+            type: "completion_receipt_status_ack",
+            id: message.id,
+            requestId: message.requestId,
+            accepted,
+          });
+        }).catch(error => this.abortWithLocalFailure(
+          message.id,
+          error instanceof Error ? error : new Error(String(error)),
+          pending,
+        ));
+      }
+      else if (message.event === "completion_recovery_token") {
+        const recoveryTurnToken = pending.turn.completionFence?.recoveryTurnToken;
+        if (!recoveryTurnToken) {
+          this.abortWithLocalFailure(
+            message.id,
+            new Error("Launcher browser helper requested a recovery token for a turn without recovery control"),
+            pending,
+          );
+          return;
+        }
+        void recoveryTurnToken().then(turnToken => {
+          if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
+          return this.send({
+            type: "completion_recovery_token_ack",
+            id: message.id,
+            requestId: message.requestId,
+            turnToken,
           });
         }).catch(error => this.abortWithLocalFailure(
           message.id,

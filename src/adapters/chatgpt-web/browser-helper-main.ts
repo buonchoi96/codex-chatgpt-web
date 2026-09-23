@@ -36,6 +36,7 @@ interface RunMessage {
     compaction?: boolean;
     captureLunaCheckpoint?: boolean;
     externalProgress?: boolean;
+    completionReceipt?: boolean;
   };
 }
 
@@ -74,6 +75,8 @@ type InputMessage = RunMessage
   | { type: "send_activation_ack"; id: string }
   | { type: "completion_fence_begin_ack"; id: string; requestId: number; revision: number | null }
   | { type: "completion_fence_commit_ack"; id: string; requestId: number; committed: boolean }
+  | { type: "completion_receipt_status_ack"; id: string; requestId: number; accepted: boolean }
+  | { type: "completion_recovery_token_ack"; id: string; requestId: number; turnToken: string }
   | { type: "progress"; id: string; snapshot: ChatGptExternalTurnProgressSnapshot }
   | { type: "abort"; id: string; reason?: "compaction_handoff_accepted" }
   | { type: "shutdown" };
@@ -113,6 +116,16 @@ const completionFenceCommitWaiters = new Map<string, {
   resolve: (committed: boolean) => void;
   reject: (error: Error) => void;
 }>();
+const completionReceiptStatusWaiters = new Map<string, {
+  requestId: number;
+  resolve: (accepted: boolean) => void;
+  reject: (error: Error) => void;
+}>();
+const completionRecoveryTokenWaiters = new Map<string, {
+  requestId: number;
+  resolve: (turnToken: string) => void;
+  reject: (error: Error) => void;
+}>();
 let completionFenceRequestId = 0;
 let shuttingDown = false;
 let shutdownPromise: Promise<void> | undefined;
@@ -141,6 +154,14 @@ function requestShutdown(): Promise<void> {
     waiter.reject(new DOMException("Browser helper is shutting down", "AbortError"));
   }
   completionFenceCommitWaiters.clear();
+  for (const waiter of completionReceiptStatusWaiters.values()) {
+    waiter.reject(new DOMException("Browser helper is shutting down", "AbortError"));
+  }
+  completionReceiptStatusWaiters.clear();
+  for (const waiter of completionRecoveryTokenWaiters.values()) {
+    waiter.reject(new DOMException("Browser helper is shutting down", "AbortError"));
+  }
+  completionRecoveryTokenWaiters.clear();
   input.close();
   void closeChatGptBrowserWorkers().then(
     () => {
@@ -185,6 +206,12 @@ async function run(message: RunMessage): Promise<void> {
   }
   if (message.turn.externalProgress !== undefined && typeof message.turn.externalProgress !== "boolean") {
     throw new Error("Browser helper external progress flag is invalid");
+  }
+  if (message.turn.completionReceipt !== undefined && typeof message.turn.completionReceipt !== "boolean") {
+    throw new Error("Browser helper completion receipt flag is invalid");
+  }
+  if (message.turn.completionReceipt && !message.turn.externalProgress) {
+    throw new Error("Browser helper completion receipt control requires external progress");
   }
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -259,6 +286,34 @@ async function run(message: RunMessage): Promise<void> {
             reject(new Error("Browser helper could not commit the broker completion fence"));
           }
         }),
+        ...(message.turn.completionReceipt ? {
+          receiptReady: () => new Promise<boolean>((resolve, reject) => {
+            if (completionReceiptStatusWaiters.has(message.id)) {
+              reject(new Error("Browser helper completion receipt status request is already pending"));
+              return;
+            }
+            completionFenceRequestId += 1;
+            const requestId = completionFenceRequestId;
+            completionReceiptStatusWaiters.set(message.id, { requestId, resolve, reject });
+            if (!writeProtocol({ type: "event", id: message.id, event: "completion_receipt_status", requestId })) {
+              completionReceiptStatusWaiters.delete(message.id);
+              reject(new Error("Browser helper could not request completion receipt status"));
+            }
+          }),
+          recoveryTurnToken: () => new Promise<string>((resolve, reject) => {
+            if (completionRecoveryTokenWaiters.has(message.id)) {
+              reject(new Error("Browser helper completion recovery token request is already pending"));
+              return;
+            }
+            completionFenceRequestId += 1;
+            const requestId = completionFenceRequestId;
+            completionRecoveryTokenWaiters.set(message.id, { requestId, resolve, reject });
+            if (!writeProtocol({ type: "event", id: message.id, event: "completion_recovery_token", requestId })) {
+              completionRecoveryTokenWaiters.delete(message.id);
+              reject(new Error("Browser helper could not request the completion recovery token"));
+            }
+          }),
+        } : {}),
       },
     } : {}),
     onHeartbeat: () => writeProtocol({ type: "event", id: message.id, event: "heartbeat" }),
@@ -336,6 +391,12 @@ async function run(message: RunMessage): Promise<void> {
     const commitWaiter = completionFenceCommitWaiters.get(message.id);
     completionFenceCommitWaiters.delete(message.id);
     commitWaiter?.reject(new DOMException("Browser helper turn ended before completion-fence commit", "AbortError"));
+    const receiptWaiter = completionReceiptStatusWaiters.get(message.id);
+    completionReceiptStatusWaiters.delete(message.id);
+    receiptWaiter?.reject(new DOMException("Browser helper turn ended before completion receipt status", "AbortError"));
+    const tokenWaiter = completionRecoveryTokenWaiters.get(message.id);
+    completionRecoveryTokenWaiters.delete(message.id);
+    tokenWaiter?.reject(new DOMException("Browser helper turn ended before completion recovery token", "AbortError"));
     abortControllers.delete(message.id);
     turnProgress.delete(message.id);
   }
@@ -464,6 +525,28 @@ input.on("line", line => {
     if (!waiter || waiter.requestId !== message.requestId) return;
     completionFenceCommitWaiters.delete(message.id);
     waiter.resolve(message.committed);
+  } else if (message.type === "completion_receipt_status_ack") {
+    if (!Number.isSafeInteger(message.requestId) || message.requestId <= 0
+      || typeof message.accepted !== "boolean") {
+      writeProtocol({ type: "error", id: message.id, message: "Browser helper completion receipt status is invalid" });
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
+    const waiter = completionReceiptStatusWaiters.get(message.id);
+    if (!waiter || waiter.requestId !== message.requestId) return;
+    completionReceiptStatusWaiters.delete(message.id);
+    waiter.resolve(message.accepted);
+  } else if (message.type === "completion_recovery_token_ack") {
+    if (!Number.isSafeInteger(message.requestId) || message.requestId <= 0
+      || typeof message.turnToken !== "string" || message.turnToken.length < 20 || message.turnToken.length > 256) {
+      writeProtocol({ type: "error", id: message.id, message: "Browser helper completion recovery token is invalid" });
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
+    const waiter = completionRecoveryTokenWaiters.get(message.id);
+    if (!waiter || waiter.requestId !== message.requestId) return;
+    completionRecoveryTokenWaiters.delete(message.id);
+    waiter.resolve(message.turnToken);
   } else if (message.type === "progress") {
     // Progress is meaningful only for a turn this helper is currently running. Ignore every other
     // id so the mirror map remains owned by active turn lifecycles.
@@ -494,6 +577,12 @@ input.on("line", line => {
     const commitWaiter = completionFenceCommitWaiters.get(message.id);
     completionFenceCommitWaiters.delete(message.id);
     commitWaiter?.reject(new DOMException("Browser helper turn aborted before completion-fence commit", "AbortError"));
+    const receiptWaiter = completionReceiptStatusWaiters.get(message.id);
+    completionReceiptStatusWaiters.delete(message.id);
+    receiptWaiter?.reject(new DOMException("Browser helper turn aborted before completion receipt status", "AbortError"));
+    const tokenWaiter = completionRecoveryTokenWaiters.get(message.id);
+    completionRecoveryTokenWaiters.delete(message.id);
+    tokenWaiter?.reject(new DOMException("Browser helper turn aborted before completion recovery token", "AbortError"));
   }
   else if (message.type === "shutdown") {
     void requestShutdown();
@@ -535,4 +624,4 @@ process.once("SIGTERM", () => {
 });
 
 // Advertise the optional frames this helper understands so the daemon can negotiate them explicitly.
-writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "multipart-stage-ack", "skill-attachments"] });
+writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "completion-receipt", "multipart-stage-ack", "skill-attachments"] });

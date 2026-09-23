@@ -4052,6 +4052,13 @@ test("the daemon prefers the browser helper that shipped beside its own entrypoi
   expect(client).toContain('this.helperFeatures.has("progress")');
   expect(client).toContain('this.helperFeatures.has("tool-boundary-ack")');
   expect(client).toContain('this.helperFeatures.has("completion-fence")');
+  expect(client).toContain('this.helperFeatures.has("completion-receipt")');
+  expect(client).toContain('message.event === "completion_receipt_status"');
+  expect(client).toContain('message.event === "completion_recovery_token"');
+  expect(helper).toContain('event: "completion_receipt_status"');
+  expect(helper).toContain('event: "completion_recovery_token"');
+  expect(helper).toContain("receiptReady:");
+  expect(helper).toContain("recoveryTurnToken:");
   expect(helper).toMatch(/message\.type === "run"/);
   expect(helper).toContain("Browser helper received an unsupported message type");
 
