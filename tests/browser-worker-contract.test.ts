@@ -1905,7 +1905,7 @@ test("production connector diagnostics distinguish an existing DEV connector", a
   expect(message).toContain(`separate connector named ${JSON.stringify(CHATGPT_CONNECTOR_NAME)}`);
 });
 
-test("connector catalog refresh stays fail-closed for absent, legacy, and exact menu evidence", async () => {
+test("connector catalog refresh treats an empty fresh menu as stale while identity mismatches stay fail-closed", async () => {
   const prototype = ChatGptBrowserWorker.prototype as unknown as {
     clearChatGptComposerState(page: unknown): Promise<void>;
     selectConnector(page: unknown, capture?: unknown, refresh?: boolean): Promise<unknown>;
@@ -1961,13 +1961,9 @@ test("connector catalog refresh stays fail-closed for absent, legacy, and exact 
     throw new Error("Expected connector selection to fail with an Error");
   }
   expect(missingMenuError).toMatchObject({
-    name: "ChatGptWebAdapterError",
-    status: 424,
-    errorType: "connector_error",
-    code: "connector_not_found",
-    retryable: false,
+    name: "ChatGptConnectorCatalogStaleError",
   });
-  expect(missingMenuError.message).toContain(`after ${MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS}`);
+  expect(missingMenuError.message).toContain("connector catalog is missing");
   await expect(run(["Codex Native"])).rejects.toThrow("Legacy ChatGPT connector");
   await expect(run([CHATGPT_CONNECTOR_NAME])).rejects.toThrow("exact row was not visible");
 });

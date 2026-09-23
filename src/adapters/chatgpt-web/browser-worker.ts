@@ -3449,10 +3449,13 @@ export class ChatGptBrowserWorker {
           }
           if (
             catalogRefreshAvailable
-            && visibleRows.length > 0
             && !visibleRows.includes(this.config.appName)
             && attemptBudget.triggerAttempts < MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS
           ) {
+            // A newly-created ChatGPT surface can expose an empty connector menu while the
+            // app catalog is still hydrating. Treat both "menu opened without this app" and
+            // "menu has no rows yet" as one bounded stale-catalog condition so the existing
+            // refresh path gets exactly one chance to hydrate the fresh document.
             throw new ChatGptConnectorCatalogStaleError(
               this.config.appName,
               attemptBudget.triggerAttempts,

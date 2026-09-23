@@ -1281,6 +1281,10 @@ export function createChatGptWebAdapter(
                   session.runtime.externalProgress.recordToolResult();
                   session.markResultDelivered(message.toolCallId);
                 }
+                // Retry budgeting is for consecutive browser failures. A successfully journaled
+                // native tool result proves the task made forward progress, so earlier recovery
+                // attempts must not accumulate until a long-running turn is exhausted.
+                if (results.length > 0) chatGptWebTurnRetryPolicy.clear(retryKey);
               }
             } else if (session.outstanding().length > 0) {
               throw new Error("Read-only ChatGPT Web runtime cannot own local tool calls");
