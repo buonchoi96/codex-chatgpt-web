@@ -86,8 +86,11 @@ test("missing native completion receipt gets a bounded same-turn continuation pr
   );
   expect(prompt).toContain("without an accepted Full Harness completion receipt");
   expect(prompt).toContain("continue every remaining independently actionable requirement");
-  expect(prompt).toContain("codex_tool_call");
-  expect(prompt).toContain("codex.control.turn_complete");
+  expect(prompt).toContain("dedicated codex_turn_complete tool");
+  expect(prompt).toContain("state=complete");
+  expect(prompt).toContain("state=blocked");
+  expect(prompt).toContain("safety-blocked required tool");
+  expect(prompt).not.toContain("wire_name codex.control.turn_complete");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("recovery 1/2");
   expect(prompt).toContain(JSON.stringify({ turn_token: turnToken }));
