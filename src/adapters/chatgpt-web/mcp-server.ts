@@ -974,7 +974,6 @@ export async function runChatGptMcpServer(options: {
       ),
     );
 
-  if (contract === "native") {
     server.registerTool(
       "codex_readonly_tool_call",
     {
@@ -1009,7 +1008,7 @@ export async function runChatGptMcpServer(options: {
       title: "Control Windows through Codex",
       description: afterSafeStart(
         contract,
-        "Invoke an exact Windows Computer Use tool that was loaded into the current outer Codex turn. Use codex_readonly_tool_call for observation-only operations; use this tool for desktop interaction actions.",
+        "Invoke an exact Windows Computer Use tool that was loaded into the current outer Codex turn. Use codex_windows_computer_use_observe for observation-only operations; use this tool for desktop interaction actions.",
       ),
       inputSchema: {
         ...turnReferenceInput(contract),
