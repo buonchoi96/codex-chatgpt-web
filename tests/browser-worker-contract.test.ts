@@ -305,7 +305,7 @@ test("a stale retained connector pill falls back to a fresh @codex selection bef
 test("launcher lease keeps conversation reuse distinct from connector reuse", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   expect(workerSource).toContain("const reuseConnector = reused && lease.connectorBound === true;");
-  expect(workerSource).toContain("return await this.runBrowserTurn(turn, surfaceId, undefined, reused, reuseConnector);");
+  expect(workerSource).toContain("return await this.runBrowserTurn(turn, surfaceId, undefined, reused, reuseConnector, lease.trackUsage === true);");
 });
 
 test("browser turns run concurrently up to the five-tab limit", async () => {

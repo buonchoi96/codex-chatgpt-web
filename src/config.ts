@@ -606,7 +606,7 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
       proAvailable: manual ? false : config.proAvailable,
       experimentalBiggerContext: manual ? false : config.experimentalBiggerContext,
       experimentalSkillAttachments: manual ? false : config.experimentalSkillAttachments,
-      experimentalFreshConversationPerTurn: !manual && config.experimentalFreshConversationPerTurn === true,
+      ...(config.experimentalFreshConversationPerTurn ? { experimentalFreshConversationPerTurn: true } : {}),
       useSavedChats: config.useSavedChats === true,
       ...(config.stallTimeoutSec !== undefined ? { stallTimeoutSec: config.stallTimeoutSec } : {}),
       autoApproveToolCalls: manual ? false : config.autoApproveToolCalls,

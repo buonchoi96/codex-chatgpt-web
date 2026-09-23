@@ -3519,6 +3519,8 @@ export class ChatGptBrowserWorker {
     requireThink = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
+    await throwIfChatGptRateLimitDialog(page);
+    throwIfPromptAttachmentAborted(abortSignal);
     let connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector, reuseConnector);
     let composerMutationStarted = false;
     try {
