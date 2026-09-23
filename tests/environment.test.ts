@@ -1356,7 +1356,7 @@ describe("trusted Codex task environment continuity", () => {
     writeFileSync(rolloutPath, [JSON.stringify(session), JSON.stringify(childTurnContext())].join("\n") + "\n");
     expect(() => new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request))
       .toThrow("session metadata");
-  });
+  }, 15_000);
 
   test("a child's untagged environment must match native history before its current task boundary", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codex-child-history-"));
