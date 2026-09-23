@@ -78,7 +78,9 @@ jobs:
           Copy-Item -LiteralPath $installer[0].FullName -Destination release-assets
           $hash = (Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($installer[0].Name)" | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding ascii
+          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
           "installer=$($installer[0].Name)" >> $env:GITHUB_OUTPUT
+          "version=$($package.version)" >> $env:GITHUB_OUTPUT
           Get-Content release-assets/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
@@ -93,7 +95,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v5.0.8-custom-windows
+          RELEASE_TAG: v${{ steps.assets.outputs.version }}-custom-windows
         run: |
           set -euo pipefail
           installer="release-assets/${{ steps.assets.outputs.installer }}"
@@ -101,7 +103,7 @@ jobs:
           test -f release-assets/SHA256SUMS.txt
 
           cat > release-notes.md <<EOF
-          ## Codex Web GPT v5.0.8 — Custom Windows build
+          ## Codex Web GPT v${{ steps.assets.outputs.version }} — Custom Windows build
 
           Rebuilt from the current 'main' branch at commit '${GITHUB_SHA}'.
 
@@ -132,14 +134,14 @@ jobs:
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows" \
               --notes-file release-notes.md
           else
             gh release create "$RELEASE_TAG" \
               "$installer" release-assets/SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Codex Web GPT v5.0.8 Custom Windows" \
+              --title "Codex Web GPT v${{ steps.assets.outputs.version }} Custom Windows" \
               --notes-file release-notes.md
           fi
 
