@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildResponseJSON } from "../src/bridge";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
-import { ChatGptCompletionTracker, chatGptImageFilePayloads, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
+import { ChatGptCompletionTracker, chatGptCompletionReceiptRecoveryPrompt, chatGptImageFilePayloads, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
 import { CHATGPT_TURN_REVISION_CONFLICT_MESSAGE, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds } from "../src/adapters/chatgpt-web/environment";
@@ -32,6 +32,15 @@ import type { AdapterEvent, CodexParsedRequest, CodexProviderConfig, CodexTool }
 const tempRoot = join(tmpdir(), `codex-chatgpt-web-harness-${process.pid}-${Date.now()}`);
 mkdirSync(tempRoot, { recursive: true });
 afterAll(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+test("completion receipt recovery uses the dedicated terminal tool for complete and blocked outcomes", () => {
+  const prompt = chatGptCompletionReceiptRecoveryPrompt(1, 2, "turn_abcdefghijklmnopqrstuvwxyz012345");
+  expect(prompt).toContain("dedicated codex_turn_complete tool");
+  expect(prompt).toContain("state=complete");
+  expect(prompt).toContain("state=blocked");
+  expect(prompt).toContain("safety-blocked required tool");
+  expect(prompt).not.toContain("wire_name codex.control.turn_complete");
+});
 
 test("current-turn MCP progress tracks active calls without claiming completion", async () => {
   const progress = new ChatGptExternalTurnProgress();
@@ -2780,6 +2789,7 @@ describe("ChatGPT outer-native harness v4", () => {
         "codex_turn_complete",
         "codex_view_image",
         "codex_windows_computer_use_call",
+        "codex_windows_computer_use_observe",
         "codex_write_stdin",
       ]);
       const publicConnectorAbi = listed.tools.map(tool => ({
@@ -2792,7 +2802,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }));
       // The explicit name, schema and annotation assertions below are the connector ABI contract.
       // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
-      expect(publicConnectorAbi).toHaveLength(9);
+      expect(publicConnectorAbi).toHaveLength(10);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -2845,6 +2855,12 @@ describe("ChatGPT outer-native harness v4", () => {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: false,
+        openWorldHint: false,
+      });
+      expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_observe")?.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       });
       expect(listed.tools.find(tool => tool.name === "codex_turn_complete")?.annotations).toMatchObject({
@@ -2968,9 +2984,9 @@ describe("ChatGPT outer-native harness v4", () => {
       broker.completeTool(token, searchRequest!.callId, toolResult({ tools: [] }));
       await search;
 
-      const health = call("codex_readonly_tool_call", {
+      const health = call("codex_windows_computer_use_observe", {
         turn_token: token,
-        wire_name: "mcp__windows_computer_use__windows_computer_use_health",
+        operation: "health",
         arguments: {},
       });
       const [healthRequest] = await broker.nextToolBatch(token);
@@ -2980,6 +2996,14 @@ describe("ChatGPT outer-native harness v4", () => {
       });
       broker.completeTool(token, healthRequest!.callId, toolResult({ ok: true }));
       expect((await health).structuredContent).toEqual({ ok: true });
+
+      const snapshotActivation = await call("codex_windows_computer_use_observe", {
+        turn_token: token,
+        operation: "snapshot",
+        arguments: { activate: true },
+      });
+      expect(snapshotActivation.isError).toBe(true);
+      expect(JSON.stringify(snapshotActivation.content)).toContain("rejects activate=true");
 
       const rejectedClick = await call("codex_readonly_tool_call", {
         turn_token: token,

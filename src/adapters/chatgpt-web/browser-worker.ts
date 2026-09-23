@@ -1321,8 +1321,9 @@ export function chatGptCompletionReceiptRecoveryPrompt(
     "Do not repeat the progress report as a final answer.",
     "Re-read the entire active user request and continue every remaining independently actionable requirement with Codex Native tools.",
     "A missing asset or blocker for one branch does not permit stopping while independent research, implementation, tests, validation, or documentation can still be completed.",
-    "When every independently actionable requirement is complete, call codex_tool_call with wire_name codex.control.turn_complete and arguments.remaining_actionable_requirements=[] and only then provide the final user-facing answer.",
-    "If the task is genuinely blocked, first complete every independent branch, then use state=blocked with a concrete blocker and the exact blocked requirements.",
+    "When every independently actionable requirement is complete, call the dedicated codex_turn_complete tool with state=complete, blocked_requirements=[], remaining_actionable_requirements=[], and no blocker; only then provide the final user-facing answer.",
+    "If the task is genuinely blocked, first complete every independent branch, then call the dedicated codex_turn_complete tool with state=blocked, remaining_actionable_requirements=[], a concrete blocker, and the exact blocked_requirements before providing final prose.",
+    "A safety-blocked required tool with no safe alternative is a valid blocker; do not leave the Codex turn open after reporting it.",
     "</codex_completion_recovery>",
   ].join("\n");
 }

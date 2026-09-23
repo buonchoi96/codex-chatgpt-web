@@ -25,6 +25,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_view_image",
   "codex_tool_inventory",
   "codex_readonly_tool_call",
+  "codex_windows_computer_use_observe",
   "codex_windows_computer_use_call",
   "codex_tool_call",
   "codex_turn_complete",
@@ -46,6 +47,16 @@ const WINDOWS_COMPUTER_USE_READ_ONLY_TOOLS = new Set([
   "mcp__windows_computer_use__windows_computer_use_element_info",
   "mcp__windows_computer_use__windows_computer_use_wait",
 ]);
+
+const WINDOWS_COMPUTER_USE_OBSERVATION_TOOLS: Record<string, string> = {
+  health: "mcp__windows_computer_use__windows_computer_use_health",
+  list_windows: "mcp__windows_computer_use__windows_computer_use_list_windows",
+  snapshot: "mcp__windows_computer_use__windows_computer_use_snapshot",
+  accessibility_tree: "mcp__windows_computer_use__windows_computer_use_accessibility_tree",
+  find: "mcp__windows_computer_use__windows_computer_use_find",
+  element_info: "mcp__windows_computer_use__windows_computer_use_element_info",
+  wait: "mcp__windows_computer_use__windows_computer_use_wait",
+};
 
 function isWindowsComputerUseWireName(name: string): boolean {
   return name.startsWith(WINDOWS_COMPUTER_USE_WIRE_PREFIX) && /^[A-Za-z0-9_]+$/.test(name);
@@ -87,7 +98,9 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
-  "For Windows Computer Use observation tools discovered by tool_search, invoke the exact loaded wire_name through codex_readonly_tool_call. For Windows Computer Use interaction tools, invoke the exact loaded wire_name through codex_windows_computer_use_call.",
+  "For Windows Computer Use observation, use codex_windows_computer_use_observe with the matching operation. Do not route Windows observation through the generic codex_readonly_tool_call unless the dedicated observation bridge is unavailable.",
+  "For Windows Computer Use interaction tools, invoke the exact loaded wire_name through codex_windows_computer_use_call.",
+  "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
   "For state=complete, blocked_requirements must be empty and blocker must be omitted. For state=blocked, blocked_requirements must be non-empty and blocker must be a concrete non-empty string.",
@@ -924,6 +937,42 @@ export async function runChatGptMcpServer(options: {
       },
     ),
   );
+
+  if (contract === "native") {
+    server.registerTool(
+      "codex_windows_computer_use_observe",
+      {
+        title: "Observe Windows through Codex",
+        description: "Read local Windows UI state through an already-loaded Windows Computer Use observation tool. This tool cannot click, type, focus, activate, scroll, move the pointer, invoke controls, or otherwise modify the desktop.",
+        inputSchema: {
+          turn_token: turnTokenSchema,
+          operation: z.enum([
+            "health",
+            "list_windows",
+            "snapshot",
+            "accessibility_tree",
+            "find",
+            "element_info",
+            "wait",
+          ]),
+          arguments: jsonArgumentsSchema.optional(),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async (toolInput, extra) => withClaimedTurn(
+        "codex_windows_computer_use_observe",
+        toolInput.turn_token,
+        extra,
+        async claimed => {
+          const wire = WINDOWS_COMPUTER_USE_OBSERVATION_TOOLS[toolInput.operation];
+          if (!wire) throw new Error(`Unsupported Windows Computer Use observation operation: ${toolInput.operation}`);
+          const args = toolInput.arguments ?? {};
+          assertWindowsComputerUseReadOnlyCall(wire, args);
+          const tool = exactVisibleStructuredTool(claimed.environment, contract, wire);
+          return invoke(claimed.bindingId, claimed.environment, tool, { arguments: args }, extra.signal);
+        },
+      ),
+    );
 
   if (contract === "native") {
     server.registerTool(
