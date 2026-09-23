@@ -512,6 +512,15 @@ function parseConfig(value: unknown, path: string): AppConfig {
     throw new Error(`Invalid experimentalSkillAttachments in ${path}`);
   }
   const experimentalSkillAttachments = parsed.experimentalSkillAttachments === true;
+  if (parsed.experimentalFreshConversationPerTurn !== undefined
+    && typeof parsed.experimentalFreshConversationPerTurn !== "boolean") {
+    throw new Error(`Invalid experimentalFreshConversationPerTurn in ${path}`);
+  }
+  const experimentalFreshConversationPerTurn = parsed.experimentalFreshConversationPerTurn === true;
+  if (parsed.useSavedChats !== undefined && typeof parsed.useSavedChats !== "boolean") {
+    throw new Error(`Invalid useSavedChats in ${path}`);
+  }
+  const useSavedChats = parsed.useSavedChats === true;
   if (browserInteractionMode === "manual" && experimentalSkillAttachments) {
     throw new Error(`Zero Risk does not support Skills as files in ${path}`);
   }

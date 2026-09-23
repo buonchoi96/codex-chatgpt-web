@@ -276,6 +276,10 @@ function baseConfig(
   if (options.experimentalSkillAttachments !== undefined) {
     config.experimentalSkillAttachments = options.experimentalSkillAttachments;
   }
+  if (options.useSavedChats !== undefined) config.useSavedChats = options.useSavedChats;
+  if (options.experimentalFreshConversationPerTurn !== undefined) {
+    config.experimentalFreshConversationPerTurn = options.experimentalFreshConversationPerTurn;
+  }
   if (options.experimentalBiggerContext !== undefined) {
     config.experimentalBiggerContext = options.experimentalBiggerContext;
   }
@@ -289,6 +293,9 @@ function baseConfig(
     config.zeroRiskProEnabled = options.zeroRiskProEnabled;
   }
   if (config.browserInteractionMode === "manual") {
+    if (options.experimentalFreshConversationPerTurn === true) {
+      throw new Error("Fresh browser conversations per turn is available only in automatic mode");
+    }
     if (options.refreshAccountCapabilities) {
       throw new Error("Zero Risk cannot refresh account capabilities");
     }
