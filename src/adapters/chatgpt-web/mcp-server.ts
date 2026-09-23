@@ -1120,7 +1120,6 @@ export async function runChatGptMcpServer(options: {
           remaining_actionable_requirements: z.array(z.string().min(1).max(20_000)).max(200).default([]),
           blocker: z.string().min(1).max(100_000).optional(),
         },
-        outputSchema: { accepted: z.literal(true) },
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       async (input, extra) => withClaimedTurn(
