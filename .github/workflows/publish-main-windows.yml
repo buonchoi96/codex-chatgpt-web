@@ -12,7 +12,9 @@ permissions:
 
 concurrency:
   group: publish-main-windows
-  cancel-in-progress: true
+  # Never cancel a publisher while it is replacing fixed-name release assets.
+  # A cancelled gh release upload --clobber can leave the next run holding a stale asset id.
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
@@ -127,10 +129,46 @@ jobs:
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+
+            delete_asset_by_name() {
+              local name="$1"
+              local attempt asset_id still_present
+
+              for attempt in 1 2 3 4 5; do
+                asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+                  --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
+
+                if [[ -z "$asset_id" ]]; then
+                  return 0
+                fi
+
+                if gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"; then
+                  for verify_attempt in 1 2 3 4 5; do
+                    still_present="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+                      --jq ".[] | select(.name == \"$name\") | .id" | head -n 1)"
+                    if [[ -z "$still_present" ]]; then
+                      return 0
+                    fi
+                    sleep 1
+                  done
+                fi
+
+                echo "Retrying release asset deletion for $name (attempt $attempt/5)" >&2
+                sleep $((attempt * 2))
+              done
+
+              echo "Could not remove existing release asset: $name" >&2
+              return 1
+            }
+
+            delete_asset_by_name "$(basename "$installer")"
+            delete_asset_by_name "SHA256SUMS.txt"
+
             gh release upload "$RELEASE_TAG" \
               "$installer" release-assets/SHA256SUMS.txt \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
+              --repo "$GITHUB_REPOSITORY"
+
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
