@@ -1328,6 +1328,15 @@ export function chatGptCompletionReceiptRecoveryPrompt(
   ].join("\n");
 }
 
+export function chatGptFinalIndicatesSafetyBlocked(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("blocked by openai's safety checks")
+    || normalized.includes("blocked by openai safety checks")
+    || normalized.includes("blocked by safety checks")
+    || /(?:^|\b)[a-z0-9_]*safety_blocked(?:\b|$)/i.test(text);
+}
+
 interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
@@ -5392,6 +5401,17 @@ export class ChatGptBrowserWorker {
           if (!completionReady) completionFenceRevision = undefined;
           if (completionReady) {
             if (turn.completionFence?.receiptReady && !await turn.completionFence.receiptReady()) {
+              if (chatGptFinalIndicatesSafetyBlocked(snapshot.visibleText)) {
+                throw new ChatGptWebAdapterError(
+                  "ChatGPT reported a safety-blocked terminal outcome before an accepted Full Harness completion receipt.",
+                  {
+                    status: 403,
+                    errorType: "invalid_request_error",
+                    code: "chatgpt_safety_blocked_without_receipt",
+                    retryable: false,
+                  },
+                );
+              }
               completionReceiptRecoveries += 1;
               if (completionReceiptRecoveries > MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES) {
                 throw new ChatGptWebAdapterError(
