@@ -315,7 +315,7 @@ async function setupCommand(args: string[]): Promise<void> {
   const freshConversation = takeFlag(args, "--fresh-conversation");
   const retainedConversation = takeFlag(args, "--retained-conversation");
   if (freshConversation && retainedConversation) {
-    throw new Error("Choose at most one conversation mode: --fresh-conversation or --retained-conversation");
+    throw new Error("Choose at most one conversation mode. Choose --fresh-conversation or --retained-conversation");
   }
   if (freshConversation || retainedConversation) options.experimentalFreshConversationPerTurn = freshConversation;
   const biggerContext = takeFlag(args, "--bigger-context");

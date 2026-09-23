@@ -280,6 +280,17 @@ test("a stale retained connector pill falls back to a fresh @codex selection bef
     ): Promise<void>;
   }).attachPrompt;
 
+  const noRateLimitDialogPage = {
+    locator: () => {
+      const locator = {
+        filter: () => locator,
+        last: () => locator,
+        isVisible: async () => false,
+      };
+      return locator;
+    },
+  };
+
   await attachPrompt.call({
     config: { appName: "Codex Native2" },
     activeComposer: async () => retainedComposer,
@@ -291,7 +302,7 @@ test("a stale retained connector pill falls back to a fresh @codex selection bef
     insertPromptText: async (_page: unknown, text: string) => { calls.push(`insert:${text}`); },
     assertPromptAttached: async (_page: unknown, text: string) => { calls.push(`assert:${text}`); },
     clearChatGptComposerState: async () => { calls.push("clear"); },
-  }, {}, "continue task", true, async checkpoint => { calls.push(`checkpoint:${checkpoint}`); },
+  }, noRateLimitDialogPage, "continue task", true, async checkpoint => { calls.push(`checkpoint:${checkpoint}`); },
   undefined, false, { triggerAttempts: 0 }, true, false);
 
   expect(calls).toContain("checkpoint:connector-binding-stale");
