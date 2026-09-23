@@ -24,6 +24,8 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_apply_patch",
   "codex_view_image",
   "codex_tool_inventory",
+  "codex_readonly_tool_call",
+  "codex_windows_computer_use_call",
   "codex_tool_call",
   "codex_turn_complete",
 ]);
@@ -33,6 +35,33 @@ const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
   "multi_agent_v2__wait_agent",
   "collaboration__wait_agent",
 ]);
+
+const WINDOWS_COMPUTER_USE_WIRE_PREFIX = "mcp__windows_computer_use__windows_computer_use_";
+const WINDOWS_COMPUTER_USE_READ_ONLY_TOOLS = new Set([
+  "mcp__windows_computer_use__windows_computer_use_health",
+  "mcp__windows_computer_use__windows_computer_use_list_windows",
+  "mcp__windows_computer_use__windows_computer_use_snapshot",
+  "mcp__windows_computer_use__windows_computer_use_accessibility_tree",
+  "mcp__windows_computer_use__windows_computer_use_find",
+  "mcp__windows_computer_use__windows_computer_use_element_info",
+  "mcp__windows_computer_use__windows_computer_use_wait",
+]);
+
+function isWindowsComputerUseWireName(name: string): boolean {
+  return name.startsWith(WINDOWS_COMPUTER_USE_WIRE_PREFIX) && /^[A-Za-z0-9_]+$/.test(name);
+}
+
+function assertWindowsComputerUseReadOnlyCall(
+  name: string,
+  args: Record<string, unknown>,
+): void {
+  if (!WINDOWS_COMPUTER_USE_READ_ONLY_TOOLS.has(name)) {
+    throw new Error(`Codex read-only dispatcher does not allow this tool: ${name}`);
+  }
+  if (args.activate === true) {
+    throw new Error("Codex read-only Windows dispatcher rejects activate=true because it changes foreground window state");
+  }
+}
 
 const turnTokenSchema = z.string().min(20).max(256);
 const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
@@ -57,10 +86,12 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Treat every explicit deliverable in the active Codex request as part of one task completion condition.",
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
+  "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
+  "For Windows Computer Use observation tools discovered by tool_search, invoke the exact loaded wire_name through codex_readonly_tool_call. For Windows Computer Use interaction tools, invoke the exact loaded wire_name through codex_windows_computer_use_call.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
-  "For Full Harness turns, the mandatory completion receipt is codex_tool_call with wire_name codex.control.turn_complete. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty. A blocked receipt is valid only after all independent work is complete and the blocker genuinely prevents the listed blocked requirements.",
-  "Pass the completion receipt fields in codex_tool_call.arguments: state, summary, completed_requirements, blocked_requirements, remaining_actionable_requirements, and optional blocker.",
-  "After the codex.control.turn_complete receipt is accepted, provide the final user-facing answer. If it is rejected, continue the task and submit a new receipt only when the rejection is resolved.",
+  "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
+  "For state=complete, blocked_requirements must be empty and blocker must be omitted. For state=blocked, blocked_requirements must be non-empty and blocker must be a concrete non-empty string.",
+  "After codex_turn_complete is accepted, provide the final user-facing answer. If it is rejected, continue the task and submit a new receipt only when the rejection is resolved.",
   "Only stop early for a genuine external blocker that cannot be resolved with the available Codex tools or environment.",
 ].join(" ");
 
@@ -153,6 +184,19 @@ function safeVisibleTools(environment: ChatGptTurnEnvironment, contract: ChatGpt
     && (tool.namespace !== undefined || tool.name !== "exec")
     && (!tool.namespace || !bridgeNamespaces.has(tool.namespace))
   ));
+}
+
+function exactVisibleStructuredTool(
+  environment: ChatGptTurnEnvironment,
+  contract: ChatGptMcpContract,
+  name: string,
+): CodexTool {
+  const tool = safeVisibleTools(environment, contract).find(candidate => wireName(candidate) === name);
+  if (!tool) throw new Error(`Codex tool is not available in this turn: ${name}`);
+  if (tool.freeform || tool.toolSearch) {
+    throw new Error(`Codex structured dispatcher cannot invoke non-function tool: ${name}`);
+  }
+  return tool;
 }
 
 function isAgentWaitTool(tool: CodexTool): boolean {
@@ -882,6 +926,69 @@ export async function runChatGptMcpServer(options: {
   );
 
   server.registerTool(
+    "codex_readonly_tool_call",
+    {
+      title: "Call a read-only Codex tool",
+      description: afterSafeStart(
+        contract,
+        "Invoke a conservatively allowlisted read-only tool from the current outer Codex turn. This bridge is intentionally narrow: it currently supports Windows Computer Use observation tools and rejects foreground activation.",
+      ),
+      inputSchema: {
+        ...turnReferenceInput(contract),
+        wire_name: z.string().min(1).max(1_000),
+        arguments: jsonArgumentsSchema.optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (toolInput, extra) => withClaimedTurn(
+      "codex_readonly_tool_call",
+      turnReference(contract, toolInput),
+      extra,
+      async claimed => {
+        const args = toolInput.arguments ?? {};
+        assertWindowsComputerUseReadOnlyCall(toolInput.wire_name, args);
+        const tool = exactVisibleStructuredTool(claimed.environment, contract, toolInput.wire_name);
+        return invoke(claimed.bindingId, claimed.environment, tool, { arguments: args }, extra.signal);
+      },
+    ),
+  );
+
+  server.registerTool(
+    "codex_windows_computer_use_call",
+    {
+      title: "Control Windows through Codex",
+      description: afterSafeStart(
+        contract,
+        "Invoke an exact Windows Computer Use tool that was loaded into the current outer Codex turn. Use codex_readonly_tool_call for observation-only operations; use this tool for desktop interaction actions.",
+      ),
+      inputSchema: {
+        ...turnReferenceInput(contract),
+        wire_name: z.string().min(1).max(1_000),
+        arguments: jsonArgumentsSchema.optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (toolInput, extra) => withClaimedTurn(
+      "codex_windows_computer_use_call",
+      turnReference(contract, toolInput),
+      extra,
+      async claimed => {
+        if (!isWindowsComputerUseWireName(toolInput.wire_name)) {
+          throw new Error(`Windows Computer Use dispatcher rejects non-Windows tool: ${toolInput.wire_name}`);
+        }
+        const tool = exactVisibleStructuredTool(claimed.environment, contract, toolInput.wire_name);
+        return invoke(
+          claimed.bindingId,
+          claimed.environment,
+          tool,
+          { arguments: toolInput.arguments ?? {} },
+          extra.signal,
+        );
+      },
+    ),
+  );
+
+  server.registerTool(
     "codex_tool_call",
     {
       title: "Call any tool from the current Codex harness",
@@ -997,6 +1104,64 @@ export async function runChatGptMcpServer(options: {
       });
     },
   );
+
+  if (contract === "native") {
+    server.registerTool(
+      "codex_turn_complete",
+      {
+        title: "Complete the current Codex task",
+        description: "Submit the mandatory Full Harness completion receipt. Use state=complete only with no blocked requirements and no blocker. Use state=blocked only with at least one blocked requirement and a concrete blocker. remaining_actionable_requirements must always be empty.",
+        inputSchema: {
+          turn_token: turnTokenSchema,
+          state: z.enum(["complete", "blocked"]),
+          summary: z.string().min(1).max(100_000),
+          completed_requirements: z.array(z.string().min(1).max(20_000)).max(200).default([]),
+          blocked_requirements: z.array(z.string().min(1).max(20_000)).max(200).default([]),
+          remaining_actionable_requirements: z.array(z.string().min(1).max(20_000)).max(200).default([]),
+          blocker: z.string().min(1).max(100_000).optional(),
+        },
+        outputSchema: { accepted: z.literal(true) },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async (input, extra) => withClaimedTurn(
+        "codex_turn_complete",
+        input.turn_token,
+        extra,
+        async claimed => {
+          if (input.remaining_actionable_requirements.length > 0) {
+            throw new Error(
+              "Completion rejected: actionable requirements remain: "
+              + input.remaining_actionable_requirements.join("; "),
+            );
+          }
+          if (input.state === "complete") {
+            if (input.blocked_requirements.length > 0 || input.blocker !== undefined) {
+              throw new Error("Completion rejected: complete status cannot include blocked requirements or a blocker");
+            }
+          } else {
+            if (input.blocked_requirements.length === 0) {
+              throw new Error("Completion rejected: blocked completion must identify blocked requirements");
+            }
+            if (!input.blocker?.trim()) {
+              throw new Error("Completion rejected: blocked completion requires a concrete blocker");
+            }
+          }
+          const response = await callTurnBroker<{ accepted: true }>(options.brokerSocketPath, {
+            method: "native_complete",
+            token: input.turn_token,
+            activityId: claimed.activityId,
+            completionState: input.state,
+            completionSummary: input.summary,
+            completedRequirements: input.completed_requirements,
+            blockedRequirements: input.blocked_requirements,
+            remainingActionableRequirements: input.remaining_actionable_requirements,
+            ...(input.blocker !== undefined ? { blocker: input.blocker } : {}),
+          }, 5_000, extra.signal);
+          return result(response);
+        },
+      ),
+    );
+  }
 
   if (contract === "safe") {
     server.registerTool(

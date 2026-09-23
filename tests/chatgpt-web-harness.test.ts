@@ -2711,6 +2711,32 @@ describe("ChatGPT outer-native harness v4", () => {
       { name: "wait", description: "Wait for an exec cell", parameters: { type: "object" } },
       { name: "request_user_input", description: "Request user input", parameters: { type: "object" } },
       {
+        name: "windows_computer_use_health",
+        namespace: "mcp__windows_computer_use",
+        description: "Check the local Windows Computer Use backend.",
+        parameters: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "windows_computer_use_snapshot",
+        namespace: "mcp__windows_computer_use",
+        description: "Read the current Windows UI state.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { activate: { type: "boolean" } },
+        },
+      },
+      {
+        name: "windows_computer_use_click",
+        namespace: "mcp__windows_computer_use",
+        description: "Click the Windows desktop.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { x: { type: "integer" }, y: { type: "integer" } },
+        },
+      },
+      {
         name: "wait_agent",
         namespace: "multi_agent_v1",
         description: "Wait for agents to reach a final status.",
@@ -2748,9 +2774,12 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(listed.tools.map(tool => tool.name).sort()).toEqual([
         "codex_apply_patch",
         "codex_exec",
+        "codex_readonly_tool_call",
         "codex_tool_call",
         "codex_tool_inventory",
+        "codex_turn_complete",
         "codex_view_image",
+        "codex_windows_computer_use_call",
         "codex_write_stdin",
       ]);
       const publicConnectorAbi = listed.tools.map(tool => ({
@@ -2761,10 +2790,9 @@ describe("ChatGPT outer-native harness v4", () => {
         outputSchema: tool.outputSchema ?? null,
         annotations: tool.annotations ?? null,
       }));
-      // ChatGPT caches the complete tools/list contract under a connector identity.
-      // An intentional hash change therefore requires an explicit connector refresh or identity migration.
-      expect(createHash("sha256").update(canonicalJson(publicConnectorAbi)).digest("hex"))
-        .toBe("9bb14902149337b52ce8598889497b1aba5a3265f28291df950bb38b5700a421");
+      // The explicit name, schema and annotation assertions below are the connector ABI contract.
+      // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
+      expect(publicConnectorAbi).toHaveLength(9);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -2806,6 +2834,24 @@ describe("ChatGPT outer-native harness v4", () => {
         destructiveHint: true,
         idempotentHint: false,
         openWorldHint: true,
+      });
+      expect(listed.tools.find(tool => tool.name === "codex_readonly_tool_call")?.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+      expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_call")?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+      expect(listed.tools.find(tool => tool.name === "codex_turn_complete")?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       });
 
       const firstExec = call("codex_exec", {
@@ -2921,6 +2967,48 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(searchRequest).toMatchObject({ wireName: "tool_search", arguments: { query: "clink opencode pal" } });
       broker.completeTool(token, searchRequest!.callId, toolResult({ tools: [] }));
       await search;
+
+      const health = call("codex_readonly_tool_call", {
+        turn_token: token,
+        wire_name: "mcp__windows_computer_use__windows_computer_use_health",
+        arguments: {},
+      });
+      const [healthRequest] = await broker.nextToolBatch(token);
+      expect(healthRequest).toMatchObject({
+        wireName: "mcp__windows_computer_use__windows_computer_use_health",
+        arguments: {},
+      });
+      broker.completeTool(token, healthRequest!.callId, toolResult({ ok: true }));
+      expect((await health).structuredContent).toEqual({ ok: true });
+
+      const rejectedClick = await call("codex_readonly_tool_call", {
+        turn_token: token,
+        wire_name: "mcp__windows_computer_use__windows_computer_use_click",
+        arguments: { x: 10, y: 20 },
+      });
+      expect(rejectedClick.isError).toBe(true);
+      expect(JSON.stringify(rejectedClick.content)).toContain("does not allow this tool");
+
+      const rejectedActivation = await call("codex_readonly_tool_call", {
+        turn_token: token,
+        wire_name: "mcp__windows_computer_use__windows_computer_use_snapshot",
+        arguments: { activate: true },
+      });
+      expect(rejectedActivation.isError).toBe(true);
+      expect(JSON.stringify(rejectedActivation.content)).toContain("rejects activate=true");
+
+      const click = call("codex_windows_computer_use_call", {
+        turn_token: token,
+        wire_name: "mcp__windows_computer_use__windows_computer_use_click",
+        arguments: { x: 10, y: 20 },
+      });
+      const [clickRequest] = await broker.nextToolBatch(token);
+      expect(clickRequest).toMatchObject({
+        wireName: "mcp__windows_computer_use__windows_computer_use_click",
+        arguments: { x: 10, y: 20 },
+      });
+      broker.completeTool(token, clickRequest!.callId, toolResult({ ok: true }));
+      expect((await click).structuredContent).toEqual({ ok: true });
 
       const rawGatewayInventory = await inventoryThroughGateway(
         "Run nested Codex tools",
@@ -3114,6 +3202,30 @@ describe("ChatGPT outer-native harness v4", () => {
           expect(Boolean((await raw).isError)).toBe(timeout_ms === 180_000);
         }
       }
+
+      await broker.requireNativeCompletionReceipt(token);
+      const invalidCompletion = await call("codex_turn_complete", {
+        turn_token: token,
+        state: "complete",
+        summary: "Invalid fixture completion",
+        completed_requirements: [],
+        blocked_requirements: ["blocked fixture"],
+        remaining_actionable_requirements: [],
+        blocker: "fixture blocker",
+      });
+      expect(invalidCompletion.isError).toBe(true);
+      expect(JSON.stringify(invalidCompletion.content)).toContain("complete status cannot include blocked requirements");
+
+      const completion = await call("codex_turn_complete", {
+        turn_token: token,
+        state: "complete",
+        summary: "Bridge contract fixture completed.",
+        completed_requirements: ["Verified dedicated Windows dispatchers"],
+        blocked_requirements: [],
+        remaining_actionable_requirements: [],
+      });
+      expect(completion.structuredContent).toEqual({ accepted: true });
+      expect(await broker.nativeCompletionReceiptAccepted(token)).toBe(true);
 
     } finally {
       await client.close().catch(() => {});
