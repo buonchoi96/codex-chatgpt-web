@@ -325,12 +325,6 @@ async function setupCommand(args: string[]): Promise<void> {
   }
   if (biggerContext || standardContext) options.experimentalBiggerContext = biggerContext;
   if (skillAttachments || inlineSkills) options.experimentalSkillAttachments = skillAttachments;
-  const freshConversation = takeFlag(args, "--fresh-conversation");
-  const retainedConversation = takeFlag(args, "--retained-conversation");
-  if (freshConversation && retainedConversation) {
-    throw new Error("Choose at most one conversation mode: --fresh-conversation or --retained-conversation");
-  }
-  if (freshConversation || retainedConversation) options.experimentalFreshConversationPerTurn = freshConversation;
   const zeroRiskPro = takeFlag(args, "--zero-risk-pro");
   const zeroRiskDefault = takeFlag(args, "--zero-risk-default");
   if (zeroRiskPro && zeroRiskDefault) {

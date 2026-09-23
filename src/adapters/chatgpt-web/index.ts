@@ -359,10 +359,6 @@ export function createChatGptWebAdapter(
   if (experimentalBiggerContext !== undefined && typeof experimentalBiggerContext !== "boolean") {
     throw new Error("ChatGPT Bigger Context preference must be a boolean");
   }
-  const freshConversationPerTurn = provider.chatgptWeb?.experimentalFreshConversationPerTurn;
-  if (freshConversationPerTurn !== undefined && typeof freshConversationPerTurn !== "boolean") {
-    throw new Error("ChatGPT fresh-conversation preference must be a boolean");
-  }
   const configuredCapabilities: ChatGptWebCapabilities = {
     localToolsEnabled: provider.chatgptWeb?.localToolsEnabled === true,
     solAvailable: provider.chatgptWeb?.solAvailable !== false,
@@ -1113,10 +1109,10 @@ export function createChatGptWebAdapter(
                     }
                     if (handoffError instanceof ChatGptWebAdapterError) {
                       if (handoffError.code === "compaction_source_unavailable") {
-                        return await runFreshCompactionFallback("source_disappeared_before_handoff");
+                        return await runFreshCompaction("source_disappeared_before_handoff");
                       }
                       if (handoffError.code === "compaction_source_stalled") {
-                        return await runFreshCompactionFallback("active_source_stalled_before_handoff");
+                        return await runFreshCompaction("active_source_stalled_before_handoff");
                       }
                     }
                     throw handoffError;

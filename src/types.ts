@@ -311,5 +311,7 @@ export interface CodexProviderConfig {
     experimentalSkillAttachments?: boolean;
     /** Experimental isolation: start a fresh ChatGPT conversation for every Codex turn. */
     experimentalFreshConversationPerTurn?: boolean;
+    /** Use ordinary ChatGPT history for task conversations. Default: Temporary Chat. */
+    useSavedChats?: boolean;
   };
 }
