@@ -2746,6 +2746,16 @@ describe("ChatGPT outer-native harness v4", () => {
         },
       },
       {
+        name: "windows_computer_use_activate_window",
+        namespace: "mcp__windows_computer_use",
+        description: "Activate a native Windows top-level window.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { nativeWindowHandle: { type: "integer" } },
+        },
+      },
+      {
         name: "wait_agent",
         namespace: "multi_agent_v1",
         description: "Wait for agents to reach a final status.",
