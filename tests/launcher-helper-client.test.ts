@@ -414,6 +414,61 @@ test("structured helper errors preserve the ChatGPT adapter failure contract", a
   });
 });
 
+test("helper exit settles the active turn immediately with a retryable fresh-transport error", async () => {
+  const client = new LauncherBrowserHelperClient({
+    appName: "Codex Native2",
+    browserHost: "launcher",
+    browserHostDescriptorPath: "/missing/launcher.json",
+    storageStatePath: "/durable/unused-state.json",
+    chromeExecutablePath: "/durable/unused-chrome",
+    turnTimeoutMs: 60_000,
+    headed: true,
+    autoApproveToolCalls: false,
+    useSavedChats: false,
+  });
+  const internal = client as unknown as {
+    child?: unknown;
+    pending: Map<string, {
+      turn: BrowserTurn;
+      resolve: (value: string) => void;
+      reject: (error: Error) => void;
+    }>;
+    handleExit(child: unknown, error: Error): void;
+  };
+  const child = { pid: process.pid };
+  internal.child = child;
+  const result = new Promise<string>((resolveResult, rejectResult) => {
+    internal.pending.set("helper-exit-123", {
+      turn: {
+        traceId: "helper-exit-123",
+        modelId: "gpt-5.6-sol",
+        reasoning: "high",
+        capabilities: { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+        prepare: async () => ({ text: "continue", images: [], release() {} }),
+        onTextDelta() {},
+      },
+      resolve: resolveResult,
+      reject: rejectResult,
+    });
+  });
+  const logger = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    internal.handleExit(child, new Error("helper transport exited"));
+    const error = await result.then(() => undefined, failure => failure);
+    expect(error).toBeInstanceOf(ChatGptWebAdapterError);
+    expect(error).toMatchObject({
+      status: 502,
+      errorType: "server_error",
+      code: "chatgpt_browser_helper_exited",
+      retryable: true,
+    });
+    expect(internal.pending.has("helper-exit-123")).toBeFalse();
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    logger.mockRestore();
+  }
+});
+
 test("an older helper cannot silently drop selected skill files and releases the prepared turn", async () => {
   const client = new LauncherBrowserHelperClient({
     appName: "Codex Native2", browserHost: "launcher", browserHostDescriptorPath: "/durable/launcher.json",
