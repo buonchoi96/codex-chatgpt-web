@@ -1,0 +1,166 @@
+name: One-shot upstream merge and Windows release
+
+on:
+  push:
+    branches:
+      - upgrade/upstream-v6.0.0
+    paths:
+      - .github/workflows/one-shot-upstream-windows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  merge-build-release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout preserved main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge five upstream commits
+        id: merge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          $expectedBase = "1c135bf597b185a6984c9a45e6abdb17b4511747"
+          $upstreamTip = "212ceef2acac9d6ee0f3c9037abfaf4ad8ff9827"
+          $actualBase = (git rev-parse HEAD).Trim()
+          if ($actualBase -ne $expectedBase) {
+            throw "main moved unexpectedly: expected $expectedBase, got $actualBase"
+          }
+
+          git remote add upstream https://github.com/miuuyy/codex-chatgpt-web.git
+          git fetch upstream main
+
+          $resolvedUpstream = (git rev-parse upstream/main).Trim()
+          if ($resolvedUpstream -ne $upstreamTip) {
+            throw "upstream main moved unexpectedly: expected $upstreamTip, got $resolvedUpstream"
+          }
+
+          git merge --no-ff -X ours upstream/main -m "Merge upstream main through 212ceef"
+          $mergeCode = $LASTEXITCODE
+
+          if ($mergeCode -ne 0) {
+            $conflicts = @(git diff --name-only --diff-filter=U)
+            if ($conflicts.Count -eq 0) {
+              throw "git merge failed without reporting conflicted paths"
+            }
+
+            foreach ($file in $conflicts) {
+              git checkout --ours -- "$file"
+              if ($LASTEXITCODE -ne 0) {
+                git rm -f --ignore-unmatch -- "$file"
+              }
+            }
+
+            git add -A
+            git commit -m "Merge upstream main through 212ceef"
+          }
+
+          $unmerged = @(git diff --name-only --diff-filter=U)
+          if ($unmerged.Count -ne 0) {
+            throw "unresolved merge conflicts remain: $($unmerged -join ', ')"
+          }
+
+          $mergedSha = (git rev-parse HEAD).Trim()
+          "merged_sha=$mergedSha" >> $env:GITHUB_OUTPUT
+
+          git push origin HEAD:main
+
+      - name: Set up Bun 1.4.0
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location launcher
+          bun install --frozen-lockfile
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { exit $code }
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify
+        shell: pwsh
+        run: bun run verify
+
+      - name: Package Windows installer
+        shell: pwsh
+        run: bun run app:package
+
+      - name: Smoke test packaged app
+        shell: pwsh
+        run: bun run app:smoke
+
+      - name: Publish v6.0.0 custom Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGED_SHA: ${{ steps.merge.outputs.merged_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "v6.0.0-custom-windows"
+          $title = "Codex Web GPT v6.0.0 Custom Windows"
+
+          $exeFiles = @(Get-ChildItem -Path "launcher/artifacts" -Filter "*.exe" -File)
+          if ($exeFiles.Count -ne 1) {
+            throw "Expected exactly one Windows installer, found $($exeFiles.Count)"
+          }
+          $exe = $exeFiles[0]
+          $hash = (Get-FileHash -Algorithm SHA256 $exe.FullName).Hash.ToLowerInvariant()
+          "$hash  $($exe.Name)" | Set-Content -Path "SHA256SUMS.txt" -Encoding ascii
+
+          git tag -f $tag $env:MERGED_SHA
+          git push origin "refs/tags/$tag" --force
+
+          $body = @"
+          ## Codex Web GPT v6.0.0 — Custom Windows build
+
+          Built from `main` at commit `$env:MERGED_SHA` after:
+          - removing local commits `08cc6812fe953dd53ef2433f5a294a517999a002`, `f06964c11ce0def1ed62d1e6474aae07f5b1ec9f`, and `b93f1a5b3babfae52f5265c4d13ddeddab789a04`;
+          - preserving the prior 82 custom commits;
+          - merging the five upstream commits through `212ceef2acac9d6ee0f3c9037abfaf4ad8ff9827`.
+
+          Windows validation:
+          - `bun run verify`
+          - `bun run app:package`
+          - `bun run app:smoke`
+          - AVX2-independent Bun 1.4.0 runtime preparation
+
+          Installer:
+          - `$($exe.Name)`
+          - SHA-256: `$hash`
+          "@
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $exe.FullName "SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title $title --notes $body --latest
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            gh release create $tag $exe.FullName "SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --title $title --notes $body --latest
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Delete all non-main branches
+        shell: pwsh
+        run: |
+          git push origin --delete upgrade/upstream-v6.0.0
+          git push origin --delete vendor/eaf-base
+          git push origin --delete vendor/upstream-v6.0.0
