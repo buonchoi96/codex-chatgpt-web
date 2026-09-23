@@ -43,7 +43,7 @@ test("completion receipt recovery uses the dedicated terminal tool for complete 
 });
 
 test("Full Harness transport keeps command results intermediate until the completion receipt", () => {
-  const parsed = parseRequest(rawWireRequest(environmentXml));
+  const parsed = rawWireRequest(environmentXml);
   const compiled = compileChatGptWebPrompt(
     parsed,
     { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
