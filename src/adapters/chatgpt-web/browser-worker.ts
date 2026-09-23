@@ -86,6 +86,7 @@ import {
   ChatGptCompactionHandoffAccepted,
   ChatGptWebAdapterError,
   chatGptBrowserTabClosedError,
+  chatGptRetainedConnectorUnavailableError,
   chatGptRetainedConversationUnavailableError,
   chatGptStoppedThinkingError,
 } from "./adapter-error";
@@ -3547,6 +3548,7 @@ export class ChatGptBrowserWorker {
     await throwIfChatGptRateLimitDialog(page);
     throwIfPromptAttachmentAborted(abortSignal);
     let connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector, reuseConnector);
+    let staleRetainedConnector = false;
     let composerMutationStarted = false;
     try {
       if (connectorMode === "retained") {
@@ -3556,6 +3558,7 @@ export class ChatGptBrowserWorker {
             `[chatgpt-web] retained connector binding for ${JSON.stringify(this.config.appName)} is stale; reselecting with ${CHATGPT_CONNECTOR_MENTION_QUERY}`,
           );
           await captureDiagnostic?.("connector-binding-stale");
+          staleRetainedConnector = true;
           connectorMode = "mention";
         } else {
           await captureDiagnostic?.("connector-retained-verified");
@@ -3597,6 +3600,17 @@ export class ChatGptBrowserWorker {
       await this.insertPromptText(page, ` ${prompt}`, abortSignal);
       await this.assertPromptAttached(page, prompt, abortSignal);
     } catch (error) {
+      if (staleRetainedConnector
+        && error instanceof ChatGptWebAdapterError
+        && error.code === "connector_not_found") {
+        console.warn(
+          `[chatgpt-web] retained connector ${JSON.stringify(this.config.appName)} is absent from the live catalog; retiring the retained surface for a fresh-turn retry`,
+        );
+        if (captureDiagnostic) {
+          await captureDiagnostic("connector-retained-reselect-failed").catch(() => {});
+        }
+        throw chatGptRetainedConnectorUnavailableError(error);
+      }
       if (!composerMutationStarted || error instanceof ChatGptPersistentBrowserStateError) throw error;
       try {
         await this.clearChatGptComposerState(page);

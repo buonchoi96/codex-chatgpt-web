@@ -112,6 +112,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Treat every explicit deliverable in the active Codex request as part of one task completion condition.",
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
+  "A successful command, inspection, inventory lookup, or intermediate tool result is progress only. Do not end the response while any requested edit, test, validation, publication, or other actionable requirement remains; continue the Codex Native tool loop.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For Windows Computer Use observation, use codex_windows_computer_use_observe with the matching operation. Do not route Windows observation through the generic codex_readonly_tool_call unless the dedicated observation bridge is unavailable.",
   "For Windows Computer Use interaction, use codex_windows_computer_use_action with the matching fixed operation. Use codex_windows_computer_use_call only as a compatibility fallback when the dedicated action bridge is unavailable.",

@@ -42,6 +42,18 @@ test("completion receipt recovery uses the dedicated terminal tool for complete 
   expect(prompt).not.toContain("wire_name codex.control.turn_complete");
 });
 
+test("Full Harness transport keeps command results intermediate until the completion receipt", () => {
+  const parsed = parseRequest(rawWireRequest(environmentXml));
+  const compiled = compileChatGptWebPrompt(
+    parsed,
+    { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+    "turn_abcdefghijklmnopqrstuvwxyz012345",
+  );
+  expect(compiled.text).toContain("Treat every command, inspection, inventory lookup, and intermediate tool result as progress only.");
+  expect(compiled.text).toContain("A successful command or inspection is only an intermediate checkpoint");
+  expect(compiled.text).toContain("dedicated codex_turn_complete");
+});
+
 test("current-turn MCP progress tracks active calls without claiming completion", async () => {
   const progress = new ChatGptExternalTurnProgress();
   expect(chatGptExternalProgressIsLive(progress.snapshot(), 1_000, 60_000)).toBeFalse();

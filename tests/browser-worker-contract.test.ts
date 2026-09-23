@@ -7,7 +7,7 @@ import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
 import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, chatGptCompletionReceiptRecoveryPrompt, chatGptFinalIndicatesSafetyBlocked, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
-import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
+import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { CHATGPT_CONNECTOR_NAME, DEV_CHATGPT_CONNECTOR_NAME, defaultChromeExecutable, legacyChatGptConnectorMigrationMessage } from "../src/config";
@@ -333,6 +333,61 @@ test("a stale retained connector pill falls back to a fresh @codex selection bef
   expect(calls).toContain("insert: continue task");
   expect(calls).toContain("assert:continue task");
   expect(calls).not.toContain("clear");
+});
+
+test("a retained connector missing from the live menu requests a bounded fresh-surface retry", async () => {
+  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt(
+      page: unknown,
+      prompt: string,
+      localTools: boolean,
+      capture?: (checkpoint: string) => Promise<void>,
+      signal?: AbortSignal,
+      catalogRefreshAvailable?: boolean,
+      attemptBudget?: { triggerAttempts: number },
+      reuseConnector?: boolean,
+      requireThink?: boolean,
+    ): Promise<void>;
+  }).attachPrompt;
+  const page = {
+    locator: () => {
+      const locator = {
+        filter: () => locator,
+        last: () => locator,
+        isVisible: async () => false,
+      };
+      return locator;
+    },
+  };
+  const checkpoints: string[] = [];
+  const failure = await attachPrompt.call({
+    config: { appName: "Codex Native2" },
+    activeComposer: async () => ({}),
+    connectorIsSelected: async () => false,
+    selectConnector: async () => {
+      throw new ChatGptWebAdapterError("connector missing", {
+        status: 424,
+        errorType: "connector_error",
+        code: "connector_not_found",
+        retryable: false,
+      });
+    },
+    clearChatGptComposerState: async () => {},
+  }, page, "continue task", true, async checkpoint => { checkpoints.push(checkpoint); },
+  undefined, false, { triggerAttempts: 0 }, true, false).then(
+    () => undefined,
+    error => error,
+  );
+
+  expect(failure).toBeInstanceOf(ChatGptWebAdapterError);
+  expect(failure).toMatchObject({
+    status: 503,
+    errorType: "connector_error",
+    code: "chatgpt_retained_connector_unavailable",
+    retryable: true,
+  });
+  expect(checkpoints).toContain("connector-binding-stale");
+  expect(checkpoints).toContain("connector-retained-reselect-failed");
 });
 
 test("launcher lease keeps conversation reuse distinct from connector reuse", () => {

@@ -512,6 +512,7 @@ export function compileChatGptWebPrompt(
       "Use actual Codex Native results as evidence for local observations and effects.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
+      "Treat every command, inspection, inventory lookup, and intermediate tool result as progress only. Unless the dedicated codex_turn_complete receipt has already been accepted, immediately continue with the next unfinished actionable requirement instead of ending the response.",
       "For native Windows desktop automation, do not use ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods as a substitute for the outer Codex Windows Computer Use MCP. These surfaces may expose only the browser and do not prove native Win32 window access.",
       "When native Windows interaction is required, use the attached Codex Native Windows bridge. Prefer codex_windows_computer_use_observe for observation and codex_windows_computer_use_action for interaction when those dedicated tools are available. Otherwise discover the loaded windows_computer_use MCP through Codex Native tool inventory/discovery and invoke it through Codex Native.",
       "Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command. tool_search is a Codex Native discovery capability, not an operating-system executable.",
@@ -604,6 +605,7 @@ export function compileChatGptWebPrompt(
       "<codex_transport_resume>",
       "The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.",
       "Immediately before finalizing, compare the entire latest active user request with the work completed in this response. If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.",
+      "A successful command or inspection is only an intermediate checkpoint while later requested edits, tests, validation, publishing, or other deliverables remain. Continue autonomously without waiting for another user message.",
       "When all independently actionable deliverables are complete, call the dedicated codex_turn_complete tool with remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
       "</codex_transport_resume>",
     ]

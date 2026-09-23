@@ -22,6 +22,34 @@ export class ChatGptWebAdapterError extends Error {
   }
 }
 
+export function chatGptRetainedConnectorUnavailableError(cause?: unknown): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    "The retained ChatGPT conversation lost the Codex Native connector and could not restore it. "
+    + "Retry this Codex turn on a fresh ChatGPT surface.",
+    {
+      status: 503,
+      errorType: "connector_error",
+      code: "chatgpt_retained_connector_unavailable",
+      retryable: true,
+      ...(cause === undefined ? {} : { cause }),
+    },
+  );
+}
+
+export function chatGptBrowserHelperExitedError(cause?: unknown): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    "The ChatGPT browser helper exited before the active Codex turn settled. "
+    + "Retry the turn with a fresh browser-helper transport.",
+    {
+      status: 502,
+      errorType: "server_error",
+      code: "chatgpt_browser_helper_exited",
+      retryable: true,
+      ...(cause === undefined ? {} : { cause }),
+    },
+  );
+}
+
 // Only the compaction owner may signal this after the broker accepts its one-shot handoff.
 // It cancels browser observation, while the accepted summary remains the native result.
 export class ChatGptCompactionHandoffAccepted extends DOMException {
