@@ -925,8 +925,9 @@ export async function runChatGptMcpServer(options: {
     ),
   );
 
-  server.registerTool(
-    "codex_readonly_tool_call",
+  if (contract === "native") {
+    server.registerTool(
+      "codex_readonly_tool_call",
     {
       title: "Call a read-only Codex tool",
       description: afterSafeStart(
@@ -987,6 +988,8 @@ export async function runChatGptMcpServer(options: {
       },
     ),
   );
+
+  }
 
   server.registerTool(
     "codex_tool_call",
