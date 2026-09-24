@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   MANAGED_INTERRUPT_HOOK_END,
+  MANAGED_INTERRUPT_HOOK_START,
   codexInterruptHookCommand,
   codexInterruptHookHash,
   installCodexInterruptHook,
