@@ -43,6 +43,48 @@ export function chatGptConversationKey(
   })).digest("hex");
 }
 
+/**
+ * Luna normally uses a fresh ChatGPT surface per native turn so its 28k transport does not
+ * accumulate browser history. A retry inside the SAME native turn is different: the retained
+ * surface already owns the hundreds of tool results that made the current Codex request huge.
+ * Scope this recovery key to thread+turn so a transient browser failure can reuse only that exact
+ * active turn, while the next user turn still starts from a fresh Luna surface.
+ */
+export function chatGptActiveTurnRecoveryConversationKey(
+  parsed: CodexParsedRequest,
+  namespace: string,
+): string | undefined {
+  const identity = extractChatGptTurnIdentity(parsed);
+  if (!identity.threadId || !identity.turnId) return undefined;
+  return createHash("sha256").update(JSON.stringify({
+    namespace,
+    purpose: "active-turn-recovery",
+    threadId: identity.threadId,
+    turnId: identity.turnId,
+    modelId: parsed.modelId,
+    reasoning: parsed.options.reasoning,
+    ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
+  })).digest("hex");
+}
+
+/**
+ * The retained browser conversation already owns the active Luna turn's complete task and tool
+ * transcript. A physical retry therefore needs only a new transport capability, never a replay of
+ * the canonical current-turn history that may already contain hundreds of tool results.
+ */
+export function retainedActiveTurnRecoveryRequest(
+  parsed: CodexParsedRequest,
+): CodexParsedRequest {
+  return {
+    ...parsed,
+    context: {
+      ...parsed.context,
+      systemPrompt: [],
+      messages: [],
+    },
+  };
+}
+
 /** Full history remains canonical; a retained epoch receives only the suffix after its last assistant reply. */
 export function retainedConversationResumeRequest(
   parsed: CodexParsedRequest,

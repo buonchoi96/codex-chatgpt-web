@@ -97,6 +97,13 @@ test("launcher descriptor is owner-only, loopback-only, and process-bound", () =
   }
 });
 
+test("launcher can retain a failed active-turn recovery surface while dropping connector proof", () => {
+  const source = readFileSync(new URL("../launcher/electron/browser-host.cjs", import.meta.url), "utf8");
+  expect(source).toContain('reason: status === "failed" ? "retryable_failure" : "completed"');
+  expect(source).toContain('tab.status = retainRequested ? "ready"');
+  expect(source).toContain('tab.connectorBound = status === "completed" && connectorBound === true');
+});
+
 test("launcher retained tabs preserve conversation identity but invalidate connector proof on full navigation", () => {
   const source = readFileSync(new URL("../launcher/electron/browser-host.cjs", import.meta.url), "utf8");
   const retainedStart = source.indexOf("const retainedMatches = conversationKey");

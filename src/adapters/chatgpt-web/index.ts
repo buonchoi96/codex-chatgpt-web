@@ -46,7 +46,9 @@ import {
   settleActiveZeroRiskCompactionSource,
 } from "./compaction-handoff";
 import {
+  chatGptActiveTurnRecoveryConversationKey,
   chatGptConversationKey,
+  retainedActiveTurnRecoveryRequest,
   retainedConversationResumeRequest,
 } from "./conversation-key";
 
@@ -428,31 +430,45 @@ export function createChatGptWebAdapter(
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
       : { parsed, applied: false };
-    // Withholding the key opts out of retained reuse: the Launcher cannot match an
-    // existing tab, so every turn opens a fresh chat and receives the full prompt.
-    const conversationKey = !parsed._compactionRequest
+    // Ordinary paid-model retention follows the thread/compaction epoch. Luna stays fresh across
+    // native turns, but gets a turn-scoped recovery identity so a transient browser failure after
+    // extensive tool work can reuse the exact active Temporary Chat instead of replaying a huge
+    // current-turn transcript into a new 28k surface.
+    const retainedConversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
       && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
       && mode.localTools
       && retainedLauncherDescriptor
       ? chatGptConversationKey(checkpointInput.parsed, executionNamespace)
       : undefined;
-    const resumeInput = conversationKey
-      ? retainedConversationResumeRequest(checkpointInput.parsed)
+    const lunaRecoveryConversationKey = !parsed._compactionRequest
+      && !freshConversationPerTurn
+      && parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
+      && mode.localTools
+      && retainedLauncherDescriptor
+      ? chatGptActiveTurnRecoveryConversationKey(checkpointInput.parsed, executionNamespace)
       : undefined;
-    const retainConversation = conversationKey !== undefined;
+    const conversationKey = retainedConversationKey ?? lunaRecoveryConversationKey;
+    const lunaActiveTurnRecovery = lunaRecoveryConversationKey !== undefined;
+    const resumeInput = retainedConversationKey
+      ? retainedConversationResumeRequest(checkpointInput.parsed)
+      : lunaActiveTurnRecovery
+        ? retainedActiveTurnRecoveryRequest(checkpointInput.parsed)
+        : undefined;
+    const retainConversation = retainedConversationKey !== undefined;
     const releaseRetainedConversation = conversationKey && retainedLauncherDescriptor
       ? async () => {
         await releaseLauncherRetainedConversation(retainedLauncherDescriptor, conversationKey);
       }
       : undefined;
-    const compileOptionsFor = (input: CodexParsedRequest) => {
+    const compileOptionsFor = (input: CodexParsedRequest, activeTurnRecovery = false) => {
       if (manualRequest) return {};
       const experimentalMultipartParts = experimentalBiggerContext
         ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments)
         : undefined;
       return {
         captureLunaCheckpoint,
+        ...(activeTurnRecovery ? { activeTurnRecovery: true } : {}),
         experimentalSkillAttachments,
         ...(experimentalMultipartParts !== undefined
           ? { experimentalMultipartParts }
@@ -732,7 +748,7 @@ export function createChatGptWebAdapter(
     const externalProgress = new ChatGptExternalTurnProgress();
     let tokenSettled = false;
     let activeToken: string | undefined;
-    const prepareWith = async (input: CodexParsedRequest) => {
+    const prepareWith = async (input: CodexParsedRequest, activeTurnRecovery = false) => {
       let turnToken = activeToken;
       if (!turnToken) {
         turnToken = await broker.register(
@@ -753,7 +769,7 @@ export function createChatGptWebAdapter(
           input,
           turnCapabilities,
           turnToken,
-          compileOptionsFor(input),
+          compileOptionsFor(input, activeTurnRecovery),
         );
         // Publish only after preparation succeeds: otherwise its failure revokes the token
         // before the response observer uses it and masks the cause as an expired capability.
@@ -776,8 +792,10 @@ export function createChatGptWebAdapter(
       ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
       capabilities: turnCapabilities,
       prepare: () => prepareWith(checkpointInput.parsed),
-      ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput) } : {}),
-      ...(retainConversation ? { retainConversation: true, conversationKey } : {}),
+      ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput, lunaActiveTurnRecovery) } : {}),
+      ...(conversationKey ? { conversationKey } : {}),
+      ...(retainConversation ? { retainConversation: true } : {}),
+      ...(lunaActiveTurnRecovery ? { retainConversationOnRetry: true } : {}),
       abortSignal: browserAbort.signal,
       ...(parsed._compactionRequest ? { compaction: true } : {}),
       ...submissionLifecycle,

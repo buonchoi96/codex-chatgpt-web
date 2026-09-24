@@ -2412,25 +2412,34 @@ class BrowserHost {
       );
     }
     const cancelledByUser = this.userCancelledTurnOwners.get(traceId) === helperPid;
-    tab.status = status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
+    const retainRequested = retain
+      && Boolean(tab.conversationKey)
+      && (!tab.connectorIdentity || status !== "completed" || connectorBound);
+    // A failed physical response may be retained only when the worker explicitly requested bounded
+    // same-turn recovery. Connector proof is deliberately dropped on failure; the replacement
+    // helper must reselect Codex Native2 before sending the small recovery prompt.
+    tab.status = retainRequested ? "ready" : status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
     this.syncPowerSaveBlocker();
-    tab.message = status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
+    tab.message = retainRequested && status === "failed"
+      ? "ChatGPT turn paused for recovery"
+      : status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
     tab.loading = false;
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.setBackgroundThrottling(true);
     if (status === "completed") {
       this.logger.info("browser.tab_completed", { tabId: tab.id, traceId });
     }
-    if (status === "completed"
-      && retain
-      && tab.conversationKey
-      && (!tab.connectorIdentity || connectorBound)) {
-      tab.connectorBound = connectorBound === true;
+    if (retainRequested) {
+      tab.connectorBound = status === "completed" && connectorBound === true;
       tab.lastHeartbeatAt = Date.now();
       tab.forceOperationalViewport = false;
       tab.deviceEmulationDirty = true;
       this.syncViewVisibility();
       if (hideAfterTurn && !this.activeTraceId) this.hide();
-      this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });
+      this.logger.info("browser.tab_retained", {
+        tabId: tab.id,
+        traceId,
+        reason: status === "failed" ? "retryable_failure" : "completed",
+      });
       this.publishState?.(this.snapshot());
       this.writeDescriptor();
       return { cancelledByUser };

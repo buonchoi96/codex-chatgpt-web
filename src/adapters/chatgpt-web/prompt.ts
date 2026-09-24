@@ -34,6 +34,8 @@ export interface CompiledChatGptWebPrompt {
 
 export interface CompileChatGptWebPromptOptions {
   captureLunaCheckpoint?: boolean;
+  /** Continue one already-running retained native turn after a transient browser transport failure. */
+  activeTurnRecovery?: boolean;
   experimentalSkillAttachments?: boolean;
   experimentalMultipartParts?: ChatGptWebMultipartPartCount;
   /**
@@ -442,6 +444,7 @@ export function compileChatGptWebPrompt(
     ? { localTools: true, effort: "low" as const, displayLabel: "Zero Risk" as const }
     : resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, capabilities);
   const captureLunaCheckpoint = options?.captureLunaCheckpoint === true;
+  const activeTurnRecovery = options?.activeTurnRecovery === true;
   const multipartParts = options?.experimentalMultipartParts;
   const multipartEnabled = multipartParts !== undefined;
   if (manualControl) {
@@ -463,6 +466,9 @@ export function compileChatGptWebPrompt(
   }
   if (captureLunaCheckpoint && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || parsed._compactionRequest)) {
     throw new Error("Rolling checkpoints are supported only for normal ChatGPT Luna turns");
+  }
+  if (activeTurnRecovery && (parsed._compactionRequest || !mode.localTools)) {
+    throw new Error("Active-turn browser recovery is valid only for normal tool-capable ChatGPT turns");
   }
   if (mode.localTools && !turnToken) {
     throw new Error(manualControl
@@ -601,14 +607,24 @@ export function compileChatGptWebPrompt(
       "</codex_transport_resume>",
     ]
     : mode.localTools
-    ? [
+    ? activeTurnRecovery
+      ? [
+        "<codex_transport_resume>",
+        "This is a transport recovery continuation of the SAME already-running Codex turn. The retained ChatGPT conversation above already contains the active user request, prior reasoning summaries, and all earlier tool calls/results for this turn.",
+        "Do not restart the task, do not repeat completed side effects, and do not re-run earlier inspections merely to reconstruct state. Continue from the latest unfinished requirement visible in this retained conversation.",
+        "Use the exact NEW turn_token from <codex_native_turn_json> unchanged for every subsequent Codex Native call; the capability from the failed physical response is retired.",
+        "If a tool call from the failed transport visibly ended without a result, re-establish only that unresolved operation when necessary; otherwise preserve the already completed work.",
+        "When all independently actionable deliverables are complete, call the dedicated codex_turn_complete tool with remaining_actionable_requirements=[] before writing the final answer.",
+        "</codex_transport_resume>",
+      ]
+      : [
       "<codex_transport_resume>",
       "The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.",
       "Immediately before finalizing, compare the entire latest active user request with the work completed in this response. If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.",
       "A successful command or inspection is only an intermediate checkpoint while later requested edits, tests, validation, publishing, or other deliverables remain. Continue autonomously without waiting for another user message.",
       "When all independently actionable deliverables are complete, call the dedicated codex_turn_complete tool with remaining_actionable_requirements=[] before writing the final answer. A missing completion receipt causes the bridge to request continuation automatically.",
       "</codex_transport_resume>",
-    ]
+      ]
     : [
       "<codex_transport_resume>",
       "The task context is complete. Execute the latest active user request now under the capability contract above.",

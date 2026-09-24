@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
+import {
+  chatGptActiveTurnRecoveryConversationKey,
+  chatGptConversationKey,
+  retainedActiveTurnRecoveryRequest,
+} from "../src/adapters/chatgpt-web/conversation-key";
 import {
   availableChatGptWebModelRoutes,
   CHATGPT_WEB_BACKEND_MODEL,
@@ -280,6 +284,33 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(compact.options.reasoning).toBe("max");
     expect(chatGptConversationKey(compact, "provider"))
       .toBe(chatGptConversationKey(normal, "provider"));
+  });
+
+  test("scopes Luna recovery retention to one exact native turn and strips replay history", () => {
+    const request = parsed("chatgpt-web/gpt-5.6-luna", "low");
+    request._rawBody = {
+      client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread_luna", turn_id: "turn_a" }),
+      },
+    };
+    request.context = {
+      systemPrompt: ["large system context"],
+      messages: [{ role: "user", content: "large current-turn history" }],
+    };
+    const first = chatGptActiveTurnRecoveryConversationKey(request, "provider");
+    const same = chatGptActiveTurnRecoveryConversationKey(structuredClone(request), "provider");
+    const next = structuredClone(request);
+    next._rawBody = {
+      client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread_luna", turn_id: "turn_b" }),
+      },
+    };
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(same).toBe(first);
+    expect(chatGptActiveTurnRecoveryConversationKey(next, "provider")).not.toBe(first);
+    const resume = retainedActiveTurnRecoveryRequest(request);
+    expect(resume.context.systemPrompt).toEqual([]);
+    expect(resume.context.messages).toEqual([]);
   });
 
   test("binds the Luna route to Luna without a selectable effort", () => {

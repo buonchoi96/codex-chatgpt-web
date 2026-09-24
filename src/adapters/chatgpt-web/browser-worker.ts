@@ -1267,7 +1267,10 @@ export interface BrowserTurn {
   prepareResume?: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>;
   /** Select the Codex Native connector without advertising the ordinary turn tool environment. */
   nativeConnector?: boolean;
+  /** Retain successful turns for ordinary cross-turn continuation. */
   retainConversation?: boolean;
+  /** Retain only a retryable failed physical response after proven tool progress. */
+  retainConversationOnRetry?: boolean;
   requireRetainedConversation?: boolean;
   conversationKey?: string;
   onPreparedSelected?: (reused: boolean) => void | Promise<void>;
@@ -1301,6 +1304,17 @@ export interface BrowserTurn {
   /** Require and remove the private Luna checkpoint tail from the visible Markdown stream. */
   captureLunaCheckpoint?: boolean;
   onLunaCheckpoint?: (captured: CapturedChatGptLunaCheckpoint) => void;
+}
+
+export function chatGptRetryableFailureCanRetainConversation(
+  turn: Pick<BrowserTurn, "conversationKey" | "retainConversationOnRetry" | "externalProgress">,
+  error: unknown,
+): boolean {
+  if (!turn.conversationKey || turn.retainConversationOnRetry !== true) return false;
+  if (!(error instanceof ChatGptWebAdapterError) || error.retryable !== true) return false;
+  if (error.code !== "upstream_server_error" && error.code !== "chatgpt_response_page_rebind_failed") return false;
+  const progress = turn.externalProgress?.snapshot();
+  return (progress?.revision ?? 0) > 0;
 }
 
 export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 2;
@@ -4663,6 +4677,13 @@ export class ChatGptBrowserWorker {
       throw error;
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      const retainForRetry = terminal === "failed"
+        && chatGptRetryableFailureCanRetainConversation(turn, originalError);
+      if (retainForRetry) {
+        console.warn(
+          `[chatgpt-web] browser turn ${turn.traceId} retaining its active conversation for bounded retry after proven tool progress`,
+        );
+      }
       try {
         const release = await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
           phase: "end",
@@ -4670,7 +4691,7 @@ export class ChatGptBrowserWorker {
           helperPid: process.pid,
           status: terminal,
           ...(terminalMessage ? { message: terminalMessage } : {}),
-          ...(terminal === "completed" && turn.retainConversation ? { retain: true } : {}),
+          ...((terminal === "completed" && turn.retainConversation) || retainForRetry ? { retain: true } : {}),
           ...(terminal === "completed" && (turn.nativeConnector || turn.capabilities.localToolsEnabled)
             ? { connectorBound: true }
             : {}),
@@ -4833,7 +4854,9 @@ export class ChatGptBrowserWorker {
         // page.evaluate by itself. A failed disconnect is terminal: opening a replacement while
         // the stale probe still owns its transport would recreate the contention this rebind is
         // meant to remove.
-        const connection = await connectAfterClosingBrowserConnection(
+        let connection;
+        try {
+          connection = await connectAfterClosingBrowserConnection(
           previousConnection,
           () => {
             turnConnection = undefined;
@@ -4873,6 +4896,20 @@ export class ChatGptBrowserWorker {
             );
           },
         );
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+          if (error instanceof ChatGptWebAdapterError) throw error;
+          throw new ChatGptWebAdapterError(
+            "ChatGPT could not rebind the existing response page after its DOM transport stalled. Retry the active turn using its retained browser conversation.",
+            {
+              status: 502,
+              errorType: "server_error",
+              code: "chatgpt_response_page_rebind_failed",
+              retryable: true,
+              cause: error,
+            },
+          );
+        }
         turnConnection = connection.browser;
         page = connection.page;
         diagnosticPage = page;
