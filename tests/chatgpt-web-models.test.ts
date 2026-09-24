@@ -295,7 +295,7 @@ describe("fixed ChatGPT Web model routes", () => {
     };
     request.context = {
       systemPrompt: ["large system context"],
-      messages: [{ role: "user", content: "large current-turn history" }],
+      messages: [{ role: "user", content: "large current-turn history", timestamp: 1 }],
     };
     const first = chatGptActiveTurnRecoveryConversationKey(request, "provider");
     const same = chatGptActiveTurnRecoveryConversationKey(structuredClone(request), "provider");
