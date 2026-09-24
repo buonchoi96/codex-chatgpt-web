@@ -166,6 +166,14 @@ Also try recreating **Codex Native2** as a new connector with the same Tunnel an
 actions**, then run **Verify runtime**. If tools are already missing in a fresh chat, report that
 separately with a safe log and the browser's actual connector/tool state.
 
+If ChatGPT itself returns `FORBIDDEN: This conversation does not support developer MCPs`, the
+request was rejected by ChatGPT before it reached the Tunnel or local broker. Automatic mode now
+retires that capability-dead conversation and retries the Codex turn on a fresh ChatGPT surface
+instead of spending the completion-receipt recovery budget on the same conversation. If the same
+FORBIDDEN result repeats in every fresh chat, verify that the launcher browser is signed into the
+intended account/workspace, that Developer Mode is enabled there, and that its plan/workspace policy
+permits the connector's actions. The launcher cannot override an account-side developer-MCP gate.
+
 ### Windows: `unable to verify the first certificate`
 
 For this error during **Connect harness**, check the affected host with Windows `curl.exe -Iv`

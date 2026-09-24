@@ -1353,6 +1353,13 @@ export function chatGptFinalIndicatesSafetyBlocked(text: string): boolean {
     || /(?:^|\b)[a-z0-9_]*safety_blocked(?:\b|$)/i.test(text);
 }
 
+export function chatGptFinalIndicatesDeveloperMcpUnavailable(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("this conversation does not support developer mcps")
+    || normalized.includes("this conversation does not support developer mcp");
+}
+
 interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
@@ -5436,6 +5443,19 @@ export class ChatGptBrowserWorker {
               ? await waitForChatGptCompletionReceipt(turn.completionFence.receiptReady)
               : true;
             if (!completionReceiptReady) {
+              if (chatGptFinalIndicatesDeveloperMcpUnavailable(snapshot.visibleText)) {
+                await diagnostics.capture(page, "developer-mcp-conversation-unavailable").catch(() => {});
+                throw new ChatGptWebAdapterError(
+                  "ChatGPT marked this conversation as unavailable for developer MCP calls. "
+                  + "Retire this ChatGPT surface and retry the active Codex turn on a fresh conversation.",
+                  {
+                    status: 503,
+                    errorType: "connector_error",
+                    code: "chatgpt_developer_mcp_conversation_unavailable",
+                    retryable: true,
+                  },
+                );
+              }
               if (chatGptFinalIndicatesSafetyBlocked(snapshot.visibleText)) {
                 throw new ChatGptWebAdapterError(
                   "ChatGPT reported a safety-blocked terminal outcome before an accepted Full Harness completion receipt.",
