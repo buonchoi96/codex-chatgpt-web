@@ -202,8 +202,8 @@ describe("native /models augmentation", () => {
       effectiveContextWindowPercent: model.effective_context_window_percent,
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 3, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 32_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
       { contextWindow: 1_050_000, effectiveContextWindowPercent: 3, autoCompactTokenLimit: 32_000 },
       { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
       { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
@@ -248,7 +248,7 @@ describe("native /models augmentation", () => {
       supported_reasoning_levels: [{ effort: "low", description: CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE.displayName }],
       context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
       max_context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      effective_context_window_percent: 9,
+      effective_context_window_percent: 100,
       auto_compact_token_limit: 96_000,
     });
 
