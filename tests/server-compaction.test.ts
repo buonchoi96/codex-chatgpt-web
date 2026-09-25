@@ -61,7 +61,8 @@ const responseRequest: typeof respond = (request, config, factory, options) =>
   respond(request, config, factory, { ...options, rememberState: false });
 
 
-for (const stream of [false, true]) test(`browser prompt-too-long auto compacts and retries once (stream=${stream})`, async () => {
+for (const triggerCode of ["browser_prompt_too_long", "message_length_exceeds_limit"] as const) {
+  for (const stream of [false, true]) test(`browser size rejection auto compacts once (code=${triggerCode}, stream=${stream})`, async () => {
   const config = defaultConfig("full");
   let normalAttempts = 0;
   let compactionAttempts = 0;
@@ -91,8 +92,8 @@ for (const stream of [false, true]) test(`browser prompt-too-long auto compacts 
           message: "ChatGPT rejected the browser composer before submission because the prompt is too long",
           status: 413,
           errorType: "browser_transport_error",
-          code: "browser_prompt_too_long",
-          retryable: true,
+          code: triggerCode,
+          retryable: triggerCode === "browser_prompt_too_long",
         });
         return;
       }
@@ -120,7 +121,8 @@ for (const stream of [false, true]) test(`browser prompt-too-long auto compacts 
   expect(JSON.stringify(json.output)).toContain("Retried after automatic compaction");
   expect(normalAttempts).toBe(2);
   expect(compactionAttempts).toBe(1);
-});
+  });
+}
 
 test("manual and automatic compaction both normalize to the same compaction request flag", async () => {
   const seen: Array<{ compaction: boolean; last: unknown }> = [];
