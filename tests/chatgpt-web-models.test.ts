@@ -215,7 +215,7 @@ describe("fixed ChatGPT Web model routes", () => {
     })).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 1_050_000,
+      autoCompactTokenLimit: 600_000,
     });
   });
 
@@ -235,7 +235,7 @@ describe("fixed ChatGPT Web model routes", () => {
     })).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 1_050_000,
+      autoCompactTokenLimit: 600_000,
     });
   });
 
