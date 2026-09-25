@@ -32,7 +32,6 @@ import {
   type ChatGptWebModelMode,
 } from "./model";
 import {
-  CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET,
   compiledChatGptWebMaxMessageChars,
   estimateChatGptWebImageTokens,
   estimateCompiledChatGptWebMessageTokens,
@@ -940,15 +939,6 @@ export function assertChatGptWebInputWithinLimits(
   if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new Error(`ChatGPT web context limit is not defined for model: ${modelId}`);
   }
-  if (
-    modelId === CHATGPT_WEB_LUNA_MODEL_ID
-    && estimatedInputTokens > CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET
-  ) {
-    throw new ChatGptWebAdapterError(
-      `This Luna turn requires ${estimatedInputTokens.toLocaleString("en-US")} estimated input tokens, which exceeds the measured ${CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET.toLocaleString("en-US")}-token ChatGPT Free browser transport budget. Completed Luna history is already replaced by its rolling checkpoint; the remaining payload is the current Codex turn and cannot be reduced by /compact.`,
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
-    );
-  }
   const { contextWindow } = resolveChatGptWebContextLimits(modelId, effort, capabilities);
   const { browserMessageTokenLimit, browserComposerCharLimit } = resolveChatGptWebTransportLimits(
     modelId,
@@ -1000,7 +990,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
   }
   if (modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new ChatGptWebAdapterError(
-      "Bigger Context is unavailable for Luna because every later browser request includes the accumulated transcript inside the same 28,000-token transport budget.",
+      "Bigger Context is unavailable for Luna because Luna already uses its native 1.05M-token model window with rolling checkpoints; multipart staging is not enabled for this route.",
       { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
     );
   }
