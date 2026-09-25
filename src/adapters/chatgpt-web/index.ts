@@ -433,7 +433,7 @@ export function createChatGptWebAdapter(
     // Ordinary paid-model retention follows the thread/compaction epoch. Luna stays fresh across
     // native turns, but gets a turn-scoped recovery identity so a transient browser failure after
     // extensive tool work can reuse the exact active Temporary Chat instead of replaying a huge
-    // current-turn transcript into a new 28k surface.
+    // current-turn transcript into another browser surface.
     const retainedConversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
       && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
@@ -901,8 +901,10 @@ export function createChatGptWebAdapter(
           }
         }
         if (parsed._compactionRequest) {
-          const structuredCompactionRequired = parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
-            && configuredCapabilities.localToolsEnabled;
+          // Full-Harness Luna can reach this path during a long active Computer Use turn.
+          // Rolling checkpoints optimize completed Luna history, but they do not replace native
+          // mid-turn compaction of the currently active Codex task.
+          const structuredCompactionRequired = configuredCapabilities.localToolsEnabled;
           if (structuredCompactionRequired
             && (!retainedLauncherDescriptor || (!manualRequest && !structuredBroker))) {
             emit({
