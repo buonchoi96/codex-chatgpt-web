@@ -44,9 +44,9 @@ export function chatGptConversationKey(
 }
 
 /**
- * Luna normally uses a fresh ChatGPT surface per native turn so its 28k transport does not
- * accumulate browser history. A retry inside the SAME native turn is different: the retained
- * surface already owns the hundreds of tool results that made the current Codex request huge.
+ * Luna normally uses a fresh ChatGPT surface per native turn so completed browser history does not
+ * accumulate across native turns. A retry inside the SAME native turn is different: the retained
+ * surface already owns the potentially large tool transcript for that active Codex turn.
  * Scope this recovery key to thread+turn so a transient browser failure can reuse only that exact
  * active turn, while the next user turn still starts from a fresh Luna surface.
  */
