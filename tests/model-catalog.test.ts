@@ -202,12 +202,12 @@ describe("native /models augmentation", () => {
       effectiveContextWindowPercent: model.effective_context_window_percent,
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
-      { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 3, autoCompactTokenLimit: 32_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 3, autoCompactTokenLimit: 32_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
     ]);
   });
 
@@ -248,7 +248,7 @@ describe("native /models augmentation", () => {
       supported_reasoning_levels: [{ effort: "low", description: CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE.displayName }],
       context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
       max_context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      effective_context_window_percent: 78,
+      effective_context_window_percent: 9,
       auto_compact_token_limit: 96_000,
     });
 
@@ -260,7 +260,7 @@ describe("native /models augmentation", () => {
       slug: CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE.slug,
       display_name: CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE.displayName,
       input_modalities: ["text"],
-      context_window: 336_579,
+      context_window: 1_050_000,
       auto_compact_token_limit: 285_000,
     });
   });
