@@ -530,7 +530,7 @@ test("a long task keeps the newest images and drops the overflow instead of fail
   expect(compiled.text).toContain("step 13");
 });
 
-test("Web compaction attaches the newest ten images as files and never embeds their base64 in prompt text", () => {
+test("Web compaction is text-only and never depends on image upload quota", () => {
   const imagePayloads = Array.from({ length: 13 }, (_unused, index) =>
     Buffer.from(`compaction-image-${index + 1}`).toString("base64"));
   const parsed: CodexParsedRequest = {
@@ -556,13 +556,13 @@ test("Web compaction attaches the newest ten images as files and never embeds th
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   );
 
-  expect(compiled.images.map(image => image.imageUrl)).toEqual(
-    imagePayloads.slice(-10).map(payload => `data:image/png;base64,${payload}`),
-  );
+  expect(compiled.images).toEqual([]);
+  expect(compiled.skillFiles).toBeUndefined();
   expect(compiled.text).not.toContain("data:image");
   for (const payload of imagePayloads) expect(compiled.text).not.toContain(payload);
-  expect(compiled.text.match(/"type":"image_attachment"/g)).toHaveLength(10);
-  expect(compiled.text.match(/older image not attached/g)).toHaveLength(3);
+  expect(compiled.text).not.toContain('"type":"image_attachment"');
+  expect(compiled.text.match(/image omitted from compaction transport/g)).toHaveLength(13);
+  expect(compiled.text).not.toContain("older image not attached");
 });
 
 test("persisted one-pixel image sentinels are not attached to ChatGPT", () => {
