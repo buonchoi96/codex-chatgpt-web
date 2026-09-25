@@ -2675,7 +2675,7 @@ test("image attachment readiness uses exact file tiles and not localized remove-
         waitFor: async (state: { state: string; timeout: number }) => {
           expect(state.state).toBe("visible");
           expect(state.timeout).toBeGreaterThan(0);
-          expect(state.timeout).toBeLessThanOrEqual(120_000);
+          expect(state.timeout).toBeLessThanOrEqual(300_000);
           calls.push(["fileTile", options.name]);
         },
       };
@@ -4251,7 +4251,7 @@ test("silent running turns become retryable stalls while real progress resets th
   expect(tracker.update({ ...base, visibleText: "progress", externalToolCallsInFlight: false }, 16_000)).toBeTrue();
 
   expect(tracker.update({ ...base, running: false }, 20_000)).toBeFalse();
-  expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(5 * 60_000);
+  expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(750_000);
 });
 
 test("stale MCP progress stops suppressing DOM health without penalising long active turns", () => {
