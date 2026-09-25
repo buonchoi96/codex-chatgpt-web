@@ -2726,6 +2726,104 @@ test("image attachment readiness uses exact file tiles and not localized remove-
   ]);
 });
 
+test("generic ZIP attachment readiness accepts a filename inside a richer attachment label", async () => {
+  const calls: string[] = [];
+  const visibleTile = {
+    or() { return this; },
+    isVisible: async () => true,
+  };
+  const hiddenTile = {
+    or(other: unknown) { return other as typeof visibleTile; },
+    isVisible: async () => false,
+    filter() { return this; },
+  };
+  const send = { isEnabled: async () => true };
+  const composerForm = {
+    getByRole: (role: string, options: { name: string; exact: boolean }) => {
+      if (role === "group") {
+        expect(options.name).toBe("codex-context-aaaaaaaaaaaaaaaa.zip");
+        expect(options.exact).toBeFalse();
+        return visibleTile;
+      }
+      expect(role).toBe("button");
+      return hiddenTile;
+    },
+    locator: (selector: string) => {
+      if (selector === CHATGPT_SEND_BUTTON_SELECTOR) return send;
+      return hiddenTile;
+    },
+  };
+  const composer = { locator: () => composerForm };
+  const input = {
+    waitFor: async () => { calls.push("input-ready"); },
+    setInputFiles: async (files: Array<{ name: string }>) => {
+      expect(files.map(file => file.name)).toEqual(["codex-context-aaaaaaaaaaaaaaaa.zip"]);
+      calls.push("zip-set");
+    },
+  };
+  const page = {
+    locator: (selector: string) => selector.includes('input[data-testid="upload-photos-input"]')
+      ? input
+      : { allInnerTexts: async () => [] },
+  };
+  const attachFiles = (ChatGptBrowserWorker.prototype as any).attachFiles;
+  const evidence = await attachFiles.call({
+    activeComposer: async () => composer,
+    currentSubmissionEvidence: async () => { throw new Error("must not inspect submission after tile is ready"); },
+  }, page, {
+    text: "archive",
+    images: [],
+    archive: {
+      name: "codex-context-aaaaaaaaaaaaaaaa.zip",
+      contextText: "complete context",
+    },
+  }, 1_000, { initialTurnIdentities: [], domCache: {} });
+
+  expect(evidence).toBeUndefined();
+  expect(calls).toEqual(["input-ready", "zip-set"]);
+});
+
+test("file attachment observation yields to authoritative submission evidence instead of replaying", async () => {
+  let evidenceReads = 0;
+  const hiddenTile = {
+    or() { return this; },
+    filter() { return this; },
+    isVisible: async () => false,
+  };
+  const composerForm = {
+    getByRole: () => hiddenTile,
+    locator: () => hiddenTile,
+  };
+  const composer = { locator: () => composerForm };
+  const input = {
+    waitFor: async () => {},
+    setInputFiles: async () => {},
+  };
+  const page = {
+    locator: (selector: string) => selector.includes('input[data-testid="upload-photos-input"]')
+      ? input
+      : { allInnerTexts: async () => [] },
+  };
+  const attachFiles = (ChatGptBrowserWorker.prototype as any).attachFiles;
+  const evidence = await attachFiles.call({
+    activeComposer: async () => composer,
+    currentSubmissionEvidence: async () => {
+      evidenceReads += 1;
+      return "assistant_turn";
+    },
+  }, page, {
+    text: "archive",
+    images: [],
+    archive: {
+      name: "codex-context-bbbbbbbbbbbbbbbb.zip",
+      contextText: "complete context",
+    },
+  }, 1_000, { initialTurnIdentities: [], domCache: {} });
+
+  expect(evidence).toBe("assistant_turn");
+  expect(evidenceReads).toBe(1);
+});
+
 test("effort slider ARIA state fails closed on malformed and unsupported ranges", () => {
   expect(parseChatGptEffortSliderState("0", "4", "3")).toEqual({ min: 0, max: 4, value: 3 });
   for (const attributes of [

@@ -4323,23 +4323,59 @@ export class ChatGptBrowserWorker {
     page: Page,
     prompt: CompiledChatGptWebPrompt,
     timeoutMs: number = browserStageTimeouts.fileAttachment,
-  ): Promise<void> {
+    submissionBaseline?: ChatGptSubmissionBaseline,
+    abortSignal?: AbortSignal,
+  ): Promise<ChatGptSubmissionEvidence | undefined> {
     const files = chatGptPromptFilePayloads(prompt);
-    if (files.length === 0) return;
+    if (files.length === 0) return undefined;
     const deadline = Date.now() + timeoutMs;
     const remaining = () => Math.max(1, deadline - Date.now());
     const composer = await this.activeComposer(page);
     const composerForm = composer.locator("xpath=ancestor::form[1]");
     const input = page.locator('input[data-testid="upload-photos-input"], form[data-chatgpt-composer] input[type="file"][multiple]:not([accept])');
+    throwIfPromptAttachmentAborted(abortSignal);
     await input.waitFor({ state: "attached", timeout: Math.min(20_000, remaining()) });
     await input.setInputFiles(files, { timeout: remaining() });
-    try {
-      await Promise.all(files.map(file => (
-        composerForm.getByRole("group", { name: file.name, exact: true })
-          .or(composerForm.locator(`.composer-attachment-surface[role="button"][aria-label=${JSON.stringify(file.name)}]`))
-          .waitFor({ state: "visible", timeout: remaining() })
-      )));
-    } catch {
+
+    // Images and generic files do not use the same accessible attachment tile. In particular,
+    // ZIP uploads can expose a filename inside a richer group/button label rather than an exact
+    // group name. Scope every relaxed match to the attachment surface so the filename in the
+    // ordinary composer prompt cannot satisfy readiness by itself.
+    const attachmentTiles = files.map(file => (
+      composerForm.getByRole("group", { name: file.name, exact: false })
+        .or(composerForm.getByRole("button", { name: file.name, exact: false }))
+        .or(composerForm.locator(
+          `.composer-attachment-surface[aria-label*=${JSON.stringify(file.name)}]`,
+        ))
+        .or(composerForm.locator(".composer-attachment-surface").filter({ hasText: file.name }))
+    ));
+    let attachmentsReady = false;
+    while (Date.now() < deadline) {
+      throwIfPromptAttachmentAborted(abortSignal);
+      const visible = await Promise.all(
+        attachmentTiles.map(tile => tile.isVisible().catch(() => false)),
+      );
+      if (visible.every(Boolean)) {
+        attachmentsReady = true;
+        break;
+      }
+      // A human or ChatGPT-side event can submit the composer while file readiness is being
+      // observed. Once a new turn exists, replaying or waiting for a tile that has disappeared is
+      // wrong: return the authoritative submission evidence and let the caller observe the answer.
+      if (submissionBaseline) {
+        const evidence = await this.currentSubmissionEvidence(
+          page,
+          submissionBaseline,
+          abortSignal,
+        );
+        if (evidence) return evidence;
+      }
+      await withBrowserTurnAbort(
+        new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, remaining()))),
+        abortSignal,
+      );
+    }
+    if (!attachmentsReady) {
       const alerts = (await page.locator('[role="alert"]').allInnerTexts().catch(() => []))
         .map(text => text.replace(/\s+/g, " ").trim())
         .filter(Boolean);
@@ -4348,10 +4384,23 @@ export class ChatGptBrowserWorker {
         + (alerts.length > 0 ? `: ${alerts.join(" | ")}` : ""),
       );
     }
+
     const send = composerForm.locator(CHATGPT_SEND_BUTTON_SELECTOR);
     while (Date.now() < deadline) {
-      if (await send.isEnabled().catch(() => false)) return;
-      await new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, remaining())));
+      throwIfPromptAttachmentAborted(abortSignal);
+      if (await send.isEnabled().catch(() => false)) return undefined;
+      if (submissionBaseline) {
+        const evidence = await this.currentSubmissionEvidence(
+          page,
+          submissionBaseline,
+          abortSignal,
+        );
+        if (evidence) return evidence;
+      }
+      await withBrowserTurnAbort(
+        new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, remaining()))),
+        abortSignal,
+      );
     }
     throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
   }
@@ -5261,8 +5310,15 @@ export class ChatGptBrowserWorker {
       const launcherObservationRecovery = launcherSurfaceId !== undefined
         && this.config.browserHostDescriptorPath !== undefined;
       await diagnostics.capture(page, "browser-page-acquired");
+      const transportKind = prepared.multipart
+        ? `multipart-${prepared.multipart.parts.length}`
+        : prepared.archive
+          ? "archive-zip"
+          : prepared.contextFile
+            ? "context-text-file"
+            : "inline";
       console.info(
-        `[chatgpt-web] browser turn ${turn.traceId} opened (transport=${prepared.multipart ? `multipart-${prepared.multipart.parts.length}` : "inline"}, maxMessageChars=${maxMessageChars}, estimatedInputTokens=${estimatedInputTokens}, images=${prepared.images.length}, compactionTrimmedMessages=${prepared.trimmedCompactionMessages ?? 0})`,
+        `[chatgpt-web] browser turn ${turn.traceId} opened (transport=${transportKind}, maxMessageChars=${maxMessageChars}, estimatedInputTokens=${estimatedInputTokens}, images=${prepared.images.length}, compactionTrimmedMessages=${prepared.trimmedCompactionMessages ?? 0})`,
       );
       if (multipartStages) {
         console.info(
@@ -5507,17 +5563,39 @@ export class ChatGptBrowserWorker {
         }
       }
       await diagnostics.capture(page, "prompt-attachment-complete");
+      let attachmentSubmissionEvidence: ChatGptSubmissionEvidence | undefined;
       try {
         const attachmentTimeout = turn.compaction
           ? CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS
           : browserStageTimeouts.fileAttachment;
-        await this.runStage(turn.traceId, "file_attachment", attachmentTimeout + 5_000, () => (
-          this.attachFiles(page, prepared, attachmentTimeout)
-        ));
+        attachmentSubmissionEvidence = await this.runStage(
+          turn.traceId,
+          "file_attachment",
+          attachmentTimeout + 5_000,
+          (stageSignal) => this.attachFiles(
+            page,
+            prepared,
+            attachmentTimeout,
+            submissionBaseline,
+            turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+          ),
+        );
       } catch (error) {
         const hasAttachments = chatGptPromptFilePayloads(prepared).length > 0;
-        const submissionEvidence = await this.currentSubmissionEvidence(page, submissionBaseline).catch(() => undefined);
-        if (prepared.archive && hasAttachments && !submissionEvidence) {
+        const submissionEvidence = await this.currentSubmissionEvidence(
+          page,
+          submissionBaseline,
+          turn.abortSignal,
+        ).catch(() => undefined);
+        if (submissionEvidence) {
+          // Submission evidence is authoritative even if the attachment tile observer lost the
+          // race. Never replay or fail a prompt that ChatGPT has already accepted.
+          attachmentSubmissionEvidence = submissionEvidence;
+          await diagnostics.capture(page, "file-attachment-submission-recovered", error);
+          console.warn(
+            `[chatgpt-web] browser turn ${turn.traceId} recovered submission during file attachment evidence=${submissionEvidence}; skipping Send replay`,
+          );
+        } else if (prepared.archive && hasAttachments) {
           await diagnostics.capture(page, "context-archive-attachment-fallback", error);
           throw new ChatGptWebAdapterError(
             "ChatGPT could not finish uploading the ZIP context bundle before Send activation. Retry the same turn with one UTF-8 context file.",
@@ -5529,8 +5607,7 @@ export class ChatGptBrowserWorker {
               cause: error,
             },
           );
-        }
-        if (turn.compaction && hasAttachments && !submissionEvidence) {
+        } else if (turn.compaction && hasAttachments) {
           await diagnostics.capture(page, "compaction-attachment-fallback", error);
           throw new ChatGptWebAdapterError(
             "ChatGPT could not finish uploading compaction attachments before the fallback deadline. Retry this same compaction as text-only.",
@@ -5542,13 +5619,22 @@ export class ChatGptBrowserWorker {
               cause: error,
             },
           );
+        } else {
+          throw error;
         }
-        throw error;
       }
-      await diagnostics.capture(page, "file-attachment-complete");
+      await diagnostics.capture(
+        page,
+        attachmentSubmissionEvidence
+          ? "file-attachment-submission-observed"
+          : "file-attachment-complete",
+      );
       let completionTracker = new ChatGptCompletionTracker();
       let finalSubmissionEvidence: ChatGptSubmissionEvidence;
-      try {
+      if (attachmentSubmissionEvidence) {
+        finalSubmissionEvidence = attachmentSubmissionEvidence;
+        await turn.onSubmitted?.();
+      } else try {
         finalSubmissionEvidence = await this.runStage(
           turn.traceId,
           "send",
@@ -5584,7 +5670,7 @@ export class ChatGptBrowserWorker {
         ).catch(() => undefined);
         if (!lateEvidence) throw error;
         finalSubmissionEvidence = lateEvidence;
-        turn.onSubmitted?.();
+        await turn.onSubmitted?.();
         await diagnostics.capture(page, "send-timeout-late-evidence");
         console.warn(
           `[chatgpt-web] browser turn ${turn.traceId} recovered a timed-out send from DOM evidence=${lateEvidence}; refusing to replay the prompt`,

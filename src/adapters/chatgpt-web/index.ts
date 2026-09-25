@@ -711,6 +711,12 @@ export function createChatGptWebAdapter(
         reasoning: parsed.options.reasoning,
         ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
         capabilities: turnCapabilities,
+        // Native /compact in Full Harness is still a Codex-owned control turn. Select the
+        // configured connector even though the compaction prompt itself is intentionally
+        // tool-free, matching retained compaction handoff semantics.
+        ...(parsed._compactionRequest && configuredCapabilities.localToolsEnabled
+          ? { nativeConnector: true }
+          : {}),
         prepare: async () => ({
           ...compileChatGptWebPrompt(
             checkpointInput.parsed,

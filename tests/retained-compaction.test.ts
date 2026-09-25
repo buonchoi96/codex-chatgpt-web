@@ -1268,6 +1268,8 @@ test.each([false, true])("structured compact rebuilds canonical context when its
     expect(turn.requireRetainedConversation).toBeUndefined();
     expect(turn.conversationKey).toBeUndefined();
     expect(turn.compaction).toBeTrue();
+    expect(turn.nativeConnector).toBeTrue();
+    expect(turn.capabilities.localToolsEnabled).toBeFalse();
     const prepared = await turn.prepare();
     const contextText = prepared.archive?.contextText ?? prepared.multipart?.parts.join("\n") ?? prepared.text;
     expect(contextText).toContain("Original task");
@@ -1329,7 +1331,13 @@ test.each([false, true])("configured fresh compaction waits for cleanup and pres
   const worker = ChatGptBrowserWorker.forProvider(provider);
   const originalRun = worker.run;
   let starts = 0;
-  worker.run = async () => { starts += 1; return "Fresh checkpoint"; };
+  worker.run = async turn => {
+    starts += 1;
+    expect(turn.compaction).toBeTrue();
+    expect(turn.nativeConnector).toBeTrue();
+    expect(turn.capabilities.localToolsEnabled).toBeFalse();
+    return "Fresh checkpoint";
+  };
   const events: AdapterEvent[] = [];
   let pending: Promise<void> | undefined;
   try {
