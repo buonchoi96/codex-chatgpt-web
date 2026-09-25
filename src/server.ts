@@ -30,7 +30,6 @@ import {
   type CodexModelContextOverride,
 } from "./codex-integration";
 import {
-  CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
   type ChatGptWebModelRoute,
