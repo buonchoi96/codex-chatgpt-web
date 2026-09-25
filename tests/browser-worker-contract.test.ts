@@ -2840,9 +2840,10 @@ test("file attachment observation yields to authoritative submission evidence in
     filter() { return this; },
     isVisible: async () => false,
   };
+  const disabledSend = { isEnabled: async () => false };
   const composerForm = {
     getByRole: () => hiddenTile,
-    locator: () => hiddenTile,
+    locator: (selector: string) => selector === CHATGPT_SEND_BUTTON_SELECTOR ? disabledSend : hiddenTile,
     evaluate: async () => false,
   };
   const composer = { locator: () => composerForm };
