@@ -6,7 +6,6 @@ import {
   CHATGPT_EFFORT_MENU_SELECTOR,
   CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR,
   activateChatGptEffortMenu,
-  activateChatGptTemporaryChat,
   assertNewChatPage,
   chatGptNewChatUrl,
   detectChatGptAccountCapabilities,
@@ -33,38 +32,11 @@ test("saved chats start empty and cannot reuse an arbitrary conversation or a Te
       locator: (selector: string) => selector === CHATGPT_COMPOSER_SELECTOR ? composer : absent,
     };
     expect(await prepare.call({ activeComposer: async () => composer }, page, undefined, saved)).toBe(composer);
-    expect(navigations).toEqual(saved
-      ? [chatGptNewChatUrl(true)]
-      : [chatGptNewChatUrl(true), chatGptNewChatUrl(false)]);
+    expect(navigations).toEqual([chatGptNewChatUrl(saved)]);
     await expect(assertNewChatPage(page, !saved)).rejects.toThrow("requested new");
     url = "https://chatgpt.com/c/previous-task";
     await expect(assertNewChatPage(page, saved)).rejects.toThrow("requested new");
   }
-});
-
-test("current root new-chat surface can activate and prove Temporary Chat structurally", async () => {
-  let active = false;
-  const turnOn = {
-    click: async () => { active = true; },
-    isVisible: async () => !active,
-  };
-  const turnOff = {
-    isVisible: async () => active,
-  };
-  const list = (item: any) => ({
-    count: async () => await item.isVisible() ? 1 : 0,
-    nth: () => item,
-    filter() { return this; },
-    last: () => item,
-  });
-  const page: any = {
-    url: () => "https://chatgpt.com/",
-    locator: (selector: string) => selector.includes("Turn off temporary chat") ? list(turnOff) : list(turnOn),
-  };
-
-  expect(await activateChatGptTemporaryChat(page, 500)).toBe("activated");
-  await expect(assertNewChatPage(page, false)).resolves.toBeUndefined();
-  await expect(assertNewChatPage(page, true)).rejects.toThrow("requested new saved Chat surface");
 });
 
 test("composer and effort selectors exclude unrelated editable fields and menu buttons", () => {

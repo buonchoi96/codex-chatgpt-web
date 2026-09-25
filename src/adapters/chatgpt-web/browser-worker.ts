@@ -48,7 +48,6 @@ import {
 } from "./prompt";
 import { estimateCompiledChatGptWebInputTokens } from "./input-tokens";
 import {
-  activateChatGptTemporaryChat,
   assertAuthenticatedChatGptPage,
   assertNewChatPage,
   chatGptNewChatUrl,
@@ -63,7 +62,6 @@ import {
   CHATGPT_STOP_BUTTON_SELECTOR,
   CHATGPT_SEND_BUTTON_SELECTOR,
   CHATGPT_USER_TURN_SELECTOR,
-  CHATGPT_SAVED_CHAT_URL,
   activateChatGptEffortMenu,
   detectChatGptAccountCapabilities,
   parseChatGptEffortSliderState,
@@ -2821,39 +2819,22 @@ export class ChatGptBrowserWorker {
     useSavedChats = false,
   ): Promise<Locator> {
     // Launcher verification refreshes its owned page before attaching Playwright so a newly added
-    // connector is present in the catalog. Navigating again here destroys that freshly hydrated
-    // document and made the first verification race a second SPA bootstrap. A leased turn starts on
-    // about:blank and therefore still performs exactly one navigation through this same method.
-    // Modern ChatGPT Web opens a normal New Chat first, then enables Temporary Chat using the
-    // structural top-right control. Keep the legacy query URL only as a bounded compatibility
-    // fallback for older surfaces that do not expose that control.
-    const entryUrl = CHATGPT_SAVED_CHAT_URL;
-    if (page.url() !== entryUrl) {
-      await page.goto(entryUrl, {
+    // connector is present in the catalog. Preserve that document when it is already on the exact
+    // requested new-chat URL. A leased turn starts on about:blank and therefore performs exactly
+    // one navigation here. Current ChatGPT Web proves Temporary Chat by the canonical
+    // ?temporary-chat=true route; the top-right pill's aria-label is not a stable active-state API.
+    const requestedUrl = chatGptNewChatUrl(useSavedChats);
+    if (page.url() !== requestedUrl) {
+      await page.goto(requestedUrl, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });
-      await captureDiagnostic?.(useSavedChats ? "saved-chat-navigation-complete" : "new-chat-navigation-complete");
+      await captureDiagnostic?.(
+        useSavedChats ? "saved-chat-navigation-complete" : "temporary-chat-navigation-complete",
+      );
     }
-    if (!useSavedChats) {
-      const activation = await activateChatGptTemporaryChat(page);
-      if (activation === "unavailable") {
-        const legacyTemporaryUrl = chatGptNewChatUrl(false);
-        if (page.url() !== legacyTemporaryUrl) {
-          await page.goto(legacyTemporaryUrl, {
-            waitUntil: "domcontentloaded",
-            timeout: 60_000,
-          });
-          await captureDiagnostic?.("temporary-chat-legacy-navigation-complete");
-        }
-      } else {
-        await captureDiagnostic?.(
-          activation === "activated" ? "temporary-chat-structural-activated" : "temporary-chat-structural-already-active",
-        );
-      }
-      if (await dismissChatGptTemporaryChatOnboarding(page)) {
-        await captureDiagnostic?.("temporary-chat-onboarding-dismissed");
-      }
+    if (!useSavedChats && await dismissChatGptTemporaryChatOnboarding(page)) {
+      await captureDiagnostic?.("temporary-chat-onboarding-dismissed");
     }
     let composer: Locator;
     try {
