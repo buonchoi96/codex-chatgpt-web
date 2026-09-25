@@ -86,6 +86,20 @@ migrates known legacy local configuration to the new name, clears prior verifica
 requires the user to create the new connector. Browser verification accepts the exact new identity,
 reports a specific migration error when only the legacy identity is visible, and never falls back to
 the legacy connector. Future public schema changes require another explicit connector identity.
+
+### Computer Use routing
+
+Full-harness Web models treat the outer Codex tool registry as the source of truth for desktop
+automation. They discover the current Computer Use capability through `codex_tool_inventory` and
+invoke the exact returned tool through `codex_tool_call` or the native exec gateway. Official
+OpenAI Codex Computer Use surfaces, including node-repl- or cua-repl-backed tools when present, are
+valid outer-Codex capabilities.
+
+The `codex_windows_computer_use_observe`, `codex_windows_computer_use_action`, and
+`codex_windows_computer_use_call` tools remain in the Native2 public schema only for compatibility
+with installations that still load the third-party `windows_computer_use` MCP. New routing must not
+require that namespace. ChatGPT's own browser-only computer surface is not treated as evidence of
+native desktop access.
 Repository DEV mode uses `Codex Native2 DEV` so the same ChatGPT account can keep both production
 and development connectors installed without renaming, refreshing, or deleting either one.
 
