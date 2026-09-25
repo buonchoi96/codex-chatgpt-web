@@ -3818,7 +3818,7 @@ export class ChatGptBrowserWorker {
     }
     const describedBy = await sendButton.getAttribute("aria-describedby").catch(() => null);
     for (const id of describedBy?.split(/\s+/).filter(Boolean) ?? []) {
-      remember(await page.locator(`#${CSS.escape(id)}`).textContent().catch(() => null));
+      remember(await page.locator(`[id=${JSON.stringify(id)}]`).textContent().catch(() => null));
     }
 
     await sendButton.hover({ force: true, timeout: 1_000 }).catch(() => {});
