@@ -2843,6 +2843,7 @@ test("file attachment observation yields to authoritative submission evidence in
   const composerForm = {
     getByRole: () => hiddenTile,
     locator: () => hiddenTile,
+    evaluate: async () => false,
   };
   const composer = { locator: () => composerForm };
   const input = {
