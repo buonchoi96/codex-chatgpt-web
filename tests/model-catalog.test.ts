@@ -72,7 +72,7 @@ describe("native /models augmentation", () => {
     const legacy = models.slice(3).filter(model => model.visibility === "hide");
     expect(legacy.map(model => model.slug)).toEqual(CHATGPT_WEB_LEGACY_MODEL_ROUTES.map(route => route.slug));
     expect(legacy.map(model => [model.context_window, model.auto_compact_token_limit])).toEqual([
-      [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000],
+      [1_050_000, 922_000], [1_050_000, 922_000], [1_050_000, 922_000], [1_050_000, 922_000], [1_050_000, 922_000],
     ]);
     expect(web.map(model => model.slug)).toEqual(CHATGPT_WEB_MODEL_ROUTES.map(route => route.slug));
     expect(web.map(model => model.display_name)).toEqual(CHATGPT_WEB_MODEL_ROUTES.map(route => route.displayName));
@@ -107,7 +107,7 @@ describe("native /models augmentation", () => {
     }, { ...config, proAvailable: false })).toThrow("Cannot group different context budgets");
   });
 
-  test("publishes Bigger Context limits in the Codex model catalog", () => {
+  test("keeps Bigger Context on the 922K semantic model boundary", () => {
     const config = defaultConfig("full");
     config.extraHighAvailable = true;
     config.proAvailable = true;
@@ -115,7 +115,7 @@ describe("native /models augmentation", () => {
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const pro = models.find(model => model.slug === "chatgpt-web/pro")!;
     expect(pro.context_window).toBe(1_050_000);
-    expect(pro.auto_compact_token_limit).toBe(285_000);
+    expect(pro.auto_compact_token_limit).toBe(922_000);
   });
 
   test("keeps native Sol selectable in the bounded Compatibility V1 registry", () => {
@@ -202,12 +202,12 @@ describe("native /models augmentation", () => {
       effectiveContextWindowPercent: model.effective_context_window_percent,
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 922_000 },
     ]);
   });
 
@@ -226,7 +226,7 @@ describe("native /models augmentation", () => {
       supported_reasoning_levels: [{ effort: "low", description: "Ordinary Luna" }, { effort: "medium", description: "Think" }],
       context_window: 1_050_000,
       effective_context_window_percent: 100,
-      auto_compact_token_limit: 600_000,
+      auto_compact_token_limit: 922_000,
     });
   });
 
