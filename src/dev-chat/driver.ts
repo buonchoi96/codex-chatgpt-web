@@ -6,9 +6,6 @@ import { createChatGptWebAdapter } from "../adapters/chatgpt-web";
 import { estimateChatGptWebInputTokens } from "../adapters/chatgpt-web/usage";
 import { RemoteTurnBroker, type TurnBrokerOwner } from "../adapters/chatgpt-web/turn-broker";
 import {
-  CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET,
-} from "../adapters/chatgpt-web/input-tokens";
-import {
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   requireChatGptWebModelRoute,
   resolveChatGptWebContextLimits,
@@ -580,7 +577,7 @@ export class DevChatDriver {
   private assertBiggerContextModel(model: DevChatModel): void {
     if (this.features.biggerContext && isLunaDevChatModel(model)) {
       throw new Error(
-        "Bigger Context is unavailable for Luna because its accumulated browser transcript still shares one 28,000-token transport budget",
+        "Bigger Context is unavailable for Luna because Luna already uses its native 1.05M-token model window with rolling checkpoints",
       );
     }
   }
@@ -609,9 +606,6 @@ export class DevChatDriver {
       inputTokens,
       autoCompactTokenLimit,
       contextWindow,
-      ...(route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL
-        ? { browserInputTokenLimit: CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET }
-        : {}),
       percent: Math.round((inputTokens / autoCompactTokenLimit) * 1_000) / 10,
       inputItems: input.length,
     };
