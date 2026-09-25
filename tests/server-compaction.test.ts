@@ -60,6 +60,120 @@ test("native responses/memento compaction returns assistant text, not an encrypt
 const responseRequest: typeof respond = (request, config, factory, options) =>
   respond(request, config, factory, { ...options, rememberState: false });
 
+
+test("browser prompt-too-long automatically compacts once and retries the same Web request", async () => {
+  const config = defaultConfig("full");
+  let normalAttempts = 0;
+  let compactionAttempts = 0;
+  const body = {
+    model,
+    stream: false,
+    input: [{
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "Continue the task after reducing browser prompt size." }],
+    }],
+  };
+
+  const factory = (): ProviderAdapter => ({
+    name: "prompt-too-long-auto-compact",
+    async runTurn(parsed, _incoming, emit) {
+      if (parsed._compactionRequest) {
+        compactionAttempts += 1;
+        emit({ type: "text_delta", text: "Compact checkpoint for retry", phase: "final_answer" });
+        emit({ type: "done", stopReason: "stop", endTurn: true });
+        return;
+      }
+      normalAttempts += 1;
+      if (normalAttempts === 1) {
+        emit({
+          type: "error",
+          message: "ChatGPT rejected the browser composer before submission because the prompt is too long",
+          status: 413,
+          errorType: "browser_transport_error",
+          code: "browser_prompt_too_long",
+          retryable: true,
+        });
+        return;
+      }
+      expect(parsed.context.messages.some(message => (
+        typeof message.content === "string"
+          ? message.content.includes(SUMMARY_PREFIX)
+          : JSON.stringify(message.content).includes(SUMMARY_PREFIX)
+      ))).toBeTrue();
+      emit({ type: "text_delta", text: "Retried after automatic compaction", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  });
+
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }), config, factory);
+  expect(response.status).toBe(200);
+  const json = await response.json() as { status?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
+  expect(json.status).toBe("completed");
+  expect(JSON.stringify(json.output)).toContain("Retried after automatic compaction");
+  expect(normalAttempts).toBe(2);
+  expect(compactionAttempts).toBe(1);
+});
+
+test("manual and automatic compaction both normalize to the same compaction request flag", async () => {
+  const seen: Array<{ compaction: boolean; last: unknown }> = [];
+  const factory = (): ProviderAdapter => ({
+    name: "manual-auto-compaction-parity",
+    async runTurn(parsed, _incoming, emit) {
+      seen.push({
+        compaction: parsed._compactionRequest === true,
+        last: parsed.context.messages.at(-1)?.content,
+      });
+      emit({ type: "text_delta", text: summary, phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  });
+  const config = defaultConfig("full");
+
+  const manual = await compactRequest(new Request("http://127.0.0.1/v1/responses/compact", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "manual source" }] }],
+    }),
+  }), config, factory);
+  expect(manual.status).toBe(200);
+
+  const metadata = {
+    request_kind: "compaction",
+    thread_id: "thread_auto_compaction_parity",
+    turn_id: "turn_auto_compaction_parity",
+    compaction: {
+      trigger: "auto",
+      reason: "context_limit",
+      implementation: "responses",
+      phase: "pre_turn",
+      strategy: "memento",
+    },
+  };
+  const automatic = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) },
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "auto source" }] }],
+    }),
+  }), config, factory);
+  expect(automatic.status).toBe(200);
+
+  expect(seen).toHaveLength(2);
+  expect(seen.every(entry => entry.compaction)).toBeTrue();
+  expect(seen.every(entry => JSON.stringify(entry.last).includes("CONTEXT CHECKPOINT COMPACTION"))).toBeTrue();
+});
+
 function compactionAdapterFactory(
   seenProviders: CodexProviderConfig[] = [],
   expectedPreviousSummary?: string,
