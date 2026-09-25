@@ -469,32 +469,36 @@ test("rejects an unknown routed compact model instead of treating it as ChatGPT 
   expect(body.error.message).toContain("model is not enabled");
 });
 
-test("Luna rejects separate native compaction instead of opening another browser turn", async () => {
+test("Luna accepts separate native compaction in addition to rolling checkpoints", async () => {
   const config = defaultConfig("browser-only");
   config.solAvailable = false;
   let adapterStarted = false;
   const response = await compactRequest(new Request("http://127.0.0.1:17841/v1/responses/compact", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "chatgpt-web/luna", input: [] }),
-  }), config, () => {
+    body: JSON.stringify({
+      model: "chatgpt-web/luna",
+      input: [{
+        type: "message",
+        id: "msg_luna_compact_source",
+        role: "user",
+        content: [{ type: "input_text", text: "Continue the long-running native Computer Use task." }],
+      }],
+    }),
+  }), config, provider => {
     adapterStarted = true;
-    return {
-      name: "must-not-start",
-      async runTurn() {
-        throw new Error("Luna compaction adapter must not start");
-      },
-    };
+    return compactionAdapterFactory()(provider);
   });
 
-  expect(response.status).toBe(409);
-  expect(adapterStarted).toBeFalse();
-  const body = await response.json() as { error: { message: string } };
-  expect(body.error.message).toContain("rolling checkpoint");
-  expect(body.error.message).toContain("separate Codex compaction is disabled");
+  expect(response.status).toBe(200);
+  expect(adapterStarted).toBeTrue();
+  const body = await response.json() as { output: Array<{ type?: string; encrypted_content?: string }> };
+  expect(body.output).toHaveLength(1);
+  expect(body.output[0]?.type).toBe("compaction");
+  expect(decodeCompactionSummary(body.output[0]?.encrypted_content ?? "")).toBe(summary);
 });
 
-test("Luna rejects a remote-v2 compaction trigger before opening another browser turn", async () => {
+test("Luna accepts a remote-v2 compaction trigger", async () => {
   const config = defaultConfig("browser-only");
   config.solAvailable = false;
   let adapterStarted = false;
@@ -504,22 +508,27 @@ test("Luna rejects a remote-v2 compaction trigger before opening another browser
     body: JSON.stringify({
       model: "chatgpt-web/luna",
       stream: false,
-      input: [{ type: "compaction_trigger" }],
+      input: [
+        {
+          type: "message",
+          id: "msg_luna_v2_source",
+          role: "user",
+          content: [{ type: "input_text", text: "Continue the long-running native Computer Use task." }],
+        },
+        { type: "compaction_trigger" },
+      ],
     }),
-  }), config, () => {
+  }), config, provider => {
     adapterStarted = true;
-    return {
-      name: "must-not-start-v2",
-      async runTurn() {
-        throw new Error("Luna v2 compaction adapter must not start");
-      },
-    };
+    return compactionAdapterFactory()(provider);
   });
 
-  expect(response.status).toBe(409);
-  expect(adapterStarted).toBeFalse();
-  const body = await response.json() as { error: { message: string } };
-  expect(body.error.message).toContain("rolling checkpoint");
+  expect(response.status).toBe(200);
+  expect(adapterStarted).toBeTrue();
+  const body = await response.json() as { output: Array<{ type?: string; encrypted_content?: string }> };
+  expect(body.output).toHaveLength(1);
+  expect(body.output[0]?.type).toBe("compaction");
+  expect(decodeCompactionSummary(body.output[0]?.encrypted_content ?? "")).toBe(summary);
 });
 
 test("rejects Pro-only routed models before opening a browser when the account has no Pro access", async () => {
