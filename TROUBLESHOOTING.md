@@ -152,6 +152,25 @@ After updating, if `codex_exec` still does not expose `sandbox_permissions`, `ju
 These fields only forward a permission request to Codex; its sandbox and approval policy still
 decide whether the command can run. Ordinary commands do not require these optional fields.
 
+### Automatic compaction vs `/compact`
+
+`/compact` is the explicit user command. Codex also has automatic compaction driven by the model
+row's `auto_compact_token_limit`; it does not wait for the hard context window to be exhausted.
+
+For routed Web models, keep these fields conceptually separate:
+
+- `context_window` / `max_context_window`: the hard model context contract for that Web route.
+- `effective_context_window_percent`: the hard-context multiplier Codex applies; routed Web rows use
+  100% so transport heuristics cannot silently shrink the model window.
+- `auto_compact_token_limit`: the earlier threshold at which Codex may summarize history.
+- browser message/composer limits: product transport boundaries, not model-context exhaustion.
+
+Codex can auto-compact before a new turn and between sampling/tool cycles during a still-running turn
+when the model needs follow-up work. That mid-turn path is important for long Computer Use tasks.
+Luna Web currently keeps the 1.05M hard model window but auto-compacts at 600K to preserve headroom;
+Sol/Pro Web keep their existing lower compaction thresholds while still advertising the full Web
+model window.
+
 ### Luna long-running turn appears frozen
 
 GPT-5.6 Luna uses a 1,050,000-token model context window. Do not interpret the historical 28K
