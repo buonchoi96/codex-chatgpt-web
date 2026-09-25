@@ -152,6 +152,25 @@ After updating, if `codex_exec` still does not expose `sandbox_permissions`, `ju
 These fields only forward a permission request to Codex; its sandbox and approval policy still
 decide whether the command can run. Ordinary commands do not require these optional fields.
 
+### Luna long-running turn appears frozen
+
+GPT-5.6 Luna uses a 1,050,000-token model context window. Do not interpret the historical 28K
+browser measurements as a fixed Luna context or transport ceiling. The bridge now preflights Luna
+against the model window and lets the live ChatGPT browser/server reject an actually unsupported
+submission.
+
+For long-running Computer Use turns, a browser tab can remain visibly running even after meaningful
+progress stops. If the Stop control stays active for five minutes with no visible answer delta,
+reasoning/commentary change, or Codex tool progress, the automatic browser worker stops that surface
+and returns retryable `browser_response_stalled`. The Codex retry policy can then start a fresh
+surface instead of leaving both Codex and ChatGPT Web apparently alive forever.
+
+When diagnosing a suspected context problem, distinguish:
+
+- `context_length_exceeded` near the 1.05M Luna model window: real model-context pressure.
+- A live browser/server HTTP rejection: an observed product transport boundary.
+- `browser_response_stalled`: a no-progress browser generation, not context exhaustion by itself.
+
 ### Web models cannot find desktop Computer Use
 
 In Full harness mode, Web models use the **outer Codex** tool registry for native desktop
