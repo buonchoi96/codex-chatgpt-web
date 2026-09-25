@@ -3013,6 +3013,46 @@ describe("ChatGPT outer-native harness v4", () => {
       broker.completeTool(token, searchRequest!.callId, toolResult({ tools: [] }));
       await search;
 
+      // Official Codex Computer Use is not tied to the legacy windows_computer_use namespace.
+      // A Web model can discover a current outer-Codex surface (for example cua_repl) through the
+      // generic inventory and invoke that exact nested tool through codex_tool_call.
+      const officialComputerUseInventory = await inventoryThroughGateway(
+        "cua_repl",
+        false,
+        ["mcp__cua_repl__js"],
+      );
+      expect(officialComputerUseInventory.structuredContent).toMatchObject({
+        tools: [{
+          wire_name: "mcp__cua_repl__js",
+          name: "mcp__cua_repl__js",
+          kind: "gateway",
+        }],
+        total: 1,
+        next_offset: null,
+      });
+
+      const officialComputerUse = call("codex_tool_call", {
+        turn_token: token,
+        wire_name: "mcp__cua_repl__js",
+        input: "text(await tools.computer.snapshot({}));",
+      });
+      const [officialComputerUseRequest] = await broker.nextToolBatch(token);
+      expect(officialComputerUseRequest).toMatchObject({ wireName: "exec", freeform: true });
+      const officialComputerUseCalls: GatewayProgramCall[] = [];
+      const officialComputerUseContent = await executeGatewayProgram(
+        officialComputerUseRequest!.input!,
+        ["mcp__cua_repl__js"],
+        officialComputerUseCalls,
+      );
+      expect(officialComputerUseCalls).toEqual([{
+        name: "mcp__cua_repl__js",
+        input: "text(await tools.computer.snapshot({}));",
+      }]);
+      broker.completeTool(token, officialComputerUseRequest!.callId, { content: officialComputerUseContent });
+      const officialComputerUseResult = await officialComputerUse;
+      expect(officialComputerUseResult.isError).not.toBe(true);
+      expect(JSON.stringify(officialComputerUseResult.content)).toContain("mcp__cua_repl__js");
+
       const health = call("codex_windows_computer_use_observe", {
         turn_token: token,
         operation: "health",
