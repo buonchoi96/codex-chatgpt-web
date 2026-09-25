@@ -2165,6 +2165,104 @@ describe("ChatGPT outer-native harness v4", () => {
     await broker.close();
   });
 
+  test("preserves native Computer Use at the compaction boundary and resumes it on a fresh turn", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-h3-cu-compact-${process.pid}-${Date.now()}`);
+    const broker = TurnBroker.forSocket(socketPath);
+    const environment = extractChatGptTurnEnvironment(parsed(environmentXml));
+    const firstToken = await broker.register(environment, 10_000, "cu-compact-before");
+    const firstClaim = await callTurnBroker<{ bindingId: string }>(socketPath, {
+      method: "claim",
+      token: firstToken,
+    });
+
+    const beforeInput = [
+      "const { sky } = await import('@oai/sky');",
+      "globalThis.sky = sky;",
+      "text(await sky.list_apps());",
+    ].join("\n");
+    const before = callTurnBroker<BrokerToolResult>(socketPath, {
+      method: "invoke",
+      bindingId: firstClaim.bindingId,
+      wireName: "mcp__node_repl__js",
+      freeform: true,
+      input: beforeInput,
+    }, 10_000);
+    const [delivered] = await broker.nextToolBatch(firstToken);
+    expect(delivered).toMatchObject({
+      wireName: "mcp__node_repl__js",
+      freeform: true,
+      input: beforeInput,
+    });
+
+    const compactionResult: BrokerToolResult = {
+      content: [{
+        type: "text",
+        text: `<${CODEX_ACTIVE_COMPACTION_REQUEST_MARKER}>checkpoint requested</${CODEX_ACTIVE_COMPACTION_REQUEST_MARKER}>`,
+      }],
+      structuredContent: { code: "context_compaction_requested" },
+    };
+
+    // A Computer Use call that was already delivered to outer Codex is never cancelled by
+    // compaction. Its canonical result must cross the boundary before ordinary tool work stops.
+    expect(broker.requestCompaction(firstToken, compactionResult)).toBe(0);
+    const beforeResult = toolResult({
+      apps: [{ name: "MikuMikuDance", nativeWindowHandle: 1234 }],
+      visibleState: "model loaded before compact",
+    });
+    broker.completeTool(firstToken, delivered!.callId, beforeResult);
+    expect(await before).toEqual(beforeResult);
+
+    // Any new native action after the compaction boundary is intercepted instead of executed.
+    const intercepted = await callTurnBroker<BrokerToolResult>(socketPath, {
+      method: "invoke",
+      bindingId: firstClaim.bindingId,
+      wireName: "mcp__node_repl__js",
+      freeform: true,
+      input: "text(await sky.click({x:10,y:20}));",
+    }, 10_000);
+    expect(intercepted).toEqual(compactionResult);
+    expect(broker.compactionDeliveryCount(firstToken)).toBe(1);
+    await expect(broker.nextToolBatch(firstToken)).rejects.toThrow(
+      "Codex context compaction superseded ordinary MCP tool delivery",
+    );
+
+    broker.revoke(firstToken);
+
+    // The compacted continuation gets a fresh turn capability but the same official Computer Use
+    // surface. Reinitializing @oai/sky is safe even if the underlying node_repl session persisted.
+    const nextToken = await broker.register(environment, 10_000, "cu-compact-after");
+    const nextClaim = await callTurnBroker<{ bindingId: string }>(socketPath, {
+      method: "claim",
+      token: nextToken,
+    });
+    const afterInput = [
+      "const { sky } = await import('@oai/sky');",
+      "globalThis.sky = sky;",
+      "text(await sky.list_apps());",
+    ].join("\n");
+    const after = callTurnBroker<BrokerToolResult>(socketPath, {
+      method: "invoke",
+      bindingId: nextClaim.bindingId,
+      wireName: "mcp__node_repl__js",
+      freeform: true,
+      input: afterInput,
+    }, 10_000);
+    const [afterRequest] = await broker.nextToolBatch(nextToken);
+    expect(afterRequest).toMatchObject({
+      wireName: "mcp__node_repl__js",
+      freeform: true,
+      input: afterInput,
+    });
+    const afterResult = toolResult({
+      apps: [{ name: "MikuMikuDance", nativeWindowHandle: 1234 }],
+      visibleState: "same MMD window re-observed after compact",
+    });
+    broker.completeTool(nextToken, afterRequest!.callId, afterResult);
+    expect(await after).toEqual(afterResult);
+
+    await broker.close();
+  });
+
   test("makes capability claim retries idempotent until the turn is revoked", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h3-claim-${process.pid}-${Date.now()}`);
     const broker = TurnBroker.forSocket(socketPath);
