@@ -226,7 +226,7 @@ describe("native /models augmentation", () => {
       supported_reasoning_levels: [{ effort: "low", description: "Ordinary Luna" }, { effort: "medium", description: "Think" }],
       context_window: 1_050_000,
       effective_context_window_percent: 100,
-      auto_compact_token_limit: 1_050_000,
+      auto_compact_token_limit: 600_000,
     });
   });
 
