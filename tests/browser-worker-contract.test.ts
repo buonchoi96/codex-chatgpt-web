@@ -2783,6 +2783,56 @@ test("generic ZIP attachment readiness accepts a filename inside a richer attach
   expect(calls).toEqual(["input-ready", "zip-set"]);
 });
 
+test("generic ZIP readiness can use filename DOM outside the editor when ChatGPT exposes no attachment tile", async () => {
+  const archiveName = "codex-context-cccccccccccccccc.zip";
+  const calls: string[] = [];
+  const hiddenTile = {
+    or() { return this; },
+    filter() { return this; },
+    isVisible: async () => false,
+  };
+  const send = {
+    isEnabled: async () => {
+      calls.push("send-enabled");
+      return true;
+    },
+  };
+  const composerForm = {
+    getByRole: () => hiddenTile,
+    locator: (selector: string) => selector === CHATGPT_SEND_BUTTON_SELECTOR ? send : hiddenTile,
+    evaluate: async (_fn: unknown, names: string[]) => {
+      expect(names).toEqual([archiveName]);
+      calls.push("generic-filename");
+      return true;
+    },
+  };
+  const composer = { locator: () => composerForm };
+  const input = {
+    waitFor: async () => {},
+    setInputFiles: async (files: Array<{ name: string }>) => {
+      expect(files.map(file => file.name)).toEqual([archiveName]);
+      calls.push("set-files");
+    },
+  };
+  const page = {
+    locator: (selector: string) => selector.includes('input[data-testid="upload-photos-input"]')
+      ? input
+      : { allInnerTexts: async () => [] },
+  };
+  const attachFiles = (ChatGptBrowserWorker.prototype as any).attachFiles;
+  const evidence = await attachFiles.call({
+    activeComposer: async () => composer,
+    currentSubmissionEvidence: async () => { throw new Error("submission evidence should not be needed"); },
+  }, page, {
+    text: "archive",
+    images: [],
+    archive: { name: archiveName, contextText: "complete context" },
+  }, 1_000, { initialTurnIdentities: [], domCache: {} });
+
+  expect(evidence).toBeUndefined();
+  expect(calls).toEqual(["set-files", "generic-filename", "send-enabled"]);
+});
+
 test("file attachment observation yields to authoritative submission evidence instead of replaying", async () => {
   let evidenceReads = 0;
   const hiddenTile = {

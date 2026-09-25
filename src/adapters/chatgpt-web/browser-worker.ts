@@ -148,6 +148,13 @@ const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
 export const CHATGPT_UI_SETTLE_MS = 250;
 export const CHATGPT_SEND_ENABLE_GRACE_MS = 75_000;
 export const CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS = 150_000;
+/**
+ * Generic ChatGPT files (ZIP/TXT) do not currently expose the same stable attachment tile as image
+ * uploads on every Web build. After setInputFiles(), a stable enabled Send button for this grace
+ * period is accepted as file readiness when no filename-bearing tile can be observed. The later
+ * submission observer remains authoritative and prevents prompt replay.
+ */
+export const CHATGPT_GENERIC_FILE_SEND_SETTLE_MS = 3_000;
 
 const CHATGPT_DOM_REVISION_ATTRIBUTES = [
   "aria-hidden",
@@ -4349,6 +4356,10 @@ export class ChatGptBrowserWorker {
         ))
         .or(composerForm.locator(".composer-attachment-surface").filter({ hasText: file.name }))
     ));
+    const genericFileTransport = Boolean(prompt.archive || prompt.contextFile);
+    const genericFileNames = files.map(file => file.name);
+    const genericUploadStartedAt = Date.now();
+    let genericSendObservedDisabled = false;
     let attachmentsReady = false;
     while (Date.now() < deadline) {
       throwIfPromptAttachmentAborted(abortSignal);
@@ -4358,6 +4369,54 @@ export class ChatGptBrowserWorker {
       if (visible.every(Boolean)) {
         attachmentsReady = true;
         break;
+      }
+
+      if (genericFileTransport) {
+        // Generic file uploads (notably ZIPs) have changed DOM shape independently of image
+        // attachments. Accept a filename-bearing rendered node outside the Lexical editor,
+        // regardless of role/class, so the filename mentioned inside the prompt cannot match.
+        const genericFilesPresent = await composerForm.evaluate((form, names) => {
+          const candidates = Array.from(form.querySelectorAll<HTMLElement>("*"));
+          return (names as string[]).every(name => candidates.some(element => {
+            if (element.closest('[contenteditable="true"]')) return false;
+            if (element.querySelector('[contenteditable="true"]')) return false;
+            const label = [
+              element.getAttribute("aria-label"),
+              element.getAttribute("title"),
+              element.getAttribute("data-file-name"),
+              element.getAttribute("data-filename"),
+              element.textContent,
+            ].filter(Boolean).join("\n");
+            if (!label.includes(name)) return false;
+            const style = getComputedStyle(element);
+            return style.display !== "none"
+              && style.visibility !== "hidden"
+              && element.getClientRects().length > 0;
+          }));
+        }, genericFileNames).catch(() => false);
+        if (genericFilesPresent) {
+          attachmentsReady = true;
+          break;
+        }
+
+        const sendEnabled = await composerForm.locator(CHATGPT_SEND_BUTTON_SELECTOR)
+          .isEnabled().catch(() => false);
+        if (!sendEnabled) {
+          // Disabled -> enabled after setInputFiles is strong evidence that ChatGPT finished its
+          // file-ingestion gate even if the attachment tile is not discoverable.
+          genericSendObservedDisabled = true;
+        } else if (
+          genericSendObservedDisabled
+          || Date.now() - genericUploadStartedAt >= CHATGPT_GENERIC_FILE_SEND_SETTLE_MS
+        ) {
+          const alerts = (await page.locator('[role="alert"]').allInnerTexts().catch(() => []))
+            .map(text => text.replace(/\s+/g, " ").trim())
+            .filter(Boolean);
+          if (alerts.length === 0) {
+            attachmentsReady = true;
+            break;
+          }
+        }
       }
       // A human or ChatGPT-side event can submit the composer while file readiness is being
       // observed. Once a new turn exists, replaying or waiting for a tile that has disappeared is
