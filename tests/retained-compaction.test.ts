@@ -1269,7 +1269,7 @@ test.each([false, true])("structured compact rebuilds canonical context when its
     expect(turn.conversationKey).toBeUndefined();
     expect(turn.compaction).toBeTrue();
     const prepared = await turn.prepare();
-    const contextText = prepared.multipart?.parts.join("\n") ?? prepared.text;
+    const contextText = prepared.archive?.contextText ?? prepared.multipart?.parts.join("\n") ?? prepared.text;
     expect(contextText).toContain("Original task");
     expect(contextText).toContain("Continue with the next step");
     if (experimentalBiggerContext) {
