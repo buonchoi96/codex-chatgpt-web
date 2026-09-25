@@ -72,7 +72,7 @@ describe("native /models augmentation", () => {
     const legacy = models.slice(3).filter(model => model.visibility === "hide");
     expect(legacy.map(model => model.slug)).toEqual(CHATGPT_WEB_LEGACY_MODEL_ROUTES.map(route => route.slug));
     expect(legacy.map(model => [model.context_window, model.auto_compact_token_limit])).toEqual([
-      [111_193, 95_000], [111_193, 95_000], [111_193, 95_000], [111_193, 95_000], [112_193, 95_000],
+      [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000], [1_050_000, 95_000],
     ]);
     expect(web.map(model => model.slug)).toEqual(CHATGPT_WEB_MODEL_ROUTES.map(route => route.slug));
     expect(web.map(model => model.display_name)).toEqual(CHATGPT_WEB_MODEL_ROUTES.map(route => route.displayName));
@@ -114,7 +114,7 @@ describe("native /models augmentation", () => {
     config.experimentalBiggerContext = true;
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const pro = models.find(model => model.slug === "chatgpt-web/pro")!;
-    expect(pro.context_window).toBe(336_579);
+    expect(pro.context_window).toBe(1_050_000);
     expect(pro.auto_compact_token_limit).toBe(285_000);
   });
 
@@ -204,10 +204,10 @@ describe("native /models augmentation", () => {
     }))).toEqual([
       { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 32_000 },
       { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 3, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 1_050_000, effectiveContextWindowPercent: 8, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 32_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 1_050_000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 80_000 },
     ]);
   });
 
