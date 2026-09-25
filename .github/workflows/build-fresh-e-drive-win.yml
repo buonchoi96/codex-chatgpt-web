@@ -11,10 +11,57 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: read
 
+concurrency:
+  group: build-fresh-e-drive-win-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  cancel-stale-main-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel stale main workflow runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" != "push" || "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Stale-run cleanup is only needed for pushes to main."
+            exit 0
+          fi
+
+          runs_json="${RUNNER_TEMP}/main-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100" > "${runs_json}"
+
+          mapfile -t stale_ids < <(
+            jq -r               --arg sha "${GITHUB_SHA}"               --argjson current_run "${GITHUB_RUN_ID}"               '.workflow_runs[]
+               | select(.id != $current_run)
+               | select(.head_sha != $sha)
+               | select(.status == "queued"
+                        or .status == "in_progress"
+                        or .status == "waiting"
+                        or .status == "requested"
+                        or .status == "pending")
+               | .id'               "${runs_json}"
+          )
+
+          if [[ "${#stale_ids[@]}" -eq 0 ]]; then
+            echo "No stale main workflow runs need cancellation."
+            exit 0
+          fi
+
+          for run_id in "${stale_ids[@]}"; do
+            echo "Cancelling stale main workflow run ${run_id}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" >/dev/null || {
+              echo "Run ${run_id} could not be cancelled; it may have completed concurrently."
+            }
+          done
+
   build-windows:
+    needs: cancel-stale-main-runs
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
