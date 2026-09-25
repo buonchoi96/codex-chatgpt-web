@@ -247,6 +247,10 @@ test("compaction prompts are isolated summarization turns without local or nativ
 
   expect(compiled.text).toContain("This is a Codex history-compaction checkpoint, not a normal task turn.");
   expect(compiled.text).toContain("Produce the requested checkpoint summary now without calling tools.");
+  expect(compiled.text).toContain("the last visibly verified UI state");
+  expect(compiled.text).toContain("the exact last native action that completed and its result");
+  expect(compiled.text).toContain("the resumed model must re-observe the current desktop/window state before any non-idempotent");
+  expect(compiled.text).toContain("re-import @oai/sky and re-enumerate/re-observe the target app");
   expect(compiled.text).not.toContain("codex_bind_turn");
   expect(compiled.text).not.toContain("web search, browsing, research");
   expect(compiled.text).not.toContain("missing local-computer bridge");
