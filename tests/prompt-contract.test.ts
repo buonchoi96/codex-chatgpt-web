@@ -10,7 +10,7 @@ import {
   withoutRetiredTurnHandles,
 } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
-import { SUMMARY_PREFIX } from "../src/responses/compaction";
+import { COMPACT_PROMPT, SUMMARY_PREFIX } from "../src/responses/compaction";
 import { biggerContextPartCount } from "../src/adapters/chatgpt-web/usage";
 import type { CodexParsedRequest } from "../src/types";
 
@@ -240,6 +240,7 @@ test("browser-only Medium directs users to the full harness", () => {
 test("compaction prompts are isolated summarization turns without local or native tool instructions", () => {
   const compact = request("high");
   compact._compactionRequest = true;
+  compact.context.messages.push({ role: "user", content: COMPACT_PROMPT, timestamp: 3 });
   const compiled = compileChatGptWebPrompt(
     compact,
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
@@ -440,6 +441,7 @@ test("Luna accepts native compaction turns in addition to rolling checkpoints", 
   const compact = request("low");
   compact.modelId = CHATGPT_WEB_LUNA_MODEL_ID;
   compact._compactionRequest = true;
+  compact.context.messages.push({ role: "user", content: COMPACT_PROMPT, timestamp: 3 });
   const compiled = compileChatGptWebPrompt(
     compact,
     { localToolsEnabled: false, solAvailable: false, extraHighAvailable: false, proAvailable: false },

@@ -492,10 +492,16 @@ test("Luna accepts separate native compaction in addition to rolling checkpoints
 
   expect(response.status).toBe(200);
   expect(adapterStarted).toBeTrue();
-  const body = await response.json() as { output: Array<{ type?: string; encrypted_content?: string }> };
-  expect(body.output).toHaveLength(1);
-  expect(body.output[0]?.type).toBe("compaction");
-  expect(decodeCompactionSummary(body.output[0]?.encrypted_content ?? "")).toBe(summary);
+  const body = await response.json() as {
+    output: Array<{ type?: string; role?: string; content?: Array<{ type?: string; text?: string }> }>;
+  };
+  // /responses/compact is native v1: it returns replacement history, not a v2 compaction item.
+  expect(body.output).toHaveLength(2);
+  expect(body.output[0]?.type).toBe("message");
+  expect(body.output[0]?.role).toBe("user");
+  expect(body.output[1]?.type).toBe("message");
+  expect(body.output[1]?.role).toBe("user");
+  expect(body.output[1]?.content?.[0]?.text).toBe(`${SUMMARY_PREFIX}\n${summary}`);
 });
 
 test("Luna accepts a remote-v2 compaction trigger", async () => {
