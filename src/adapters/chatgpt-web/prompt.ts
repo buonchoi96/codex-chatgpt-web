@@ -186,7 +186,91 @@ export function chatGptPromptJsonBytes(text: string): number {
 const DROPPED_IMAGE_NOTE =
   `[older image not attached: ChatGPT accepts at most ${CHATGPT_MAX_INPUT_IMAGES} per message]`;
 const COMPACTION_IMAGE_NOTE =
-  "[image omitted from compaction transport; preserve relevant visual facts from supplied text/tool evidence and re-observe the native UI after compaction if needed]";
+  "[image omitted from compaction transport after ChatGPT attachment upload timed out or was rejected; preserve relevant visual facts from supplied text/tool evidence and re-observe the native UI after compaction if needed]";
+const COMPACTION_SKILL_NOTE =
+  "[selected skill attachment inlined into compaction text because ChatGPT file upload was unavailable]";
+
+function rewriteCompactionAttachmentValue(
+  value: unknown,
+  skillFiles: ReadonlyMap<string, ChatGptSkillFile>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => rewriteCompactionAttachmentValue(item, skillFiles));
+  }
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (record.type === "image_attachment") {
+    return { type: "text", text: COMPACTION_IMAGE_NOTE };
+  }
+  if (record.type === "skill_attachment" && typeof record.filename === "string") {
+    const file = skillFiles.get(record.filename);
+    return {
+      type: "text",
+      text: file
+        ? `${COMPACTION_SKILL_NOTE}\n${file.text}`
+        : `${COMPACTION_SKILL_NOTE}\n[skill file unavailable: ${record.filename}]`,
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, child]) => [
+      key,
+      rewriteCompactionAttachmentValue(child, skillFiles),
+    ]),
+  );
+}
+
+function rewriteCompactionJsonPayload(
+  json: string,
+  skillFiles: ReadonlyMap<string, ChatGptSkillFile>,
+): string {
+  return JSON.stringify(rewriteCompactionAttachmentValue(JSON.parse(json), skillFiles));
+}
+
+function rewriteInlineCompactionEnvelope(
+  text: string,
+  skillFiles: ReadonlyMap<string, ChatGptSkillFile>,
+): string {
+  const open = "<codex_context_json>\n";
+  const close = "\n</codex_context_json>";
+  const start = text.indexOf(open);
+  if (start < 0) return text;
+  const payloadStart = start + open.length;
+  const end = text.indexOf(close, payloadStart);
+  if (end < 0) return text;
+  const rewritten = rewriteCompactionJsonPayload(text.slice(payloadStart, end), skillFiles);
+  return `${text.slice(0, payloadStart)}${rewritten}${text.slice(end)}`;
+}
+
+/**
+ * Fallback used only after a compaction attachment upload was actually rejected or timed out
+ * before Send activation. It preserves the same compaction request as text, replacing image
+ * references with explicit omission markers and selected skill files with their inline contents.
+ */
+export function compiledChatGptWebCompactionTextOnlyFallback(
+  prepared: CompiledChatGptWebPrompt,
+): CompiledChatGptWebPrompt {
+  const skillFiles = new Map((prepared.skillFiles ?? []).map(file => [file.name, file] as const));
+  const multipart = prepared.multipart
+    ? {
+      ...prepared.multipart,
+      parts: prepared.multipart.parts.map(part => rewriteCompactionJsonPayload(part, skillFiles)) as ChatGptWebMultipartParts,
+      commit: [
+        prepared.multipart.commit,
+        "Compaction attachment fallback is active: binary uploads were unavailable, so image references were replaced by omission markers and selected skill files were inlined into the staged text.",
+      ].join("\n"),
+    }
+    : undefined;
+  return {
+    ...prepared,
+    text: [
+      rewriteInlineCompactionEnvelope(prepared.text, skillFiles),
+      "Compaction attachment fallback is active: binary uploads were unavailable, so continue from the supplied textual checkpoint context.",
+    ].join("\n"),
+    images: [],
+    skillFiles: undefined,
+    ...(multipart ? { multipart } : {}),
+  };
+}
 
 /**
  * A fresh compaction epoch receives the complete canonical context, so every still-relevant image
