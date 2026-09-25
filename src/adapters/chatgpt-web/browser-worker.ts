@@ -952,13 +952,13 @@ export function assertChatGptWebInputWithinLimits(
   ) {
     throw new ChatGptWebAdapterError(
       `This prompt contains ${promptChars.toLocaleString("en-US")} inline characters, which exceeds the measured ${browserComposerCharLimit.toLocaleString("en-US")}-character ChatGPT composer boundary for this account and effort. Run /compact, then retry this Web model.`,
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+      { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
     );
   }
   if (browserMessageTokenLimit !== undefined && estimatedMessageTokens > browserMessageTokenLimit) {
     throw new ChatGptWebAdapterError(
       `This prompt requires ${estimatedMessageTokens.toLocaleString("en-US")} visible message tokens, which exceeds the measured ${browserMessageTokenLimit.toLocaleString("en-US")}-token ChatGPT browser message boundary for this account and effort. The model context window is ${contextWindow.toLocaleString("en-US")} tokens; run /compact to reduce the next browser message without changing that model window.`,
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+      { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
     );
   }
   if (estimatedInputTokens < contextWindow) return;
@@ -1017,20 +1017,20 @@ export function assertChatGptWebMultipartInputWithinLimits(
     if (browserComposerCharLimit !== undefined && messageChars > browserComposerCharLimit) {
       throw new ChatGptWebAdapterError(
         `A Bigger Context ${label} contains ${messageChars.toLocaleString("en-US")} characters, which exceeds the measured ${browserComposerCharLimit.toLocaleString("en-US")}-character ChatGPT composer boundary. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
-        { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+        { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
       );
     }
     if (browserMessageTokenLimit !== undefined && messageTokens > browserMessageTokenLimit) {
       throw new ChatGptWebAdapterError(
         `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds the measured ${browserMessageTokenLimit.toLocaleString("en-US")}-token ChatGPT message boundary. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
-        { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+        { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
       );
     }
     const messageBudget = resolveChatGptWebMessageTokenBudget(modelId, messageEffort, capabilities, imageTokens);
     if (messageTokens > messageBudget) {
       throw new ChatGptWebAdapterError(
         `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds its ${messageBudget.toLocaleString("en-US")}-token input budget after reserving space for ChatGPT and attachments. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
-        { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+        { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
       );
     }
   };
@@ -1052,11 +1052,11 @@ export function assertChatGptWebMultipartInputWithinLimits(
     assertMessageBoundary("stage", estimatedMessageTokens, maxMessageChars, effort);
   }
   // More transport messages do not enlarge the model's advertised context window.
-  const experimentalContextWindow = baseContextWindow * Math.min(partCount, CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER);
+  const experimentalContextWindow = baseContextWindow;
   if (estimatedInputTokens < experimentalContextWindow) return;
   const partLabel = partCount === 2 ? "two-part" : "six-part";
   throw new ChatGptWebAdapterError(
-    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds its experimental ${experimentalContextWindow.toLocaleString("en-US")}-token ${partLabel} ceiling. Run /compact, then retry.`,
+    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds the underlying ${experimentalContextWindow.toLocaleString("en-US")}-token model context window even when transported as a ${partLabel} transaction. Run /compact, then retry.`,
     { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
   );
 }
