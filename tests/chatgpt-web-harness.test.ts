@@ -2876,14 +2876,14 @@ describe("ChatGPT outer-native harness v4", () => {
       });
       expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_action")?.annotations).toMatchObject({
         readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       });
       expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_call")?.annotations).toMatchObject({
         readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       });
       expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_observe")?.annotations).toMatchObject({
@@ -3058,26 +3058,40 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(officialComputerUseResult.isError).not.toBe(true);
       expect(JSON.stringify(officialComputerUseResult.content)).toContain("mcp__node_repl__js");
 
-      const health = call("codex_windows_computer_use_observe", {
+      const legacyObserve = await call("codex_windows_computer_use_observe", {
         turn_token: token,
         operation: "health",
         arguments: {},
       });
-      const [healthRequest] = await broker.nextToolBatch(token);
-      expect(healthRequest).toMatchObject({
-        wireName: "mcp__windows_computer_use__windows_computer_use_health",
-        arguments: {},
+      expect(legacyObserve.isError).toBe(true);
+      expect(legacyObserve.structuredContent).toMatchObject({
+        code: "legacy_windows_computer_use_disabled",
+        retryable: false,
       });
-      broker.completeTool(token, healthRequest!.callId, toolResult({ ok: true }));
-      expect((await health).structuredContent).toEqual({ ok: true });
+      expect(JSON.stringify(legacyObserve.content)).toContain("mcp__node_repl__js");
+      expect(JSON.stringify(legacyObserve.content)).toContain("@oai/sky");
 
-      const snapshotActivation = await call("codex_windows_computer_use_observe", {
+      const legacyAction = await call("codex_windows_computer_use_action", {
         turn_token: token,
-        operation: "snapshot",
-        arguments: { activate: true },
+        operation: "click",
+        arguments: { x: 10, y: 20 },
       });
-      expect(snapshotActivation.isError).toBe(true);
-      expect(JSON.stringify(snapshotActivation.content)).toContain("rejects activate=true");
+      expect(legacyAction.isError).toBe(true);
+      expect(legacyAction.structuredContent).toMatchObject({
+        code: "legacy_windows_computer_use_disabled",
+        retryable: false,
+      });
+
+      const legacyCall = await call("codex_windows_computer_use_call", {
+        turn_token: token,
+        wire_name: "mcp__windows_computer_use__windows_computer_use_activate_window",
+        arguments: { nativeWindowHandle: 1234 },
+      });
+      expect(legacyCall.isError).toBe(true);
+      expect(legacyCall.structuredContent).toMatchObject({
+        code: "legacy_windows_computer_use_disabled",
+        retryable: false,
+      });
 
       const rejectedClick = await call("codex_readonly_tool_call", {
         turn_token: token,
@@ -3094,32 +3108,6 @@ describe("ChatGPT outer-native harness v4", () => {
       });
       expect(rejectedActivation.isError).toBe(true);
       expect(JSON.stringify(rejectedActivation.content)).toContain("rejects activate=true");
-
-      const click = call("codex_windows_computer_use_action", {
-        turn_token: token,
-        operation: "click",
-        arguments: { x: 10, y: 20 },
-      });
-      const [clickRequest] = await broker.nextToolBatch(token);
-      expect(clickRequest).toMatchObject({
-        wireName: "mcp__windows_computer_use__windows_computer_use_click",
-        arguments: { x: 10, y: 20 },
-      });
-      broker.completeTool(token, clickRequest!.callId, toolResult({ ok: true }));
-      expect((await click).structuredContent).toEqual({ ok: true });
-
-      const compatibilityActivation = call("codex_windows_computer_use_call", {
-        turn_token: token,
-        wire_name: "mcp__windows_computer_use__windows_computer_use_activate_window",
-        arguments: { nativeWindowHandle: 1234 },
-      });
-      const [compatibilityActivationRequest] = await broker.nextToolBatch(token);
-      expect(compatibilityActivationRequest).toMatchObject({
-        wireName: "mcp__windows_computer_use__windows_computer_use_activate_window",
-        arguments: { nativeWindowHandle: 1234 },
-      });
-      broker.completeTool(token, compatibilityActivationRequest!.callId, toolResult({ ok: true }));
-      expect((await compatibilityActivation).structuredContent).toEqual({ ok: true });
 
       const rawGatewayInventory = await inventoryThroughGateway(
         "Run nested Codex tools",
