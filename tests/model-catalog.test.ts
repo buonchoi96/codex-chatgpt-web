@@ -102,9 +102,12 @@ describe("native /models augmentation", () => {
     }
     expect((web[1]!.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
       .toEqual(["medium", "high", "xhigh"]);
-    expect(() => buildChatGptWebModel(originalModels[1], {
+    const grouped = buildChatGptWebModel(originalModels[1], {
       ...CHATGPT_WEB_MODEL_ROUTES[1]!, supportedCodexEfforts: ["low", "medium"],
-    }, { ...config, proAvailable: false })).toThrow("Cannot group different context budgets");
+    }, { ...config, proAvailable: false });
+    expect(grouped.auto_compact_token_limit).toBe(922_000);
+    expect((grouped.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
+      .toEqual(["low", "medium"]);
   });
 
   test("keeps Bigger Context on the 922K semantic model boundary", () => {
