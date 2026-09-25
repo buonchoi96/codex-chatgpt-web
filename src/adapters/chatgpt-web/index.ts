@@ -977,7 +977,10 @@ export function createChatGptWebAdapter(
                   };
                   armHandoffDeadline();
                   const operationSignal = AbortSignal.any([operatorSignal, handoffDeadline.signal]);
-                  const sourceConversationKey = chatGptConversationKey(parsed, executionNamespace);
+                  const sourceExecutionSession = chatGptTurnSessions.find(compactedSourceExecutionKey);
+                  const sourceConversationKey = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
+                    ? sourceExecutionSession?.conversationKey()
+                    : chatGptConversationKey(parsed, executionNamespace);
                   const runFreshCompaction = async (reason: string): Promise<string> => {
                     if (freshConversationPerTurn) console.info("[chatgpt-web] compaction uses configured fresh conversation mode");
                     else console.warn(`[chatgpt-web] retained compaction fallback=${reason}`);
