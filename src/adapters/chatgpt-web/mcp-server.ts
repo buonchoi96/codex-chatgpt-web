@@ -122,7 +122,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Use codex_tool_inventory to discover the exact Computer Use surface. When discovery_tools contains tool_search, invoke tool_search through codex_tool_call and continue discovery in the same response; then invoke the exact returned wire_name through codex_tool_call or the native exec gateway.",
   "Treat cua_repl as browser-oriented unless its current description/state explicitly proves native computer APIs are enabled. apps=[], 'Native computer APIs are disabled', a missing sky trusted service, or an equivalent native-surface error is a signal to try node_repl + @oai/sky instead of declaring native Windows unavailable.",
   "Do not treat ChatGPT's browser-only computer surface as evidence of native desktop access.",
-  "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are legacy compatibility helpers for the third-party windows_computer_use MCP. Do not call them unless codex_tool_inventory already proved that the corresponding mcp__windows_computer_use tools are loaded in the current outer Codex turn.",
+  "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are deprecated ABI stubs. They intentionally fail fast and never route desktop work. Use official node_repl + @oai/sky for native Windows Computer Use.",
   "Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command. tool_search is a Codex Native discovery capability, not an operating-system executable.",
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
@@ -966,8 +966,8 @@ export async function runChatGptMcpServer(options: {
     server.registerTool(
       "codex_windows_computer_use_observe",
       {
-        title: "Observe Windows through Codex",
-        description: "Read local Windows UI state through an already-loaded Windows Computer Use observation tool. This tool cannot click, type, focus, activate, scroll, move the pointer, invoke controls, or otherwise modify the desktop.",
+        title: "Deprecated Windows CU observation stub",
+        description: "Deprecated ABI compatibility stub. It never routes Windows desktop work and always fails fast. Use official node_repl + @oai/sky for native Windows Computer Use.",
         inputSchema: {
           turn_token: turnTokenSchema,
           operation: z.enum([
@@ -983,19 +983,11 @@ export async function runChatGptMcpServer(options: {
         },
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
-      async (toolInput, extra) => withClaimedTurn(
-        "codex_windows_computer_use_observe",
-        toolInput.turn_token,
-        extra,
-        async claimed => {
-          const wire = WINDOWS_COMPUTER_USE_OBSERVATION_TOOLS[toolInput.operation];
-          if (!wire) throw new Error(`Unsupported Windows Computer Use observation operation: ${toolInput.operation}`);
-          const args = toolInput.arguments ?? {};
-          assertWindowsComputerUseReadOnlyCall(wire, args);
-          const tool = exactVisibleStructuredTool(claimed.environment, contract, wire);
-          return invoke(claimed.bindingId, claimed.environment, tool, { arguments: args }, extra.signal);
-        },
-      ),
+      async () => result({
+        code: "legacy_windows_computer_use_disabled",
+        retryable: false,
+        message: "This legacy Windows Computer Use bridge is disabled. Use official mcp__node_repl__js with @oai/sky for native Windows Computer Use.",
+      }, true),
     );
 
     server.registerTool(
@@ -1029,8 +1021,8 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_windows_computer_use_action",
     {
-      title: "Perform a Windows UI action through Codex",
-      description: "Perform one fixed Windows Computer Use interaction operation through an already-loaded local Windows UI tool. Observation-only work belongs on codex_windows_computer_use_observe.",
+      title: "Deprecated Windows CU action stub",
+      description: "Deprecated ABI compatibility stub. It never performs Windows UI actions and always fails fast. Use official node_repl + @oai/sky for native Windows Computer Use.",
       inputSchema: {
         turn_token: turnTokenSchema,
         operation: z.enum([
@@ -1048,60 +1040,35 @@ export async function runChatGptMcpServer(options: {
         ]),
         arguments: jsonArgumentsSchema.optional(),
       },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (toolInput, extra) => withClaimedTurn(
-      "codex_windows_computer_use_action",
-      toolInput.turn_token,
-      extra,
-      async claimed => {
-        const wire = WINDOWS_COMPUTER_USE_ACTION_TOOLS[toolInput.operation];
-        if (!wire) throw new Error(`Unsupported Windows Computer Use action operation: ${toolInput.operation}`);
-        const tool = exactVisibleStructuredTool(claimed.environment, contract, wire);
-        return invoke(
-          claimed.bindingId,
-          claimed.environment,
-          tool,
-          { arguments: toolInput.arguments ?? {} },
-          extra.signal,
-        );
-      },
-    ),
+    async () => result({
+      code: "legacy_windows_computer_use_disabled",
+      retryable: false,
+      message: "This legacy Windows Computer Use bridge is disabled. Use official mcp__node_repl__js with @oai/sky for native Windows Computer Use.",
+    }, true),
   );
 
   server.registerTool(
     "codex_windows_computer_use_call",
     {
-      title: "Control Windows through Codex (compatibility fallback)",
+      title: "Deprecated Windows CU compatibility stub",
       description: afterSafeStart(
         contract,
-        "Compatibility fallback for an exact loaded Windows Computer Use wire_name. Prefer codex_windows_computer_use_action for interaction and codex_windows_computer_use_observe for observation.",
+        "Deprecated ABI compatibility stub. It never routes Windows desktop work and always fails fast. Use official node_repl + @oai/sky for native Windows Computer Use.",
       ),
       inputSchema: {
         ...turnReferenceInput(contract),
         wire_name: z.string().min(1).max(1_000),
         arguments: jsonArgumentsSchema.optional(),
       },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (toolInput, extra) => withClaimedTurn(
-      "codex_windows_computer_use_call",
-      turnReference(contract, toolInput),
-      extra,
-      async claimed => {
-        if (!isWindowsComputerUseWireName(toolInput.wire_name)) {
-          throw new Error(`Windows Computer Use dispatcher rejects non-Windows tool: ${toolInput.wire_name}`);
-        }
-        const tool = exactVisibleStructuredTool(claimed.environment, contract, toolInput.wire_name);
-        return invoke(
-          claimed.bindingId,
-          claimed.environment,
-          tool,
-          { arguments: toolInput.arguments ?? {} },
-          extra.signal,
-        );
-      },
-    ),
+    async () => result({
+      code: "legacy_windows_computer_use_disabled",
+      retryable: false,
+      message: "This legacy Windows Computer Use bridge is disabled. Use official mcp__node_repl__js with @oai/sky for native Windows Computer Use.",
+    }, true),
   );
 
   }
