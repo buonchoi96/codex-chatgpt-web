@@ -29,8 +29,8 @@ test("multipart selection accounts for whole-record and composer fit before subm
   const plus = { ...capabilities, extraHighAvailable: false, proAvailable: false };
   for (const [contents, expected] of [
     [["small task"], undefined],
-    [[50_000, 40_000, 50_000, 5_000].map(n => "word ".repeat(n)), 2],
-    [Array.from({ length: 3 }, () => " ".repeat(450_000)), 2],
+    [[50_000, 40_000, 50_000, 5_000].map(n => "word ".repeat(n)), undefined],
+    [Array.from({ length: 3 }, () => " ".repeat(450_000)), undefined],
   ] as const) {
     const parsed = request("");
     parsed.context.messages = contents.map((content, index) => ({ role: "user", content, timestamp: index + 1 }));
@@ -45,7 +45,9 @@ test("multipart selection accounts for whole-record and composer fit before subm
   // Low-token text can still exceed the reasoning model's server character ceiling.
   // Stage the complete record instead of sending it inline or dropping its contents.
   const sparsePro = request("x".repeat(600_000));
-  expect(resolveBiggerContextMultipartParts(sparsePro, capabilities)).toBe(2);
+  expect(resolveBiggerContextMultipartParts(sparsePro, capabilities)).toBeUndefined();
+  const archivedPro = compileChatGptWebPrompt(sparsePro, capabilities);
+  expect(archivedPro.archive?.contextText).toContain("x".repeat(10_000));
   const stagedPro = compileChatGptWebPrompt(sparsePro, capabilities, undefined, { experimentalMultipartParts: 2 });
   expect(stagedPro.multipart!.parts.flatMap(part => JSON.parse(part).records).map(record => record.message.content))
     .toEqual([sparsePro.context.messages[0]!.content]);
