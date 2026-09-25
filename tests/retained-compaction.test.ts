@@ -1052,7 +1052,7 @@ test("retained compaction can close its browser epoch while preserving an ordina
   sessions.clear();
 });
 
-test("adapter compact returns one same-agent handoff and preserves a pre-existing ordinary final", async () => {
+test("Sol Web compaction keeps the retained Computer Use conversation across a new compaction turn id", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-adapter-retained-compact-"));
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -1071,6 +1071,7 @@ test("adapter compact returns one same-agent handoff and preserves a pre-existin
   const worker = ChatGptBrowserWorker.forProvider(provider);
   const originalRun = worker.run.bind(worker);
   const sourceRequest = request(false);
+  expect(sourceRequest.modelId).toBe("gpt-5.6-sol");
   const namespace = chatGptWebExecutionNamespace(provider);
   const sourceKey = `${namespace}:${chatGptTurnExecutionKey(sourceRequest)}`;
   const conversationKey = chatGptConversationKey(sourceRequest, namespace)!;
