@@ -6,7 +6,6 @@ import { createChatGptWebAdapter } from "../adapters/chatgpt-web";
 import { estimateChatGptWebInputTokens } from "../adapters/chatgpt-web/usage";
 import { RemoteTurnBroker, type TurnBrokerOwner } from "../adapters/chatgpt-web/turn-broker";
 import {
-  CHATGPT_WEB_LUNA_BACKEND_MODEL,
   requireChatGptWebModelRoute,
   resolveChatGptWebContextLimits,
 } from "../chatgpt-web-models";
