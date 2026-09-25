@@ -3049,7 +3049,7 @@ test("only a size rejection of the current owned browser submission is non-retry
   expect(await observer.failure()).toBeUndefined();
   const current = makeRequest(); page.emit("request", current); respond(current);
   expect(await observer.failure()).toMatchObject({
-    status: 400, code: "context_length_exceeded", errorType: "invalid_request_error", retryable: false,
+    status: 400, code: "message_length_exceeds_limit", errorType: "invalid_request_error", retryable: false,
   });
   observer.begin(page as unknown as Page);
   expect(await observer.failure()).toBeUndefined();
@@ -3423,31 +3423,14 @@ test("browser preflight separates model context from one-message transport limit
   const pro = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
   const luna = { localToolsEnabled: false, solAvailable: false, extraHighAvailable: false, proAvailable: false };
 
-  try {
-    assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "medium", plus);
-    throw new Error("expected context-window preflight to fail");
-  } catch (error) {
-    expect(error).toMatchObject({
-      name: "ChatGptWebAdapterError",
-      status: 400,
-      errorType: "invalid_request_error",
-      code: "context_length_exceeded",
-      retryable: false,
-    });
-    expect(String(error)).toContain("/compact");
-  }
-
-  expect(() => assertChatGptWebInputWithinLimits(40_999, 32_807, "gpt-5.6-sol", "low", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(41_000, 32_808, "gpt-5.6-sol", "low", plus)).toThrow(
-    "41,000-token context window",
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "medium", plus, 300_000)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "high", plus, 300_000)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "xhigh", pro, 300_000)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "max", pro, 300_000)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(1_049_999, 75_000, "gpt-5.6-sol", "medium", plus, 300_000)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(1_050_000, 75_000, "gpt-5.6-sol", "medium", plus, 300_000)).toThrow(
+    "1,050,000-token context window",
   );
-  expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "medium", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "high", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "high", plus)).toThrow(
-    "90,000-token context window",
-  );
-  expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "xhigh", pro)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "max", pro)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(28_000, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(191_584, 183_392, "gpt-5.6-luna", "low", luna)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(1_049_999, 1_041_807, "gpt-5.6-luna", "low", luna)).not.toThrow();
@@ -3498,14 +3481,19 @@ test("browser preflight separates model context from one-message transport limit
     pro,
     500_000,
   )).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(
-    111_193,
-    103_001,
-    "gpt-5.6-sol",
-    "medium",
-    pro,
-    500_000,
-  )).toThrow("103,000-token ChatGPT browser message boundary");
+  try {
+    assertChatGptWebInputWithinLimits(191_584, 103_001, "gpt-5.6-sol", "medium", pro, 500_000);
+    throw new Error("expected browser message boundary to fail");
+  } catch (error) {
+    expect(error).toMatchObject({
+      name: "ChatGptWebAdapterError",
+      status: 400,
+      errorType: "invalid_request_error",
+      code: "message_length_exceeds_limit",
+      retryable: false,
+    });
+    expect(String(error)).toContain("103,000-token ChatGPT browser message boundary");
+  }
   expect(() => assertChatGptWebInputWithinLimits(
     112_192,
     104_000,
@@ -3515,7 +3503,7 @@ test("browser preflight separates model context from one-message transport limit
     520_000,
   )).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(
-    112_193,
+    191_584,
     104_001,
     "gpt-5.6-sol",
     "max",
