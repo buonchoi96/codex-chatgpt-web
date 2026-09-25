@@ -1,0 +1,138 @@
+name: Feature Official Computer Use Windows Release
+
+on:
+  push:
+    branches:
+      - feature/official-codex-computer-use
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: feature-official-computer-use-windows-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out feature branch commit
+        uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and regression tests
+        run: bun run verify
+
+      - name: Build Windows launcher
+        run: bun run --cwd launcher package:win
+
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\codex-e-drive"
+
+      - name: Smoke packaged launcher
+        run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
+
+      - name: Prepare release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installers = @(Get-ChildItem "launcher/artifacts" -Filter "*-win-x64.exe" -File)
+          if ($installers.Count -ne 1) {
+            Write-Error "Expected exactly one *-win-x64.exe installer, found $($installers.Count)."
+          }
+
+          New-Item -ItemType Directory -Force "release-assets" | Out-Null
+          $installer = $installers[0]
+          Copy-Item $installer.FullName "release-assets\$($installer.Name)" -Force
+
+          $hash = (Get-FileHash "release-assets\$($installer.Name)" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
+
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "package.json version is missing"
+          }
+
+          "installer=$($installer.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload validated installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-cu-windows-installer-${{ github.sha }}
+          path: |
+            release-assets/*.exe
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Publish feature prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ steps.assets.outputs.version }}-official-computer-use
+          INSTALLER_NAME: ${{ steps.assets.outputs.installer }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          @"
+          ## Official Codex Computer Use feature build
+
+          Built from branch 'feature/official-codex-computer-use'.
+
+          Source commit: '$env:GITHUB_SHA'
+          Workflow run: '$env:GITHUB_RUN_ID'
+
+          Validation completed before publication:
+          - bun run verify
+          - Windows launcher packaging
+          - packaged launcher smoke test
+          - AVX2-independent Bun 1.4.0 runtime preparation
+
+          This prerelease changes ChatGPT Web Full Harness Computer Use routing to prefer
+          capabilities exposed by the outer Codex registry, including official OpenAI Codex
+          Computer Use / Unified Computer Use surfaces, while retaining the legacy
+          codex_windows_computer_use_* bridge ABI for compatibility.
+
+          Assets:
+          - '$env:INSTALLER_NAME'
+          - 'SHA256SUMS.txt'
+          "@ | Set-Content "release-notes.md" -Encoding utf8
+
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG "release-assets\$env:INSTALLER_NAME" "release-assets\SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --clobber
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex Web GPT v${{ steps.assets.outputs.version }} Official Computer Use" --notes-file "release-notes.md" --prerelease --latest=false
+          }
+          else {
+            gh release create $env:RELEASE_TAG "release-assets\$env:INSTALLER_NAME" "release-assets\SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex Web GPT v${{ steps.assets.outputs.version }} Official Computer Use" --notes-file "release-notes.md" --prerelease
+          }
