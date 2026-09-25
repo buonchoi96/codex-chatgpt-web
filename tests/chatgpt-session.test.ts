@@ -19,7 +19,13 @@ test("saved chats start empty and cannot reuse an arbitrary conversation or a Te
   for (const saved of [false, true]) {
     let url = "https://chatgpt.com/c/previous-task";
     const navigations: string[] = [];
-    const absent: any = { filter: () => absent, last: () => absent, isVisible: async () => false };
+    const absent: any = {
+      filter: () => absent,
+      last: () => absent,
+      nth: () => absent,
+      count: async () => 0,
+      isVisible: async () => false,
+    };
     const composer: any = { count: async () => 1, nth: () => composer, isVisible: async () => true };
     const page: any = {
       url: () => url,
