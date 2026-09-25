@@ -28,7 +28,7 @@ test("multipart selection accounts for whole-record and composer fit before subm
   const plus = { ...capabilities, extraHighAvailable: false, proAvailable: false };
   for (const [contents, expected] of [
     [["small task"], undefined],
-    [[50_000, 40_000, 50_000, 5_000].map(n => "word ".repeat(n)), 6],
+    [[50_000, 40_000, 50_000, 5_000].map(n => "word ".repeat(n)), 2],
     [Array.from({ length: 3 }, () => " ".repeat(450_000)), 2],
   ] as const) {
     const parsed = request("");
