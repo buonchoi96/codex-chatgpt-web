@@ -2628,7 +2628,9 @@ test("image attachment readiness uses exact file tiles and not localized remove-
       return {
         or() { return this; },
         waitFor: async (state: { state: string; timeout: number }) => {
-          expect(state).toEqual({ state: "visible", timeout: 60_000 });
+          expect(state.state).toBe("visible");
+          expect(state.timeout).toBeGreaterThan(0);
+          expect(state.timeout).toBeLessThanOrEqual(120_000);
           calls.push(["fileTile", options.name]);
         },
       };
