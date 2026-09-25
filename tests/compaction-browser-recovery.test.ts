@@ -105,7 +105,7 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
       `effort:${effort}`,
       tools ? "attach:tools" : "attach:plain", "files", "send", "observe",
     ]);
-    expect(sendBudgets).toEqual(multipart ? Array(6).fill(180_000) : [120_000]);
+    expect(sendBudgets).toEqual(multipart ? Array(6).fill(450_000) : [300_000]);
     expect(released).toBe(true);
     expect(activated).toBe(1);
     expect(page.listenerCount("request")).toBe(0);
@@ -127,6 +127,6 @@ test("accepted compaction handoff never presses Stop while real cancellation sti
 });
 
 test("ordinary prompt submission has headroom for large composer ingestion", () => {
-  expect(browserStageTimeouts.send).toBe(120_000);
-  expect(CHATGPT_SEND_ENABLE_GRACE_MS).toBe(30_000);
+  expect(browserStageTimeouts.send).toBe(300_000);
+  expect(CHATGPT_SEND_ENABLE_GRACE_MS).toBe(75_000);
 });
