@@ -2863,6 +2863,18 @@ class BrowserHost {
         if (!wasAuthenticated) this.logger.info("browser.authenticated", { url: result.url });
       } else if (result.sessionCheckError) {
         this.setState({ status: "error", message: result.sessionCheckError, authenticated: false, url: result.url || url });
+      } else if (result.sessionAuthenticated && this.state.authenticated) {
+        // ChatGPT can replace the document while Temporary Chat is rehydrating after sign-in.
+        // The composer may disappear briefly during that transition even though the session
+        // remains authenticated. Do not regress Setup step 1 back to signed-out once the
+        // account has already been proven; the subsequent probe or smoke test will establish
+        // surface readiness.
+        this.setState({
+          status: "loading",
+          message: "Finishing ChatGPT sign-in",
+          authenticated: true,
+          url: result.url || url,
+        });
       } else {
         const loaded = result.readyState === "complete";
         this.setState({
@@ -2898,6 +2910,11 @@ class BrowserHost {
 
   async smokeTest() {
     requireAutomaticBrowserInspection(this, "ChatGPT browser smoke test");
+    // A renderer reload can reset Setup's local busy state while the main process is still
+    // completing the login transaction. Serialize smoke behind that transaction instead of
+    // surfacing a stale "already busy with ChatGPT login" error to the user.
+    const loginOperation = this.loginOperation;
+    if (loginOperation) await loginOperation;
     return await this.withManualOperation("browser smoke test", () => this.runSmokeTest());
   }
 

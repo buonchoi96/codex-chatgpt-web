@@ -1014,6 +1014,63 @@ test("concurrent authentication probes share the same navigation and allow the n
   assert.equal(probes, 3); // the settled operation must not cache stale authentication
 });
 
+test("authentication stays confirmed while Temporary Chat rehydrates after sign-in", async () => {
+  const url = "https://chatgpt.com/?temporary-chat=true";
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    state: { authenticated: true, status: "ready", message: "ChatGPT is ready" },
+    activeTraceId: null,
+    manualOperation: null,
+    authenticationProbe: null,
+    view: { webContents: {
+      isDestroyed: () => false,
+      getURL: () => url,
+      executeJavaScript: async () => ({
+        url,
+        composer: false,
+        temporary: true,
+        readyState: "complete",
+        sessionAuthenticated: true,
+        sessionCheckError: null,
+      }),
+    } },
+    setState(patch) { this.state = { ...this.state, ...patch }; },
+    snapshot() { return { ...this.state }; },
+    logger: { info() {} },
+  });
+
+  const result = await BrowserHost.prototype.probeAuthentication.call(fixture);
+
+  assert.equal(result.authenticated, true);
+  assert.equal(result.status, "loading");
+  assert.equal(result.message, "Finishing ChatGPT sign-in");
+});
+
+test("browser smoke waits for an in-flight login transaction", async () => {
+  const calls = [];
+  let finishLogin;
+  const loginOperation = new Promise((resolve) => { finishLogin = resolve; });
+  const fixture = {
+    loginOperation,
+    getBrowserInteractionMode: () => "automatic",
+    withManualOperation: async (name, action) => {
+      calls.push(name);
+      return await action();
+    },
+    runSmokeTest: async () => {
+      calls.push("smoke");
+      return { ok: true };
+    },
+  };
+
+  const pending = BrowserHost.prototype.smokeTest.call(fixture);
+  await Promise.resolve();
+  assert.deepEqual(calls, []);
+
+  finishLogin();
+  assert.deepEqual(await pending, { ok: true });
+  assert.deepEqual(calls, ["browser smoke test", "smoke"]);
+});
+
 test("concurrent embedded login requests share one authentication operation", async () => {
   let resolveLogin;
   let waits = 0;
