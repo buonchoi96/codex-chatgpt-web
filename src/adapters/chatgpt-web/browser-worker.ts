@@ -33,6 +33,7 @@ import {
 } from "./model";
 import {
   compiledChatGptWebMaxMessageChars,
+  compiledChatGptWebCompactionTextOnlyFallback,
   estimateChatGptWebImageTokens,
   estimateCompiledChatGptWebMessageTokens,
 } from "./input-tokens";
@@ -143,6 +144,7 @@ const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
  */
 export const CHATGPT_UI_SETTLE_MS = 250;
 export const CHATGPT_SEND_ENABLE_GRACE_MS = 30_000;
+export const CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS = 60_000;
 
 const CHATGPT_DOM_REVISION_ATTRIBUTES = [
   "aria-hidden",
@@ -2392,7 +2394,38 @@ export class ChatGptBrowserWorker {
     if (useHelper) {
       this.launcherHelper ??= new LauncherBrowserHelperClient(this.config);
     }
-    const run = Promise.resolve().then(() => useHelper ? this.launcherHelper!.run(turn) : this.runExclusive(turn));
+    const execute = (candidate: BrowserTurn): Promise<string> => (
+      useHelper ? this.launcherHelper!.run(candidate) : this.runExclusive(candidate)
+    );
+    const run = Promise.resolve().then(async () => {
+      try {
+        return await execute(turn);
+      } catch (error) {
+        if (!(turn.compaction
+          && error instanceof ChatGptWebAdapterError
+          && error.code === "compaction_attachment_fallback")) {
+          throw error;
+        }
+        console.warn(
+          `[chatgpt-web] browser turn ${turn.traceId} retrying compaction as text-only after attachment upload failure`,
+        );
+        const textOnlyPrepare = (prepare: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>) => (
+          async () => {
+            const prepared = await prepare();
+            return {
+              ...compiledChatGptWebCompactionTextOnlyFallback(prepared),
+              release: prepared.release,
+            };
+          }
+        );
+        const fallbackTurn: BrowserTurn = {
+          ...turn,
+          prepare: textOnlyPrepare(turn.prepare),
+          ...(turn.prepareResume ? { prepareResume: textOnlyPrepare(turn.prepareResume) } : {}),
+        };
+        return await execute(fallbackTurn);
+      }
+    });
     this.activeRuns.set(turn.traceId, run);
     void run.finally(() => {
       if (this.activeRuns.get(turn.traceId) === run) this.activeRuns.delete(turn.traceId);
@@ -4116,19 +4149,25 @@ export class ChatGptBrowserWorker {
     return { effort: mode.displayLabel, response: CHATGPT_SMOKE_EXPECTED };
   }
 
-  private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt): Promise<void> {
+  private async attachFiles(
+    page: Page,
+    prompt: CompiledChatGptWebPrompt,
+    timeoutMs = browserStageTimeouts.fileAttachment,
+  ): Promise<void> {
     const files = chatGptPromptFilePayloads(prompt);
     if (files.length === 0) return;
+    const deadline = Date.now() + timeoutMs;
+    const remaining = () => Math.max(1, deadline - Date.now());
     const composer = await this.activeComposer(page);
     const composerForm = composer.locator("xpath=ancestor::form[1]");
     const input = page.locator('input[data-testid="upload-photos-input"], form[data-chatgpt-composer] input[type="file"][multiple]:not([accept])');
-    await input.waitFor({ state: "attached", timeout: 20_000 });
-    await input.setInputFiles(files);
+    await input.waitFor({ state: "attached", timeout: Math.min(20_000, remaining()) });
+    await input.setInputFiles(files, { timeout: remaining() });
     try {
       await Promise.all(files.map(file => (
         composerForm.getByRole("group", { name: file.name, exact: true })
           .or(composerForm.locator(`.composer-attachment-surface[role="button"][aria-label=${JSON.stringify(file.name)}]`))
-          .waitFor({ state: "visible", timeout: 60_000 })
+          .waitFor({ state: "visible", timeout: remaining() })
       )));
     } catch {
       const alerts = (await page.locator('[role="alert"]').allInnerTexts().catch(() => []))
@@ -4140,10 +4179,9 @@ export class ChatGptBrowserWorker {
       );
     }
     const send = composerForm.locator(CHATGPT_SEND_BUTTON_SELECTOR);
-    const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       if (await send.isEnabled().catch(() => false)) return;
-      await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
+      await new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, remaining())));
     }
     throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
   }
@@ -5299,9 +5337,31 @@ export class ChatGptBrowserWorker {
         }
       }
       await diagnostics.capture(page, "prompt-attachment-complete");
-      await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, () => (
-        this.attachFiles(page, prepared)
-      ));
+      try {
+        const attachmentTimeout = turn.compaction
+          ? CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS
+          : browserStageTimeouts.fileAttachment;
+        await this.runStage(turn.traceId, "file_attachment", attachmentTimeout + 5_000, () => (
+          this.attachFiles(page, prepared, attachmentTimeout)
+        ));
+      } catch (error) {
+        const hasAttachments = chatGptPromptFilePayloads(prepared).length > 0;
+        const submissionEvidence = await this.currentSubmissionEvidence(page, submissionBaseline).catch(() => undefined);
+        if (turn.compaction && hasAttachments && !submissionEvidence) {
+          await diagnostics.capture(page, "compaction-attachment-fallback", error);
+          throw new ChatGptWebAdapterError(
+            "ChatGPT could not finish uploading compaction attachments before the fallback deadline. Retry this same compaction as text-only.",
+            {
+              status: 409,
+              errorType: "browser_transport_error",
+              code: "compaction_attachment_fallback",
+              retryable: true,
+              cause: error,
+            },
+          );
+        }
+        throw error;
+      }
       await diagnostics.capture(page, "file-attachment-complete");
       let completionTracker = new ChatGptCompletionTracker();
       let finalSubmissionEvidence: ChatGptSubmissionEvidence;
