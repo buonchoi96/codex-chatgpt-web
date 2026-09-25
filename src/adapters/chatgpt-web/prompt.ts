@@ -459,10 +459,7 @@ export function compileChatGptWebPrompt(
     throw new Error("Bigger Context requires two or six context parts");
   }
   if (multipartEnabled && parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
-    throw new Error("Bigger Context is unavailable for Luna because its accumulated browser transcript still shares one 28,000-token transport budget");
-  }
-  if (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && parsed._compactionRequest) {
-    throw new Error("ChatGPT Luna uses rolling checkpoints and does not accept a separate compaction turn");
+    throw new Error("Bigger Context is unavailable for Luna because Luna already owns the native 1.05M-token Web model window; multipart staging is not enabled for this route");
   }
   if (captureLunaCheckpoint && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || parsed._compactionRequest)) {
     throw new Error("Rolling checkpoints are supported only for normal ChatGPT Luna turns");
