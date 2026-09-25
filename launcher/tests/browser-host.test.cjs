@@ -831,7 +831,7 @@ test("shell zoom shortcuts recognize native CommandOrControl keys only", () => {
 test("guest and incomplete server sessions do not prove launcher authentication", async () => {
   const fixture = {
     state: { authenticated: true },
-    activeTraceId: null,
+    turnTabs: new Map(),
     manualOperation: null,
     view: {
       webContents: {
