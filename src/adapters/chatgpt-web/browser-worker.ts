@@ -1736,6 +1736,45 @@ export const MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS = 8;
  */
 export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 10 * 60_000;
 
+/**
+ * A visible ChatGPT turn that keeps its Stop control active but produces no text, reasoning trace,
+ * or native-tool progress is not useful liveness. Bound that silent-running state so a wedged Web
+ * generation becomes a retryable adapter failure instead of looking alive forever.
+ */
+export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
+
+export class ChatGptRunningProgressTracker {
+  private signature?: string;
+  private lastProgressAt?: number;
+
+  constructor(private readonly stallMs = CHATGPT_RUNNING_NO_PROGRESS_STALL_MS) {}
+
+  update(state: {
+    running: boolean;
+    visibleText: string;
+    traceBlocks: readonly ChatGptVisibleTraceBlock[];
+    externalLastProgressAt?: number;
+    externalToolCallsInFlight: boolean;
+  }, now = Date.now()): boolean {
+    if (!state.running) {
+      this.signature = undefined;
+      this.lastProgressAt = undefined;
+      return false;
+    }
+    const signature = JSON.stringify([
+      state.visibleText,
+      state.traceBlocks.map(block => [block.kind, block.key ?? null, block.text, block.complete ?? null]),
+      state.externalLastProgressAt ?? null,
+    ]);
+    if (state.externalToolCallsInFlight || this.signature !== signature || this.lastProgressAt === undefined) {
+      this.signature = signature;
+      this.lastProgressAt = now;
+      return false;
+    }
+    return now - this.lastProgressAt >= this.stallMs;
+  }
+}
+
 /** Tolerated clock difference between the recording daemon and the observing helper process. */
 export const CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS = 5_000;
 
@@ -5367,6 +5406,7 @@ export class ChatGptBrowserWorker {
         });
       };
       let domHealthTracker = new ChatGptTurnDomHealthTracker();
+      let runningProgressTracker = new ChatGptRunningProgressTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -5491,6 +5531,25 @@ export class ChatGptBrowserWorker {
           : false;
         const terminalUiReady = snapshot.completionActionVisible || composerReady;
         if (running) sawRunning = true;
+        if (runningProgressTracker.update({
+          running,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          externalToolCallsInFlight,
+        })) {
+          await diagnostics.capture(page, "response-no-progress-5m").catch(() => {});
+          await stop.press("Enter").catch(() => {});
+          throw new ChatGptWebAdapterError(
+            "ChatGPT remained in a running state for five minutes without visible response, reasoning, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.",
+            {
+              status: 504,
+              errorType: "server_error",
+              code: "browser_response_stalled",
+              retryable: true,
+            },
+          );
+        }
         if (snapshot.responsePresent) {
           if (!capturedResponse) {
             capturedResponse = true;
@@ -5641,6 +5700,7 @@ export class ChatGptBrowserWorker {
               visibleTrace = new ChatGptVisibleTraceTracker();
               markdownBuffer = new ChatGptMarkdownBuffer();
               domHealthTracker = new ChatGptTurnDomHealthTracker();
+              runningProgressTracker = new ChatGptRunningProgressTracker();
               responseDomCache.key = undefined;
               responseDomCache.snapshot = undefined;
               completionFenceRevision = undefined;
