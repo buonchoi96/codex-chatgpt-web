@@ -249,7 +249,7 @@ test("Bigger Context triples the DEV compaction window and fails closed for Luna
   const biggerStatus = bigger.status(biggerState);
   expect(biggerStatus).toMatchObject({
     autoCompactTokenLimit: 285_000,
-    contextWindow: 333_579,
+    contextWindow: 1_050_000,
   });
   expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 285_000) * 1_000) / 10);
   const luna = new DevChatDriver({
