@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { estimateChatGptWebInputTokens, resolveBiggerContextMultipartParts } from "../src/adapters/chatgpt-web/usage";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
 import { compiledChatGptWebMessages, estimateChatGptWebImageTokens, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
-import { assertChatGptWebMultipartInputWithinLimits, resolveChatGptWebMultipartStagingMode } from "../src/adapters/chatgpt-web/browser-worker";
+import { assertChatGptWebMultipartInputWithinLimits, chatGptPromptFilePayloads, resolveChatGptWebMultipartStagingMode } from "../src/adapters/chatgpt-web/browser-worker";
+import { strFromU8, unzipSync } from "fflate";
 import { estimateTokens } from "../src/lib/token-estimate";
 import type { CodexParsedRequest } from "../src/types";
 
@@ -103,3 +104,42 @@ test("multipart planning leaves room for final attachments and execution instruc
     )).not.toThrow();
   }
 }, 30_000);
+
+
+test("automatic compaction carries full text and images in one ZIP with a small composer wrapper", () => {
+  const parsed = request("word ".repeat(40_000));
+  parsed._compactionRequest = true;
+  const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==";
+  parsed.context.messages.push({
+    role: "user",
+    content: [{ type: "text", text: "inspect archive image" }, { type: "image", imageUrl, detail: "high" }],
+    timestamp: 2,
+  });
+
+  const compiled = compileChatGptWebPrompt(parsed, capabilities);
+  expect(compiled.archive?.name).toMatch(/^codex-context-[a-f0-9]{16}\.zip$/);
+  expect(compiled.text.length).toBeLessThan(5_000);
+  expect(compiled.archive!.contextText).toContain("word word word");
+  expect(compiled.archive!.contextText).toContain('"attachment_ref":"codex-input-image-1"');
+
+  const payloads = chatGptPromptFilePayloads(compiled);
+  expect(payloads).toHaveLength(1);
+  expect(payloads[0]!.mimeType).toBe("application/zip");
+
+  const archive = unzipSync(payloads[0]!.buffer);
+  expect(strFromU8(archive["context.txt"]!)).toBe(compiled.archive!.contextText);
+  const manifest = JSON.parse(strFromU8(archive["manifest.json"]!));
+  expect(manifest.images[0].attachment_ref).toBe("codex-input-image-1");
+  expect(Object.keys(archive)).toContain(manifest.images[0].path);
+});
+
+test("large ordinary Web context uses archive transport before browser composer limits force semantic compaction", () => {
+  const parsed = request("word ".repeat(60_000));
+  const compiled = compileChatGptWebPrompt(parsed, capabilities);
+  expect(compiled.archive).toBeDefined();
+  expect(compiled.text).toContain("complete Codex context bundle");
+  expect(compiled.archive!.contextText.length).toBeGreaterThan(100_000);
+  expect(estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId)).toBeGreaterThan(
+    estimateTokens(compiled.text, parsed.modelId),
+  );
+});
