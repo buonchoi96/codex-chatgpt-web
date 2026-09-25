@@ -91,9 +91,15 @@ the legacy connector. Future public schema changes require another explicit conn
 
 Full-harness Web models treat the outer Codex tool registry as the source of truth for desktop
 automation. They discover the current Computer Use capability through `codex_tool_inventory` and
-invoke the exact returned tool through `codex_tool_call` or the native exec gateway. Official
-OpenAI Codex Computer Use surfaces, including node-repl- or cua-repl-backed tools when present, are
-valid outer-Codex capabilities.
+invoke the exact returned tool through `codex_tool_call` or the native exec gateway.
+
+For native Windows application control, the preferred official path is persistent
+`mcp__node_repl__js` plus `@oai/sky`: import `@oai/sky`, retain the `sky` object in the REPL
+session, call `sky.list_apps()`, then use the native app/window operations exposed by `sky`.
+`cua_repl` is treated as browser-oriented unless its current runtime state explicitly proves that
+native computer APIs are enabled. An empty app inventory, a "Native computer APIs are disabled"
+message, or a missing `sky` trusted service must trigger the `node_repl` path rather than being
+interpreted as proof that native desktop control is unavailable.
 
 The `codex_windows_computer_use_observe`, `codex_windows_computer_use_action`, and
 `codex_windows_computer_use_call` tools remain in the Native2 public schema only for compatibility
