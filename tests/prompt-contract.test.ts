@@ -88,7 +88,9 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("explicitly search for node_repl before concluding that desktop control is unavailable");
   expect(transportOnly).toContain("prefer the official Computer Use path through persistent node_repl and @oai/sky");
   expect(transportOnly).toContain("Treat cua_repl as browser-oriented unless its current tool description or runtime state explicitly proves that native computer APIs are enabled");
-  expect(transportOnly).toContain("Do not call them unless the current native tool inventory has already proved that the corresponding mcp__windows_computer_use tools are loaded");
+  expect(transportOnly).toContain("codex_windows_computer_use_* bridge tools are deprecated ABI stubs only");
+  expect(transportOnly).toContain("Never use them for desktop work; they intentionally fail fast");
+  expect(transportOnly).toContain("Use official node_repl + @oai/sky for native Windows Computer Use");
   expect(transportOnly).not.toContain("do not use ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods");
   expect(transportOnly).toContain("Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command");
   expect(transportOnly).not.toContain("codex.control.turn_complete");
