@@ -5,6 +5,7 @@ import {
   chatGptPromptJsonBytes,
   chatGptReadOnlyContextWarning,
   compileChatGptWebPrompt,
+  compiledChatGptWebCompactionTextOnlyFallback,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
   withoutRetiredTurnHandles,
@@ -530,7 +531,7 @@ test("a long task keeps the newest images and drops the overflow instead of fail
   expect(compiled.text).toContain("step 13");
 });
 
-test("Web compaction is text-only and never depends on image upload quota", () => {
+test("Web compaction tries image uploads first and can fall back to text-only", () => {
   const imagePayloads = Array.from({ length: 13 }, (_unused, index) =>
     Buffer.from(`compaction-image-${index + 1}`).toString("base64"));
   const parsed: CodexParsedRequest = {
@@ -556,13 +557,20 @@ test("Web compaction is text-only and never depends on image upload quota", () =
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   );
 
-  expect(compiled.images).toEqual([]);
-  expect(compiled.skillFiles).toBeUndefined();
+  expect(compiled.images.map(image => image.imageUrl)).toEqual(
+    imagePayloads.slice(-10).map(payload => `data:image/png;base64,${payload}`),
+  );
   expect(compiled.text).not.toContain("data:image");
   for (const payload of imagePayloads) expect(compiled.text).not.toContain(payload);
-  expect(compiled.text).not.toContain('"type":"image_attachment"');
-  expect(compiled.text.match(/image omitted from compaction transport/g)).toHaveLength(13);
-  expect(compiled.text).not.toContain("older image not attached");
+  expect(compiled.text.match(/"type":"image_attachment"/g)).toHaveLength(10);
+  expect(compiled.text.match(/older image not attached/g)).toHaveLength(3);
+
+  const fallback = compiledChatGptWebCompactionTextOnlyFallback(compiled);
+  expect(fallback.images).toEqual([]);
+  expect(fallback.skillFiles).toBeUndefined();
+  expect(fallback.text).not.toContain('"type":"image_attachment"');
+  expect(fallback.text.match(/image omitted from compaction transport after ChatGPT attachment upload timed out or was rejected/g)).toHaveLength(10);
+  expect(fallback.text.match(/older image not attached/g)).toHaveLength(3);
 });
 
 test("persisted one-pixel image sentinels are not attached to ChatGPT", () => {
