@@ -171,8 +171,9 @@ If a Web model reports that native desktop Computer Use is unavailable:
    missing `sky` trusted service, fall back to `node_repl` + `@oai/sky`.
 4. Do not treat ChatGPT's browser-only computer surface as proof that native desktop access is
    available.
-5. The `codex_windows_computer_use_*` connector tools are legacy compatibility helpers only and
-   must not be called unless the matching `mcp__windows_computer_use` tools are actually present.
+5. The `codex_windows_computer_use_*` connector tools are deprecated ABI stubs. They always
+   return `legacy_windows_computer_use_disabled` immediately and must never be used for desktop
+   work. Native Windows automation should stay on `mcp__node_repl__js` + `@oai/sky`.
 
 If the outer Codex inventory contains no suitable Computer Use capability, collect a safe log and
 report the exact Codex version, selected model, and inventory result.
