@@ -84,8 +84,10 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
   expect(transportOnly).toContain("If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.");
   expect(transportOnly).toContain("call the dedicated codex_turn_complete tool with remaining_actionable_requirements=[] before writing the final answer");
-  expect(transportOnly).toContain("do not use ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods");
-  expect(transportOnly).toContain("Prefer codex_windows_computer_use_observe for observation and codex_windows_computer_use_action for interaction");
+  expect(transportOnly).toContain("use a Computer Use capability that is actually exposed by the current outer Codex tool registry");
+  expect(transportOnly).toContain("Prefer official OpenAI Codex Computer Use or Unified Computer Use capabilities when they are available");
+  expect(transportOnly).toContain("codex_windows_computer_use_* bridge tools are legacy compatibility helpers only");
+  expect(transportOnly).not.toContain("do not use ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods");
   expect(transportOnly).toContain("Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command");
   expect(transportOnly).not.toContain("codex.control.turn_complete");
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
