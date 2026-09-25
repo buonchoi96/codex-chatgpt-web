@@ -61,13 +61,13 @@ const responseRequest: typeof respond = (request, config, factory, options) =>
   respond(request, config, factory, { ...options, rememberState: false });
 
 
-test("browser prompt-too-long automatically compacts once and retries the same Web request", async () => {
+for (const stream of [false, true]) test(`browser prompt-too-long auto compacts and retries once (stream=${stream})`, async () => {
   const config = defaultConfig("full");
   let normalAttempts = 0;
   let compactionAttempts = 0;
   const body = {
     model,
-    stream: false,
+    stream,
     input: [{
       type: "message",
       role: "user",
@@ -112,7 +112,10 @@ test("browser prompt-too-long automatically compacts once and retries the same W
     body: JSON.stringify(body),
   }), config, factory);
   expect(response.status).toBe(200);
-  const json = await response.json() as { status?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
+  const text = await response.text();
+  const json = stream
+    ? JSON.parse(text.split("\n").find(line => line.startsWith('data: {"type":"response.completed"'))!.slice(6)).response
+    : JSON.parse(text);
   expect(json.status).toBe("completed");
   expect(JSON.stringify(json.output)).toContain("Retried after automatic compaction");
   expect(normalAttempts).toBe(2);
