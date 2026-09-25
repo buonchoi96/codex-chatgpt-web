@@ -831,7 +831,7 @@ test("shell zoom shortcuts recognize native CommandOrControl keys only", () => {
 test("guest and incomplete server sessions do not prove launcher authentication", async () => {
   const fixture = {
     state: { authenticated: true },
-    turnTabs: new Map(),
+    activeTraceId: null,
     manualOperation: null,
     view: {
       webContents: {
@@ -1018,7 +1018,7 @@ test("authentication stays confirmed while Temporary Chat rehydrates after sign-
   const url = "https://chatgpt.com/?temporary-chat=true";
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     state: { authenticated: true, status: "ready", message: "ChatGPT is ready" },
-    activeTraceId: null,
+    turnTabs: new Map(),
     manualOperation: null,
     authenticationProbe: null,
     view: { webContents: {
