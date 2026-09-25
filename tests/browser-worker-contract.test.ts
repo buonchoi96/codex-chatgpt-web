@@ -3423,6 +3423,8 @@ test("browser preflight separates model context from one-message transport limit
   const pro = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
   const luna = { localToolsEnabled: false, solAvailable: false, extraHighAvailable: false, proAvailable: false };
 
+  // Regression for the Luna-style false-context bug: Sol Web must also accept a long canonical
+  // turn when the visible browser message itself remains within the selected transport boundary.
   expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "medium", plus, 300_000)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "high", plus, 300_000)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(191_584, 75_000, "gpt-5.6-sol", "xhigh", pro, 300_000)).not.toThrow();
