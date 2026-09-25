@@ -102,10 +102,11 @@ message, or a missing `sky` trusted service must trigger the `node_repl` path ra
 interpreted as proof that native desktop control is unavailable.
 
 The `codex_windows_computer_use_observe`, `codex_windows_computer_use_action`, and
-`codex_windows_computer_use_call` tools remain in the Native2 public schema only for compatibility
-with installations that still load the third-party `windows_computer_use` MCP. New routing must not
-require that namespace. ChatGPT's own browser-only computer surface is not treated as evidence of
-native desktop access.
+`codex_windows_computer_use_call` tools remain in the Native2 public schema only as deprecated ABI
+stubs. They intentionally return `legacy_windows_computer_use_disabled` without claiming or
+invoking the outer broker, so an accidental model call cannot create a recursive legacy-tool wait.
+All native Windows desktop work must use the official `node_repl` + `@oai/sky` path. ChatGPT's
+own browser-only computer surface is not treated as evidence of native desktop access.
 Repository DEV mode uses `Codex Native2 DEV` so the same ChatGPT account can keep both production
 and development connectors installed without renaming, refreshing, or deleting either one.
 
