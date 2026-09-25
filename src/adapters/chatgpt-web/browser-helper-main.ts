@@ -478,6 +478,28 @@ input.on("line", line => {
       abortControllers.get(message.id)?.abort();
       return;
     }
+    if (prepared.archive !== undefined && (
+      !prepared.archive
+      || typeof prepared.archive.name !== "string"
+      || !/^codex-context-[a-f0-9]{16}\.zip$/.test(prepared.archive.name)
+      || typeof prepared.archive.contextText !== "string"
+      || prepared.archive.contextText.length === 0
+    )) {
+      writeProtocol({ type: "error", id: message.id, message: "Browser helper context archive is invalid" });
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
+    if (prepared.contextFile !== undefined && (
+      !prepared.contextFile
+      || typeof prepared.contextFile.name !== "string"
+      || !/^codex-context-[A-Za-z0-9._-]+\.txt$/.test(prepared.contextFile.name)
+      || typeof prepared.contextFile.text !== "string"
+      || prepared.contextFile.text.length === 0
+    )) {
+      writeProtocol({ type: "error", id: message.id, message: "Browser helper context text file is invalid" });
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
     if (prepared.multipart !== undefined) {
       const multipart = prepared.multipart;
       if (!multipart || !Array.isArray(multipart.parts)
@@ -624,4 +646,4 @@ process.once("SIGTERM", () => {
 });
 
 // Advertise the optional frames this helper understands so the daemon can negotiate them explicitly.
-writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "completion-receipt", "multipart-stage-ack", "skill-attachments"] });
+writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "completion-receipt", "multipart-stage-ack", "skill-attachments", "context-archive"] });
