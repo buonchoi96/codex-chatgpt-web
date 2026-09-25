@@ -256,6 +256,51 @@ test("assistant tracking rebinds only one proven replacement after React detache
   )).toThrow("2 new conversation turns");
 });
 
+test("assistant rebinding accepts one late submitted user turn but rejects a second user turn", async () => {
+  const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+  const missingLocator = { count: async () => 0 };
+  const reboundLocator = { count: async () => 0 };
+  const page = {
+    locator: () => reboundLocator,
+  } as unknown as Page;
+  const baseline = {
+    initialTurnIdentities: ["history-user", "history-assistant"],
+    domCache: {},
+  };
+
+  let state = {
+    userTurnCount: 2,
+    assistantTurnCount: 2,
+    visibleStopButtonCount: 0,
+    turnIdentities: ["history-user", "history-assistant", "submitted-user", "assistant-final"],
+    userIdentities: ["history-user", "submitted-user"],
+    responseIdentities: ["history-assistant", "assistant-final"],
+  };
+  worker.submissionDomState = async () => state;
+
+  // ChatGPT can expose an assistant shell first, then materialize the matching user turn only
+  // after a large response has finished. That late user node belongs to the accepted submission.
+  const rebound = await worker.reconcileAssistantTurnBinding(page, baseline, {
+    identity: "assistant-shell",
+    locator: missingLocator,
+    acceptedTurnIdentities: ["history-user", "history-assistant", "assistant-shell"],
+    acceptedUserTurnIdentities: ["history-user"],
+  });
+  expect(rebound.identity).toBe("assistant-final");
+  expect(rebound.acceptedUserTurnIdentities).toEqual(["history-user", "submitted-user"]);
+
+  state = {
+    ...state,
+    userTurnCount: 3,
+    turnIdentities: [...state.turnIdentities, "foreign-user"],
+    userIdentities: [...state.userIdentities, "foreign-user"],
+  };
+  await expect(worker.reconcileAssistantTurnBinding(page, baseline, {
+    ...rebound,
+    locator: missingLocator,
+  })).rejects.toThrow("ChatGPT opened another user turn while the bound assistant response was detached");
+});
+
 test("power turn identity separates roles and keeps virtualized groups in the submission baseline", async () => {
   const { createWindow } = require("@mixmark-io/domino");
   const window = createWindow('<div data-turn-id-container="legacy"><section data-testid="conversation-turn-0" data-turn="assistant" data-turn-id="legacy"></section></div><div data-turn-key="history"></div><div data-turn-key="previous"><div data-user-message-bubble></div><h4 data-conversation-role="assistant"></h4><div data-turn-id-container="search-only"><section data-testid="conversation-turn-search" data-turn="assistant"><div data-message-author-role="assistant"></div></section></div></div>');

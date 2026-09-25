@@ -1395,6 +1395,9 @@ interface ChatGptAssistantTurnBinding {
   identity: string;
   locator: Locator;
   acceptedTurnIdentities: readonly string[];
+  // User turns are tracked separately from assistant turns because the ChatGPT renderer can
+  // materialize the submitted user node after its assistant shell is already visible.
+  acceptedUserTurnIdentities: readonly string[];
 }
 
 interface ChatGptSubmissionDomState {
@@ -3263,6 +3266,7 @@ export class ChatGptBrowserWorker {
         identity,
         locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
         acceptedTurnIdentities: state.turnIdentities,
+        acceptedUserTurnIdentities: state.userIdentities,
       };
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
       // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
@@ -3298,20 +3302,52 @@ export class ChatGptBrowserWorker {
       throw new Error(`ChatGPT exposed ${boundCount} DOM nodes for the bound assistant turn`);
     }
     const state = await this.submissionDomState(page, baseline.domCache, signal);
-    const acceptedTurns = new Set(binding.acceptedTurnIdentities);
-    if (state.userIdentities.some(identity => !acceptedTurns.has(identity))) {
+
+    // The power UI may mount the assistant shell before it materializes the user message that
+    // caused it. In that ordering, seeing one post-baseline user identity for the first time is
+    // evidence of our already-accepted submission, not evidence that a second user turn opened.
+    // Keep that user identity across virtualization/rebinds and fail closed only if another
+    // post-baseline user identity actually appears.
+    const baselineTurns = new Set(baseline.initialTurnIdentities);
+    const acceptedSubmittedUsers = binding.acceptedUserTurnIdentities
+      .filter(identity => !baselineTurns.has(identity));
+    const currentSubmittedUsers = state.userIdentities
+      .filter(identity => !baselineTurns.has(identity));
+    const acceptedSubmittedUser = acceptedSubmittedUsers[0];
+    const currentSubmittedUser = currentSubmittedUsers[0];
+    if (acceptedSubmittedUsers.length > 1
+      || currentSubmittedUsers.length > 1
+      || (acceptedSubmittedUser !== undefined
+        && currentSubmittedUser !== undefined
+        && currentSubmittedUser !== acceptedSubmittedUser)) {
       throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
     }
+
+    const acceptedTurnIdentities = [...new Set([
+      ...binding.acceptedTurnIdentities,
+      ...state.turnIdentities,
+    ])];
+    const acceptedUserTurnIdentities = [...new Set([
+      ...binding.acceptedUserTurnIdentities,
+      ...state.userIdentities,
+    ])];
     const identity = chatGptReboundTurnIdentity(
       baseline.initialTurnIdentities,
       binding.identity,
       state.responseIdentities,
     );
-    if (!identity || identity === binding.identity) return binding;
+    if (!identity || identity === binding.identity) {
+      return {
+        ...binding,
+        acceptedTurnIdentities,
+        acceptedUserTurnIdentities,
+      };
+    }
     return {
       identity,
       locator: page.locator(chatGptAssistantTurnSelector(identity)),
-      acceptedTurnIdentities: state.turnIdentities,
+      acceptedTurnIdentities,
+      acceptedUserTurnIdentities,
     };
   }
 
