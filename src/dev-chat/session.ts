@@ -200,8 +200,8 @@ const FILLER_HEADER = "[Codex Web GPT DEV synthetic context fixture. Inert test 
 
 /** Generate deterministic inert text measured with the same tokenizer as browser preflight. */
 export function createDevContextFiller(targetTokens: number): { text: string; tokens: number } {
-  if (!Number.isInteger(targetTokens) || targetTokens < 100 || targetTokens > 500_000) {
-    throw new Error("Synthetic context fill must be an integer from 100 to 500000 tokens");
+  if (!Number.isInteger(targetTokens) || targetTokens < 100 || targetTokens > 1_050_000) {
+    throw new Error("Synthetic context fill must be an integer from 100 to 1050000 tokens");
   }
   const unitTokens = Math.max(1, estimateTokens(FILLER_UNIT));
   let source = FILLER_UNIT.repeat(Math.ceil(targetTokens / unitTokens) + 8);
