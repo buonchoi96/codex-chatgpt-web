@@ -74,7 +74,7 @@ export function resolveBiggerContextMultipartParts(
     throw new Error("Bigger Context is unavailable for ChatGPT Zero Risk");
   }
   if (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
-    throw new Error("Bigger Context is unavailable for Luna because its accumulated browser transcript still shares one 28,000-token transport budget");
+    throw new Error("Bigger Context is unavailable for Luna because Luna already uses the full 1.05M-token Web model window with rolling checkpoints");
   }
   const mode = resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, capabilities);
   if (parsed._compactionRequest) return CHATGPT_BIGGER_CONTEXT_PARTS;
@@ -107,8 +107,8 @@ export function resolveBiggerContextMultipartParts(
       );
       if (estimateTokens(text, parsed.modelId) > budget) return false;
     }
-    return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId)
-      < contextWindow * Math.min(messages.length, CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER);
+    // Multipart changes transport shape only; it never multiplies the underlying model context.
+    return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId) < contextWindow;
   };
   if (initialParts === undefined && fits(inline)) return undefined;
   return fits(compile(2)) ? 2 : CHATGPT_BIGGER_CONTEXT_PARTS;
