@@ -1307,14 +1307,16 @@ test("closing the launcher page is an immediate terminal turn error", async () =
   expect((error as Error).message).toContain("turn was cancelled");
 });
 
-test("active composer resolution waits for exactly one visible editor", async () => {
-  const composer = { id: "active" };
-  const counts = [2, 1];
+test("active composer resolution accepts transient duplicate editors and selects the newest visible one", async () => {
+  const oldComposer = { id: "outgoing" };
+  const newComposer = { id: "incoming" };
   const visibleComposers = {
-    count: async () => counts.shift() ?? 1,
-    first: () => composer,
+    count: async () => 2,
+    last: () => newComposer,
+    first: () => oldComposer,
   };
   const page = {
+    url: () => "https://chatgpt.com/?temporary-chat=true",
     locator: () => ({
       filter: (options: { visible: boolean }) => {
         expect(options).toEqual({ visible: true });
@@ -1326,7 +1328,26 @@ test("active composer resolution waits for exactly one visible editor", async ()
     activeComposer(page: unknown, timeoutMs?: number): Promise<unknown>;
   }).activeComposer;
 
-  expect(await activeComposer.call({}, page, 500)).toBe(composer);
+  expect(await activeComposer.call({}, page, 500)).toBe(newComposer);
+});
+
+test("active composer timeout reports surface readiness instead of claiming the login expired", async () => {
+  const visibleComposers = {
+    count: async () => 0,
+    last: () => { throw new Error("no composer"); },
+  };
+  const page = {
+    url: () => "https://chatgpt.com/?temporary-chat=true",
+    locator: () => ({ filter: () => visibleComposers }),
+  };
+  const activeComposer = (ChatGptBrowserWorker.prototype as unknown as {
+    activeComposer(page: unknown, timeoutMs?: number): Promise<unknown>;
+  }).activeComposer;
+
+  const error = await activeComposer.call({}, page, 5).catch(cause => cause);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain("new-chat composer did not become available");
+  expect((error as Error).message).not.toContain("login is expired");
 });
 
 test("prompt verification accepts Lexical NBSP preservation without weakening other mismatches", async () => {

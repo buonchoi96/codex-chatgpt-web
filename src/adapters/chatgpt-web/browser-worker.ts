@@ -2789,14 +2789,18 @@ export class ChatGptBrowserWorker {
         ),
         abortSignal,
       );
-      if (count === 1) return composers.first();
+      // ChatGPT can briefly leave both the outgoing and incoming composer mounted and visible
+      // during a SPA/new-chat transition. Authentication already accepts any visible composer as
+      // proof of a usable session, so requiring exactly one here turns a harmless duplicate into a
+      // false login failure. Prefer the newest visible editor in document order.
+      if (count > 0) return composers.last();
       await withBrowserTurnAbort(
         new Promise(resolveSleep => setTimeout(resolveSleep, 50)),
         abortSignal,
       );
     }
     throw new Error(
-      "ChatGPT composer is unavailable. Reload ChatGPT and retry the task.",
+      `ChatGPT new-chat composer did not become available within ${timeoutMs}ms at ${page.url()}`,
       { cause: new Error(`Visible ChatGPT composer count was ${count}`) },
     );
   }
@@ -2822,8 +2826,12 @@ export class ChatGptBrowserWorker {
     let composer: Locator;
     try {
       composer = await this.activeComposer(page);
-    } catch {
-      throw new Error("ChatGPT web login is expired or the new chat surface is unavailable");
+    } catch (error) {
+      // Composer readiness and authentication are separate signals. Preserve a proven session
+      // alert when present; otherwise keep the precise surface-readiness failure instead of
+      // incorrectly telling an authenticated user that their login expired.
+      await throwIfChatGptSessionFailureAlert(page);
+      throw error;
     }
     if (!useSavedChats && await dismissChatGptTemporaryChatOnboarding(page)) {
       await captureDiagnostic?.("temporary-chat-onboarding-dismissed");
