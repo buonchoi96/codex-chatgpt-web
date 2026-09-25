@@ -1748,7 +1748,10 @@ export const MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS = 8;
  * bounds the silence since the last recorded activity rather than the turn's total duration, so a
  * long turn that keeps calling tools is never penalised for taking a long time.
  */
-export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 10 * 60_000;
+// Long native commands (for example a quiet pytest run) can legitimately spend many minutes
+// between observable Codex tool events. Keep DOM health suppressed for the same 15-minute safety
+// horizon as remote compaction, while still bounding a truly orphaned tool/source turn.
+export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 15 * 60_000;
 
 /**
  * A visible ChatGPT turn that keeps its Stop control active but produces no text, reasoning trace,
@@ -1756,6 +1759,8 @@ export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 10 * 60_000;
  * generation becomes a retryable adapter failure instead of looking alive forever.
  */
 export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 750_000;
+/** Near-1M compaction can spend materially longer in backend reasoning than an ordinary turn. */
+export const CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 
 export class ChatGptRunningProgressTracker {
   private signature?: string;
@@ -5796,7 +5801,11 @@ export class ChatGptBrowserWorker {
         });
       };
       let domHealthTracker = new ChatGptTurnDomHealthTracker();
-      let runningProgressTracker = new ChatGptRunningProgressTracker();
+      let runningProgressTracker = new ChatGptRunningProgressTracker(
+        turn.compaction
+          ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
+          : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
+      );
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -6093,7 +6102,11 @@ export class ChatGptBrowserWorker {
               visibleTrace = new ChatGptVisibleTraceTracker();
               markdownBuffer = new ChatGptMarkdownBuffer();
               domHealthTracker = new ChatGptTurnDomHealthTracker();
-              runningProgressTracker = new ChatGptRunningProgressTracker();
+              runningProgressTracker = new ChatGptRunningProgressTracker(
+                turn.compaction
+                  ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
+                  : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
+              );
               responseDomCache.key = undefined;
               responseDomCache.snapshot = undefined;
               completionFenceRevision = undefined;

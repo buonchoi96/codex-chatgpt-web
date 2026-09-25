@@ -326,7 +326,7 @@ test("active compaction drains an MCP call already queued without an outer Codex
 });
 
 test("a completed retained agent returns an exact checkpoint and its browser is physically retired", async () => {
-  expect(MAX_COMPACTION_HANDOFF_TIMEOUT_MS).toBe(750_000);
+  expect(MAX_COMPACTION_HANDOFF_TIMEOUT_MS).toBe(15 * 60_000);
   const sourceRequest = request(false);
   const conversationKey = chatGptConversationKey(sourceRequest, "provider")!;
   const source = new ChatGptTurnSession({

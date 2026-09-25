@@ -144,7 +144,7 @@ function currentToolResults(
   return results;
 }
 
-export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 750_000;
+export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 15 * 60_000;
 export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 15_000;
 
 function activeCompactionSourceStalledError(timeoutMs: number): ChatGptWebAdapterError {
