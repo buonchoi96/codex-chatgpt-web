@@ -436,14 +436,18 @@ test("Web compaction rebuilds attachments after trimming an oversized oldest ima
   expect(compiled.text).toContain("preserve-latest-checkpoint");
 });
 
-test("Luna rejects a separate compaction prompt because continuity is already rolling", () => {
+test("Luna accepts native compaction turns in addition to rolling checkpoints", () => {
   const compact = request("low");
   compact.modelId = CHATGPT_WEB_LUNA_MODEL_ID;
   compact._compactionRequest = true;
-  expect(() => compileChatGptWebPrompt(
+  const compiled = compileChatGptWebPrompt(
     compact,
     { localToolsEnabled: false, solAvailable: false, extraHighAvailable: false, proAvailable: false },
-  )).toThrow("does not accept a separate compaction turn");
+  );
+  expect(compiled.text).toContain("This is a Codex history-compaction checkpoint, not a normal task turn.");
+  expect(compiled.text).toContain("the last visibly verified UI state");
+  expect(compiled.text).toContain("re-import @oai/sky and re-enumerate/re-observe the target app");
+  expect(compiled.text).not.toContain("codex_turn_complete");
 });
 
 test("Web compaction fails closed when its final instruction alone exceeds the transport budget", () => {
