@@ -28,6 +28,12 @@ function source(): Record<string, unknown> {
         supported_in_api: true,
         multi_agent_version: "v2",
         base_instructions: "native harness",
+        model_messages: {
+          instructions_template: "native harness",
+          confirmation_policies: {
+            computer_use: "official Codex Computer Use confirmation policy",
+          },
+        },
         supported_reasoning_levels: [
           { effort: "low", description: "Low" },
           { effort: "medium", description: "Medium native" },
@@ -90,6 +96,7 @@ describe("native /models augmentation", () => {
         default_service_tier: null,
       });
       expect(model).not.toHaveProperty("comp_hash");
+      expect(model.model_messages).toEqual(originalModels[1]!.model_messages);
       expect((model.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
         .toEqual([...chatGptWebRouteEfforts(route, config)]);
     }
