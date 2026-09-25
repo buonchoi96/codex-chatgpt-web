@@ -33,12 +33,12 @@ import {
 } from "./model";
 import {
   compiledChatGptWebMaxMessageChars,
-  compiledChatGptWebCompactionTextOnlyFallback,
   estimateChatGptWebImageTokens,
   estimateCompiledChatGptWebMessageTokens,
 } from "./input-tokens";
 import {
   CHATGPT_MAX_INPUT_IMAGES,
+  compiledChatGptWebCompactionTextOnlyFallback,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
   isChatGptWebMultipartPartCount,
@@ -3803,6 +3803,33 @@ export class ChatGptBrowserWorker {
     }
   }
 
+  private async disabledSendPromptTooLongReason(
+    page: Page,
+    sendButton: Locator,
+  ): Promise<string | undefined> {
+    const texts = new Set<string>();
+    const remember = (value: string | null | undefined) => {
+      const normalized = value?.replace(/\s+/g, " ").trim();
+      if (normalized) texts.add(normalized);
+    };
+
+    for (const attribute of ["aria-label", "title", "data-tooltip", "data-tooltip-content"]) {
+      remember(await sendButton.getAttribute(attribute).catch(() => null));
+    }
+    const describedBy = await sendButton.getAttribute("aria-describedby").catch(() => null);
+    for (const id of describedBy?.split(/\s+/).filter(Boolean) ?? []) {
+      remember(await page.locator(`#${CSS.escape(id)}`).textContent().catch(() => null));
+    }
+
+    await sendButton.hover({ force: true, timeout: 1_000 }).catch(() => {});
+    for (const text of await page.locator('[role="tooltip"], [role="alert"]').allInnerTexts().catch(() => [])) {
+      remember(text);
+    }
+
+    const tooLong = /(prompt|message|input|text).{0,80}(too long|too large|exceed(?:s|ed)?|maximum|max length|length limit|character limit|token limit)|(too long|too large).{0,80}(prompt|message|input|text)/i;
+    return [...texts].find(text => tooLong.test(text));
+  }
+
   private async sendAttachedPrompt(
     page: Page,
     baseline: ChatGptSubmissionBaseline,
@@ -3826,6 +3853,19 @@ export class ChatGptBrowserWorker {
       await throwIfChatGptSessionFailureAlert(page);
       await throwIfChatGptRateLimitDialog(page);
       if (await sendButton.isEnabled()) break;
+      const promptTooLongReason = await this.disabledSendPromptTooLongReason(page, sendButton);
+      if (promptTooLongReason) {
+        await captureDiagnostic?.("send-prompt-too-long");
+        throw new ChatGptWebAdapterError(
+          `ChatGPT rejected the browser composer before submission because the prompt is too long: ${promptTooLongReason}`,
+          {
+            status: 413,
+            errorType: "browser_transport_error",
+            code: "browser_prompt_too_long",
+            retryable: true,
+          },
+        );
+      }
       if (Date.now() >= sendEnableDeadline) {
         await captureDiagnostic?.("send-disabled");
         throw new Error("ChatGPT send button remained disabled after the complete prompt was attached");
@@ -4152,7 +4192,7 @@ export class ChatGptBrowserWorker {
   private async attachFiles(
     page: Page,
     prompt: CompiledChatGptWebPrompt,
-    timeoutMs = browserStageTimeouts.fileAttachment,
+    timeoutMs: number = browserStageTimeouts.fileAttachment,
   ): Promise<void> {
     const files = chatGptPromptFilePayloads(prompt);
     if (files.length === 0) return;
