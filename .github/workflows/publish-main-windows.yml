@@ -24,12 +24,30 @@ jobs:
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
 
     steps:
+      - name: Check whether this build is still current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$SOURCE_SHA" == "$current_main" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Validated build is current main: $SOURCE_SHA"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale validated build $SOURCE_SHA; current main is $current_main"
+          fi
+
       - name: Check out the exact validated commit
+        if: steps.gate.outputs.publish == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Download validated Windows installer
+        if: steps.gate.outputs.publish == 'true'
         uses: actions/download-artifact@v4
         with:
           name: windows-installer-main-${{ github.event.workflow_run.head_sha }}
@@ -38,6 +56,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Prepare release assets
+        if: steps.gate.outputs.publish == 'true'
         id: assets
         shell: bash
         run: |
@@ -64,6 +83,7 @@ jobs:
           cat release-assets/SHA256SUMS.txt
 
       - name: Publish custom Windows release
+        if: steps.gate.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
