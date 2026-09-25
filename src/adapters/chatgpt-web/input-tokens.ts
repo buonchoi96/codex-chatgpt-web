@@ -41,7 +41,9 @@ export function estimateCompiledChatGptWebMessageTokens(
 ): number {
   const messages = compiledChatGptWebMessages(compiled);
   return Math.max(...messages.map((message, index) => estimateTokens(message, modelId)
-    + (index === messages.length - 1 ? skillFileTokens(compiled.skillFiles, modelId) : 0)));
+    + (index === messages.length - 1 && !compiled.archive
+      ? skillFileTokens(compiled.skillFiles, modelId)
+      : 0)));
 }
 
 export function estimateCompiledChatGptWebInputTokens(
@@ -62,7 +64,17 @@ export function estimateCompiledChatGptWebInputTokens(
       modelId,
     ), 0)
     : 0;
-  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + messageTokens + acknowledgementTokens + imageTokens + skillFileTokens(compiled.skillFiles, modelId);
+  const archivedContextTokens = compiled.archive
+    ? estimateTokens(compiled.archive.contextText, modelId)
+    : compiled.contextFile
+      ? estimateTokens(compiled.contextFile.text, modelId)
+      : 0;
+  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS
+    + messageTokens
+    + acknowledgementTokens
+    + archivedContextTokens
+    + imageTokens
+    + skillFileTokens(compiled.skillFiles, modelId);
 }
 
 export function estimateChatGptWebImageTokens(compiled: CompiledChatGptWebPrompt): number {
