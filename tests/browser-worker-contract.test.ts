@@ -966,6 +966,30 @@ test("an accepted Full-mode send survives one stalled DOM probe and a later MCP 
   }
 });
 
+test("disabled ChatGPT Send exposes prompt-too-long before any submission", async () => {
+  const sendButton = {
+    getAttribute: async (name: string) => name === "title" ? "Prompt is too long" : null,
+    hover: async () => {},
+  };
+  const page = {
+    locator: () => ({
+      textContent: async () => null,
+      allInnerTexts: async () => [],
+    }),
+  };
+  const detect = (ChatGptBrowserWorker.prototype as unknown as {
+    disabledSendPromptTooLongReason(page: unknown, sendButton: unknown): Promise<string | undefined>;
+  }).disabledSendPromptTooLongReason;
+
+  await expect(detect.call({}, page, sendButton)).resolves.toBe("Prompt is too long");
+
+  const unrelated = {
+    ...sendButton,
+    getAttribute: async (name: string) => name === "title" ? "Send message" : null,
+  };
+  await expect(detect.call({}, page, unrelated)).resolves.toBeUndefined();
+});
+
 test("Bigger Context send activation keeps the outer stage budget instead of restoring a nested 20-second timeout", async () => {
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
