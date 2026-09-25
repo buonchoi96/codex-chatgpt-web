@@ -198,7 +198,6 @@ const COMPACTION_IMAGE_NOTE =
 interface ImageBudget {
   seen: number;
   dropped: number;
-  dropReason?: "limit" | "compaction";
 }
 
 function inputContent(
@@ -216,12 +215,7 @@ function inputContent(
   return semantic.map(part => {
     if (part.type === "text") return { type: "text", text: part.text };
     budget.seen += 1;
-    if (budget.seen <= budget.dropped) {
-      return {
-        type: "text",
-        text: budget.dropReason === "compaction" ? COMPACTION_IMAGE_NOTE : DROPPED_IMAGE_NOTE,
-      };
-    }
+    if (budget.seen <= budget.dropped) return { type: "text", text: DROPPED_IMAGE_NOTE };
     const ref = `codex-input-image-${images.length + 1}`;
     images.push({ ref, imageUrl: part.imageUrl, ...(part.detail ? { detail: part.detail } : {}) });
     return { type: "image_attachment", attachment_ref: ref, ...(part.detail ? { detail: part.detail } : {}) };
@@ -444,10 +438,7 @@ export function compileChatGptWebPrompt(
   options?: CompileChatGptWebPromptOptions,
 ): CompiledChatGptWebPrompt {
   const manualControl = options?.manualControl === true;
-  // Compaction must remain text-only. Re-uploading task images or skill files can deadlock the
-  // browser turn when the account has exhausted its upload quota, even though the checkpoint
-  // itself needs only textual task state.
-  const attachSkills = options?.experimentalSkillAttachments === true && !parsed._compactionRequest;
+  const attachSkills = options?.experimentalSkillAttachments === true;
   if (attachSkills && (manualControl || isChatGptWebZeroRiskBackendModel(parsed.modelId))) {
     throw new Error("Skills as files is unavailable in Zero Risk mode");
   }
@@ -648,10 +639,7 @@ export function compileChatGptWebPrompt(
     const contextImageCount = countChatGptContextImages(sourceMessages);
     const budget: ImageBudget = {
       seen: 0,
-      dropped: parsed._compactionRequest
-        ? contextImageCount
-        : Math.max(0, contextImageCount - CHATGPT_MAX_INPUT_IMAGES),
-      dropReason: parsed._compactionRequest ? "compaction" : "limit",
+      dropped: Math.max(0, contextImageCount - CHATGPT_MAX_INPUT_IMAGES),
     };
     const skillFiles: ChatGptSkillFile[] = [];
     const messages = sourceMessages.map(message => {
