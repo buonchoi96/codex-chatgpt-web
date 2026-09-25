@@ -3,9 +3,47 @@ import type { ChatGptWebAccountCapabilities } from "./chatgpt-web-models";
 
 export const CHATGPT_TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
 export const CHATGPT_SAVED_CHAT_URL = "https://chatgpt.com/";
+export const CHATGPT_TEMPORARY_CHAT_TURN_ON_SELECTOR = [
+  'button[aria-label="Temporary chat"]',
+  'button[aria-label="Turn on temporary chat"]',
+].join(", ");
+export const CHATGPT_TEMPORARY_CHAT_ACTIVE_SELECTOR = 'button[aria-label="Turn off temporary chat"]';
 
 export function chatGptNewChatUrl(useSavedChats = false): string {
   return useSavedChats ? CHATGPT_SAVED_CHAT_URL : CHATGPT_TEMPORARY_CHAT_URL;
+}
+
+export type ChatGptTemporaryChatState = "active" | "inactive" | "unknown";
+
+export async function chatGptTemporaryChatState(page: Page): Promise<ChatGptTemporaryChatState> {
+  const active = page.locator(CHATGPT_TEMPORARY_CHAT_ACTIVE_SELECTOR).filter({ visible: true });
+  if (await anyVisible(active)) return "active";
+  const inactive = page.locator(CHATGPT_TEMPORARY_CHAT_TURN_ON_SELECTOR).filter({ visible: true });
+  if (await anyVisible(inactive)) return "inactive";
+  return "unknown";
+}
+
+/**
+ * Current ChatGPT Web exposes Temporary Chat as a structural pill on a normal new-chat surface.
+ * The legacy ?temporary-chat=true URL remains a fallback for older UI variants.
+ */
+export async function activateChatGptTemporaryChat(
+  page: Page,
+  timeoutMs = 10_000,
+): Promise<"already-active" | "activated" | "unavailable"> {
+  const initial = await chatGptTemporaryChatState(page);
+  if (initial === "active") return "already-active";
+  if (initial === "unknown") return "unavailable";
+
+  const turnOn = page.locator(CHATGPT_TEMPORARY_CHAT_TURN_ON_SELECTOR).filter({ visible: true }).last();
+  await turnOn.click({ force: true, timeout: Math.max(1, timeoutMs) });
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await chatGptTemporaryChatState(page) === "active") return "activated";
+    await new Promise(resolveSleep => setTimeout(resolveSleep, 50));
+  }
+  throw new Error("ChatGPT Temporary Chat control did not enter its active state after activation");
 }
 export const CHATGPT_COMPOSER_SELECTOR = [
   '[data-testid="prompt-textarea"]',
@@ -196,9 +234,12 @@ export async function assertTemporaryChatPage(page: Page): Promise<void> {
 
 export async function assertNewChatPage(page: Page, useSavedChats = false): Promise<void> {
   const url = new URL(page.url());
-  const expected = new URL(chatGptNewChatUrl(useSavedChats));
+  const expected = new URL(CHATGPT_SAVED_CHAT_URL);
+  const structuralTemporaryState = await chatGptTemporaryChatState(page);
+  const legacyTemporary = url.searchParams.get("temporary-chat") === "true";
+  const temporaryActive = legacyTemporary || structuralTemporaryState === "active";
   if (url.origin !== expected.origin || url.pathname !== expected.pathname
-    || (url.searchParams.get("temporary-chat") === "true") === useSavedChats) {
+    || (useSavedChats ? temporaryActive : !temporaryActive)) {
     throw new Error(`ChatGPT left the requested new ${useSavedChats ? "saved" : "Temporary"} Chat surface (${page.url()})`);
   }
 }

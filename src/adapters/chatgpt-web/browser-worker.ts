@@ -48,9 +48,11 @@ import {
 } from "./prompt";
 import { estimateCompiledChatGptWebInputTokens } from "./input-tokens";
 import {
+  activateChatGptTemporaryChat,
   assertAuthenticatedChatGptPage,
   assertNewChatPage,
   chatGptNewChatUrl,
+  chatGptTemporaryChatState,
   CHATGPT_ASSISTANT_TURN_SELECTOR,
   CHATGPT_COMPLETION_ACTION_SELECTOR,
   CHATGPT_COMPOSER_SELECTOR,
@@ -59,6 +61,7 @@ import {
   CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR,
   CHATGPT_STOP_BUTTON_SELECTOR,
   CHATGPT_USER_TURN_SELECTOR,
+  CHATGPT_SAVED_CHAT_URL,
   activateChatGptEffortMenu,
   detectChatGptAccountCapabilities,
   parseChatGptEffortSliderState,
@@ -2815,13 +2818,36 @@ export class ChatGptBrowserWorker {
     // connector is present in the catalog. Navigating again here destroys that freshly hydrated
     // document and made the first verification race a second SPA bootstrap. A leased turn starts on
     // about:blank and therefore still performs exactly one navigation through this same method.
-    const targetUrl = chatGptNewChatUrl(useSavedChats);
-    if (page.url() !== targetUrl) {
-      await page.goto(targetUrl, {
+    // Modern ChatGPT Web opens a normal New Chat first, then enables Temporary Chat using the
+    // structural top-right control. Keep the legacy query URL only as a bounded compatibility
+    // fallback for older surfaces that do not expose that control.
+    const entryUrl = CHATGPT_SAVED_CHAT_URL;
+    if (page.url() !== entryUrl) {
+      await page.goto(entryUrl, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });
-      await captureDiagnostic?.(useSavedChats ? "saved-chat-navigation-complete" : "temporary-chat-navigation-complete");
+      await captureDiagnostic?.(useSavedChats ? "saved-chat-navigation-complete" : "new-chat-navigation-complete");
+    }
+    if (!useSavedChats) {
+      const activation = await activateChatGptTemporaryChat(page);
+      if (activation === "unavailable") {
+        const legacyTemporaryUrl = chatGptNewChatUrl(false);
+        if (page.url() !== legacyTemporaryUrl) {
+          await page.goto(legacyTemporaryUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: 60_000,
+          });
+          await captureDiagnostic?.("temporary-chat-legacy-navigation-complete");
+        }
+      } else {
+        await captureDiagnostic?.(
+          activation === "activated" ? "temporary-chat-structural-activated" : "temporary-chat-structural-already-active",
+        );
+      }
+      if (await dismissChatGptTemporaryChatOnboarding(page)) {
+        await captureDiagnostic?.("temporary-chat-onboarding-dismissed");
+      }
     }
     let composer: Locator;
     try {
@@ -2832,9 +2858,6 @@ export class ChatGptBrowserWorker {
       // incorrectly telling an authenticated user that their login expired.
       await throwIfChatGptSessionFailureAlert(page);
       throw error;
-    }
-    if (!useSavedChats && await dismissChatGptTemporaryChatOnboarding(page)) {
-      await captureDiagnostic?.("temporary-chat-onboarding-dismissed");
     }
     await captureDiagnostic?.("composer-ready");
     await throwIfChatGptSessionFailureAlert(page);
@@ -3379,7 +3402,9 @@ export class ChatGptBrowserWorker {
     const appResult = menuRows.filter({
       has: page.getByText(this.config.appName, { exact: true }),
     });
-    if (new URL(page.url()).searchParams.get("temporary-chat") === "true") await ensureChatGptPersonalizedConnectorAccess(
+    const temporaryChatActive = new URL(page.url()).searchParams.get("temporary-chat") === "true"
+      || await chatGptTemporaryChatState(page) === "active";
+    if (temporaryChatActive) await ensureChatGptPersonalizedConnectorAccess(
       page,
       capture,
       async (personalizationSignal) => {
