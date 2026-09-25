@@ -152,6 +152,27 @@ After updating, if `codex_exec` still does not expose `sandbox_permissions`, `ju
 These fields only forward a permission request to Codex; its sandbox and approval policy still
 decide whether the command can run. Ordinary commands do not require these optional fields.
 
+### Web models cannot find desktop Computer Use
+
+In Full harness mode, Web models use the **outer Codex** tool registry for native desktop
+automation. The bridge does not require the third-party `windows_computer_use` MCP. Official
+OpenAI Codex Computer Use or Unified Computer Use surfaces should be discovered through
+`codex_tool_inventory` / native `tool_search` and invoked through the generic Codex Native tool
+bridge.
+
+If a Web model reports that native desktop Computer Use is unavailable:
+
+1. Confirm the official Codex Computer Use plugin/capability is enabled in the outer Codex runtime.
+2. Start a fresh Full-harness turn and inspect the native inventory for Computer Use, `node_repl`,
+   or `cua_repl` surfaces.
+3. Do not treat ChatGPT's browser-only computer surface as proof that native desktop access is
+   available.
+4. The `codex_windows_computer_use_*` connector tools are legacy compatibility helpers only and
+   work only when the old third-party `windows_computer_use` MCP is actually loaded.
+
+If the outer Codex inventory contains no suitable Computer Use capability, collect a safe log and
+report the exact Codex version, selected model, and inventory result.
+
 ### Tools disappear on follow-up messages
 
 If local tools work on the first message but disappear on a follow-up, check the same ChatGPT tab
