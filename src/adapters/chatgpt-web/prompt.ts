@@ -22,10 +22,25 @@ export interface ChatGptWebPromptImage {
   detail?: string;
 }
 
+export interface ChatGptContextArchive {
+  name: string;
+  /** Complete UTF-8 transport prompt written to context.txt inside the ZIP. */
+  contextText: string;
+}
+
+export interface ChatGptContextTextFile {
+  name: string;
+  text: string;
+}
+
 export interface CompiledChatGptWebPrompt {
   text: string;
   images: ChatGptWebPromptImage[];
   skillFiles?: ChatGptSkillFile[];
+  /** Preferred large-context transport: one ZIP containing context.txt, manifest.json and assets. */
+  archive?: ChatGptContextArchive;
+  /** ZIP-rejection fallback: one UTF-8 text attachment, never a giant composer paste. */
+  contextFile?: ChatGptContextTextFile;
   /** Transactional transport when Bigger Context is explicitly enabled. */
   multipart?: ChatGptWebMultipartPrompt;
   /** Oldest history items removed by native-style compaction fit recovery; absent on normal turns. */
@@ -167,6 +182,49 @@ export function withoutRetiredTurnHandles(contextJson: string): string {
 
 /** ChatGPT accepts at most this many attachments on one message. */
 export const CHATGPT_MAX_INPUT_IMAGES = 10;
+/**
+ * Above this point the bridge keeps the visible composer small and uploads one context archive.
+ * This is a browser-performance threshold, not a semantic compaction threshold.
+ */
+export const CHATGPT_CONTEXT_ARCHIVE_INLINE_CHAR_THRESHOLD = 100_000;
+export const CHATGPT_CONTEXT_ARCHIVE_IMAGE_THRESHOLD = 4;
+export const CHATGPT_CONTEXT_ARCHIVE_UNREADABLE_MARKER = "CODEX_CONTEXT_ARCHIVE_UNREADABLE";
+
+function archivedContextPrompt(
+  compiled: CompiledChatGptWebPrompt,
+  compaction: boolean,
+): CompiledChatGptWebPrompt {
+  const contextText = compiled.text
+    .replace(
+      "Each image_attachment in the context refers to the correspondingly named image attached to this ChatGPT message; inspect it directly.",
+      "Each image_attachment in the context refers to a file under images/ in the attached context ZIP; resolve it through manifest.json and inspect that file directly.",
+    )
+    .replace(
+      "Each skill_attachment refers to a named UTF-8 text file attached to this message (the final commit in multipart mode).",
+      "Each skill_attachment refers to a named UTF-8 text file under skills/ in the attached context ZIP, mapped by manifest.json.",
+    );
+  const digest = createHash("sha256")
+    .update(contextText)
+    .update(JSON.stringify(compiled.images.map(image => [image.ref, image.detail ?? ""])))
+    .update(JSON.stringify((compiled.skillFiles ?? []).map(file => file.name)))
+    .digest("hex")
+    .slice(0, 16);
+  const name = `codex-context-${digest}.zip`;
+  const text = [
+    `A complete Codex context bundle is attached as ${name}. Open and inspect this ZIP before responding.`,
+    "Archive layout:",
+    "- context.txt: the complete Codex transport contract and canonical task history. Read it fully first and preserve its original instruction priorities.",
+    "- manifest.json: maps every attachment_ref and selected skill filename to its archive path and media type.",
+    "- images/: every referenced historical image retained for this bundled turn. Inspect an image when context.txt refers to its attachment_ref; never infer visual facts from the filename.",
+    "- skills/: selected Codex skill instruction files referenced by context.txt, when present.",
+    "The ZIP is transport only. It does not replace or disable the Codex Native2 connector selected for this turn. If context.txt authorizes or requests Codex Native tools, keep using that connector exactly as instructed there.",
+    `If this ChatGPT surface cannot open or read the ZIP contents, reply with exactly ${CHATGPT_CONTEXT_ARCHIVE_UNREADABLE_MARKER} and nothing else so the bridge can retry with a supported text-file fallback.`,
+    compaction
+      ? "This is a history-compaction checkpoint. Follow the compaction contract in context.txt and return only the checkpoint summary; do not call work tools."
+      : "After reconstructing context.txt and any referenced assets, execute the latest active request end-to-end.",
+  ].join("\n");
+  return { ...compiled, text, archive: { name, contextText } };
+}
 
 /**
  * ChatGPT's current `/backend-api/f/conversation` edge rejects large inline JSON bodies before a
@@ -246,9 +304,32 @@ function rewriteInlineCompactionEnvelope(
  * before Send activation. It preserves the same compaction request as text, replacing image
  * references with explicit omission markers and selected skill files with their inline contents.
  */
+export function compiledChatGptWebArchiveTextFileFallback(
+  prepared: CompiledChatGptWebPrompt,
+): CompiledChatGptWebPrompt {
+  if (!prepared.archive) return prepared;
+  const skillFiles = new Map((prepared.skillFiles ?? []).map(file => [file.name, file] as const));
+  const rewritten = rewriteInlineCompactionEnvelope(prepared.archive.contextText, skillFiles);
+  const stem = prepared.archive.name.replace(/\.zip$/i, "");
+  return {
+    ...prepared,
+    text: [
+      "The preferred ZIP context bundle was unavailable on this ChatGPT surface.",
+      "Read the attached UTF-8 context file completely before responding.",
+      "Historical image payloads are omitted only in this fallback. Preserve visual conclusions already recorded in text and re-observe the native UI later if fresh visual evidence is still required.",
+      "Codex Native2 tool access, when attached to this turn, is unchanged by this fallback.",
+    ].join("\n"),
+    images: [],
+    skillFiles: undefined,
+    archive: undefined,
+    contextFile: { name: `${stem}.txt`, text: rewritten },
+  };
+}
+
 export function compiledChatGptWebCompactionTextOnlyFallback(
   prepared: CompiledChatGptWebPrompt,
 ): CompiledChatGptWebPrompt {
+  if (prepared.archive) return compiledChatGptWebArchiveTextFileFallback(prepared);
   const skillFiles = new Map((prepared.skillFiles ?? []).map(file => [file.name, file] as const));
   const multipart = prepared.multipart
     ? {
@@ -723,7 +804,9 @@ export function compileChatGptWebPrompt(
     const contextImageCount = countChatGptContextImages(sourceMessages);
     const budget: ImageBudget = {
       seen: 0,
-      dropped: Math.max(0, contextImageCount - CHATGPT_MAX_INPUT_IMAGES),
+      // Automatic mode can move all images into one ZIP, so do not discard historical images just
+      // because the ordinary ChatGPT composer accepts only ten discrete attachments.
+      dropped: manualControl ? Math.max(0, contextImageCount - CHATGPT_MAX_INPUT_IMAGES) : 0,
     };
     const skillFiles: ChatGptSkillFile[] = [];
     const messages = sourceMessages.map(message => {
@@ -819,8 +902,17 @@ export function compileChatGptWebPrompt(
   let sourceMessages = withoutSupersededModelSwitchContracts(parsed.context.messages);
   const initialMessageCount = sourceMessages.length;
   let compiled = build(sourceMessages);
+  const shouldArchive = !manualControl
+    && !compiled.multipart
+    && (
+      parsed._compactionRequest
+      || compiled.text.length >= CHATGPT_CONTEXT_ARCHIVE_INLINE_CHAR_THRESHOLD
+      || compiled.images.length >= CHATGPT_CONTEXT_ARCHIVE_IMAGE_THRESHOLD
+    );
+  if (shouldArchive) return archivedContextPrompt(compiled, parsed._compactionRequest === true);
   if (!parsed._compactionRequest) return compiled;
 
+  // The 110k edge budget remains only for legacy non-archive compaction paths.
   // The 110k edge budget was measured for the old single-message compaction envelope. Bigger
   // Context stages are governed by the same model-specific per-message token and composer limits
   // as ordinary multipart turns in browser-worker. Applying the legacy byte cap here silently
