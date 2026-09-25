@@ -76,6 +76,11 @@ export const CHATGPT_WEB_PRO_MODEL_COMPOSER_CHAR_LIMIT = 1_635_000;
  * history out of later browser requests without asking Codex to compact its canonical history.
  */
 export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
+/**
+ * Leave substantial headroom for a long Luna Web tool turn to compact itself before the hard
+ * 1.05M model window. Codex supports mid-turn auto-compaction between sampling/tool cycles.
+ */
+export const CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
 export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 3;
 
 export interface ChatGptWebContextLimits {
@@ -135,7 +140,7 @@ export function resolveChatGptWebContextLimits(
     // Luna carries continuity through a private checkpoint on every completed browser turn. Codex
     // internally clamps this field to 90% of the model window, but the reported active usage is the
     // bounded payload actually sent to ChatGPT and therefore stays far below that threshold.
-    return contextLimits(CHATGPT_WEB_LUNA_CONTEXT_WINDOW, CHATGPT_WEB_LUNA_CONTEXT_WINDOW);
+    return contextLimits(CHATGPT_WEB_LUNA_CONTEXT_WINDOW, CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT);
   }
 
   let autoCompactTokenLimit: number;
