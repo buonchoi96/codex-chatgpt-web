@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { strToU8, zipSync } from "fflate";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
 import { chatGptPlanUsesLunaOnly, detectChatGptLimitsPlan, readChatGptUsageAccount, readChatGptUsageModel, type ChatGptUsageModel } from "./limits";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from "playwright-core";
@@ -37,7 +38,9 @@ import {
   estimateCompiledChatGptWebMessageTokens,
 } from "./input-tokens";
 import {
+  CHATGPT_CONTEXT_ARCHIVE_UNREADABLE_MARKER,
   CHATGPT_MAX_INPUT_IMAGES,
+  compiledChatGptWebArchiveTextFileFallback,
   compiledChatGptWebCompactionTextOnlyFallback,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
@@ -121,16 +124,16 @@ export async function closeChatGptBrowserWorkers(): Promise<void> {
   }
 }
 
-export const CHATGPT_RESPONSE_DOM_GRACE_MS = 60_000;
+export const CHATGPT_RESPONSE_DOM_GRACE_MS = 150_000;
 /**
  * How long a staged Bigger Context part may take to produce its assistant turn. A staged part is two
  * orders of magnitude larger than an ordinary prompt and ChatGPT reads all of it before answering.
  * No MCP activity exists while that inert part is being ingested, so the response grace matches
  * the bounded staged-send budget.
  */
-export const CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS = 180_000;
+export const CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS = 450_000;
 export const CHATGPT_EMPTY_RESPONSE_GRACE_MS = 10_000;
-export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 60_000;
+export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 150_000;
 export const CHATGPT_COMPLETION_SETTLE_MS = 2_000;
 export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
@@ -143,8 +146,8 @@ const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
  * editor has taken the previous one. This is headroom for that, not a readiness check.
  */
 export const CHATGPT_UI_SETTLE_MS = 250;
-export const CHATGPT_SEND_ENABLE_GRACE_MS = 30_000;
-export const CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS = 60_000;
+export const CHATGPT_SEND_ENABLE_GRACE_MS = 75_000;
+export const CHATGPT_COMPACTION_ATTACHMENT_FALLBACK_MS = 150_000;
 
 const CHATGPT_DOM_REVISION_ATTRIBUTES = [
   "aria-hidden",
@@ -1101,14 +1104,14 @@ export const browserStageTimeouts = {
   temporaryChatPreparation: 150_000,
   effortSelection: 120_000,
   promptAttachment: 60_000,
-  fileAttachment: 120_000,
+  fileAttachment: 300_000,
   // Ordinary prompts can spend substantial time in ChatGPT composer ingestion before the user turn
   // becomes observable. Keep this well above the old 20-second budget so Codex does not enter a
   // reconnect loop while ChatGPT is still accepting a large prompt.
-  send: 120_000,
+  send: 300_000,
   // A Bigger Context stage posts a much larger payload onto a conversation that already holds the
   // earlier parts. This budget covers ChatGPT accepting the submission, not just the click.
-  multipartStageSend: 180_000,
+  multipartStageSend: 450_000,
   // Staging asks for one transaction-bound acknowledgement, not an open-ended model answer.
   multipartStageAcknowledgement: CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
 } as const;
@@ -1745,7 +1748,7 @@ export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 10 * 60_000;
  * or native-tool progress is not useful liveness. Bound that silent-running state so a wedged Web
  * generation becomes a retryable adapter failure instead of looking alive forever.
  */
-export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
+export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 750_000;
 
 export class ChatGptRunningProgressTracker {
   private signature?: string;
@@ -2251,19 +2254,87 @@ export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[]): Array
 }
 
 function assertChatGptPromptAttachments(prompt: CompiledChatGptWebPrompt): void {
+  validateSkillFiles(prompt.skillFiles);
+  if (prompt.archive || prompt.contextFile) return;
   if (prompt.images.length + (prompt.skillFiles?.length ?? 0) > CHATGPT_MAX_INPUT_IMAGES) {
     throw new ChatGptWebAdapterError(
-      "Selected skills and images exceed ChatGPT's 10 attachments per message; disable Skills as files or reduce attachments.",
+      "Selected skills and images exceed ChatGPT's 10 attachments per message; use context archive transport or reduce attachments.",
       { status: 400, errorType: "invalid_request_error", code: "too_many_attachments", retryable: false },
     );
   }
-  validateSkillFiles(prompt.skillFiles);
+}
+
+function chatGptContextArchivePayload(
+  prompt: CompiledChatGptWebPrompt,
+): { name: string; mimeType: string; buffer: Buffer } {
+  if (!prompt.archive) throw new Error("Missing ChatGPT context archive");
+  const entries: Record<string, Uint8Array> = {
+    "context.txt": strToU8(prompt.archive.contextText),
+  };
+  const manifestImages: Array<Record<string, unknown>> = [];
+  let rawBytes = Buffer.byteLength(prompt.archive.contextText, "utf8");
+
+  for (const image of prompt.images) {
+    const parsed = parseDataUrl(image.imageUrl);
+    if (!parsed) throw new Error(`ChatGPT web input image ${image.ref} must be an inline base64 data URL`);
+    const extension = imageExtensions.get(parsed.mediaType.toLowerCase());
+    if (!extension) throw new Error(`ChatGPT web input image ${image.ref} has unsupported media type: ${parsed.mediaType}`);
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(parsed.base64) || parsed.base64.length % 4 !== 0) {
+      throw new Error(`ChatGPT web input image ${image.ref} contains invalid base64 data`);
+    }
+    const buffer = Buffer.from(parsed.base64, "base64");
+    if (buffer.length === 0) throw new Error(`ChatGPT web input image ${image.ref} is empty`);
+    if (buffer.length > 20_000_000) throw new Error(`ChatGPT web input image ${image.ref} exceeds 20 MB`);
+    rawBytes += buffer.length;
+    if (rawBytes > 500_000_000) {
+      throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+    }
+    const path = `images/${image.ref}.${extension}`;
+    entries[path] = buffer;
+    manifestImages.push({
+      attachment_ref: image.ref,
+      path,
+      mime_type: parsed.mediaType.toLowerCase(),
+      ...(image.detail ? { detail: image.detail } : {}),
+    });
+  }
+
+  const manifestSkills: Array<Record<string, unknown>> = [];
+  for (const file of prompt.skillFiles ?? []) {
+    const path = `skills/${file.name}`;
+    const data = strToU8(file.text);
+    rawBytes += data.length;
+    if (rawBytes > 500_000_000) {
+      throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+    }
+    entries[path] = data;
+    manifestSkills.push({ filename: file.name, path, mime_type: "text/plain; charset=utf-8" });
+  }
+
+  entries["manifest.json"] = strToU8(JSON.stringify({
+    version: 1,
+    context: { path: "context.txt", mime_type: "text/plain; charset=utf-8" },
+    images: manifestImages,
+    skills: manifestSkills,
+  }, null, 2));
+
+  const zipped = Buffer.from(zipSync(entries, { level: 6 }));
+  if (zipped.length > 500_000_000) {
+    throw new Error("ChatGPT context archive exceeds the 500 MB compressed bridge limit");
+  }
+  return { name: prompt.archive.name, mimeType: "application/zip", buffer: zipped };
 }
 
 export function chatGptPromptFilePayloads(
   prompt: CompiledChatGptWebPrompt,
 ): Array<{ name: string; mimeType: string; buffer: Buffer }> {
   assertChatGptPromptAttachments(prompt);
+  if (prompt.archive) return [chatGptContextArchivePayload(prompt)];
+  if (prompt.contextFile) {
+    const buffer = Buffer.from(prompt.contextFile.text, "utf8");
+    if (buffer.length > 100_000_000) throw new Error("ChatGPT context text fallback exceeds 100 MB");
+    return [{ name: prompt.contextFile.name, mimeType: "text/plain", buffer }];
+  }
   const files = [...chatGptImageFilePayloads(prompt.images), ...(prompt.skillFiles ?? []).map(file => ({
     name: file.name, mimeType: "text/plain", buffer: Buffer.from(file.text, "utf8"),
   }))];
@@ -2404,6 +2475,26 @@ export class ChatGptBrowserWorker {
       try {
         return await execute(turn);
       } catch (error) {
+        if (error instanceof ChatGptWebAdapterError && error.code === "context_archive_attachment_fallback") {
+          console.warn(
+            `[chatgpt-web] browser turn ${turn.traceId} retrying the context ZIP as one UTF-8 text attachment`,
+          );
+          const textFilePrepare = (prepare: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>) => (
+            async () => {
+              const prepared = await prepare();
+              return {
+                ...compiledChatGptWebArchiveTextFileFallback(prepared),
+                release: prepared.release,
+              };
+            }
+          );
+          const fallbackTurn: BrowserTurn = {
+            ...turn,
+            prepare: textFilePrepare(turn.prepare),
+            ...(turn.prepareResume ? { prepareResume: textFilePrepare(turn.prepareResume) } : {}),
+          };
+          return await execute(fallbackTurn);
+        }
         if (!(turn.compaction
           && error instanceof ChatGptWebAdapterError
           && error.code === "compaction_attachment_fallback")) {
@@ -5423,6 +5514,19 @@ export class ChatGptBrowserWorker {
       } catch (error) {
         const hasAttachments = chatGptPromptFilePayloads(prepared).length > 0;
         const submissionEvidence = await this.currentSubmissionEvidence(page, submissionBaseline).catch(() => undefined);
+        if (prepared.archive && hasAttachments && !submissionEvidence) {
+          await diagnostics.capture(page, "context-archive-attachment-fallback", error);
+          throw new ChatGptWebAdapterError(
+            "ChatGPT could not finish uploading the ZIP context bundle before Send activation. Retry the same turn with one UTF-8 context file.",
+            {
+              status: 409,
+              errorType: "browser_transport_error",
+              code: "context_archive_attachment_fallback",
+              retryable: true,
+              cause: error,
+            },
+          );
+        }
         if (turn.compaction && hasAttachments && !submissionEvidence) {
           await diagnostics.capture(page, "compaction-attachment-fallback", error);
           throw new ChatGptWebAdapterError(
@@ -5515,11 +5619,14 @@ export class ChatGptBrowserWorker {
         ? new ChatGptLunaCheckpointStream()
         : undefined;
       const receiptRequired = turn.completionFence?.receiptReady !== undefined;
+      // Archive turns are buffered until terminal completion so an unreadable-ZIP marker can
+      // transparently switch to the TXT fallback without leaking transport text to Codex.
+      const deferFinalText = receiptRequired || Boolean(prepared.archive);
       let bufferedFinalDeltas: string[] = [];
       const emitMarkdownDelta = (delta: string): void => {
         const visible = checkpointStream ? checkpointStream.push(delta) : delta;
         if (!visible) return;
-        if (receiptRequired) bufferedFinalDeltas.push(visible);
+        if (deferFinalText) bufferedFinalDeltas.push(visible);
         else turn.onTextDelta(visible);
       };
       const flushBufferedFinalDeltas = (): void => {
@@ -5676,7 +5783,7 @@ export class ChatGptBrowserWorker {
           await diagnostics.capture(page, "response-no-progress-5m").catch(() => {});
           await stop.press("Enter").catch(() => {});
           throw new ChatGptWebAdapterError(
-            "ChatGPT remained in a running state for five minutes without visible response, reasoning, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.",
+            `ChatGPT remained in a running state for ${(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS / 60_000).toFixed(1)} minutes without visible response, reasoning, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
             {
               status: 504,
               errorType: "server_error",
@@ -5690,7 +5797,10 @@ export class ChatGptBrowserWorker {
             capturedResponse = true;
             await diagnostics.capture(page, "response-visible");
           }
-          const textDelta = (() => {
+          // Compaction is consumed as one terminal checkpoint. ChatGPT can reorder completed DOM
+          // blocks during hydration, so streaming intermediate projections creates false
+          // block_order_changed failures and unnecessary Codex reconnects.
+          const textDelta = turn.compaction ? "" : (() => {
             try {
               return markdownBuffer.observe(snapshot.markdownSegments);
             } catch (error) {
@@ -5874,6 +5984,11 @@ export class ChatGptBrowserWorker {
             }
             const final = (() => {
               try {
+                if (turn.compaction) {
+                  const terminalBuffer = new ChatGptMarkdownBuffer();
+                  terminalBuffer.observe(snapshot.markdownSegments);
+                  return terminalBuffer.finish();
+                }
                 return markdownBuffer.finish();
               } catch (error) {
                 return throwMarkdownConsistencyError(error);
@@ -5883,7 +5998,19 @@ export class ChatGptBrowserWorker {
               throw new Error("ChatGPT completed with visible text that could not be serialized as Markdown");
             }
             if (final.delta) emitMarkdownDelta(final.delta);
-            if (receiptRequired) flushBufferedFinalDeltas();
+            if (prepared.archive && final.markdown.trim() === CHATGPT_CONTEXT_ARCHIVE_UNREADABLE_MARKER) {
+              bufferedFinalDeltas = [];
+              throw new ChatGptWebAdapterError(
+                "ChatGPT accepted the ZIP upload but could not read its contents. Retry the same turn with one UTF-8 context file.",
+                {
+                  status: 409,
+                  errorType: "browser_transport_error",
+                  code: "context_archive_attachment_fallback",
+                  retryable: true,
+                },
+              );
+            }
+            if (deferFinalText) flushBufferedFinalDeltas();
             if (checkpointStream) {
               const completed = checkpointStream.finishOptional(snapshot.visibleText);
               if (completed.visibleRemainder) turn.onTextDelta(completed.visibleRemainder);
