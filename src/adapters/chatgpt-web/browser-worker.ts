@@ -76,7 +76,6 @@ import {
   notifyLauncherTurn,
 } from "../../launcher-browser-host";
 import {
-  CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER,
   resolveChatGptWebContextLimits,
   resolveChatGptWebMessageTokenBudget,
   resolveChatGptWebTransportLimits,
@@ -840,7 +839,7 @@ export class ChatGptSubmissionRejectionObserver {
       .then(body => body?.detail?.code === "message_length_exceeds_limit"
         ? new ChatGptWebAdapterError(
           "ChatGPT rejected this message because it exceeds the selected mode's input-size limit. Compact the task before retrying.",
-          { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+          { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
         ) : undefined)
       // Unreadable or unfamiliar responses do not establish a size rejection. The normal
       // bound-response DOM error remains authoritative in that case.
