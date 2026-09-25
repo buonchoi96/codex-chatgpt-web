@@ -905,8 +905,7 @@ export function compileChatGptWebPrompt(
   const shouldArchive = !manualControl
     && !compiled.multipart
     && (
-      parsed._compactionRequest
-      || compiled.text.length >= CHATGPT_CONTEXT_ARCHIVE_INLINE_CHAR_THRESHOLD
+      compiled.text.length >= CHATGPT_CONTEXT_ARCHIVE_INLINE_CHAR_THRESHOLD
       || compiled.images.length >= CHATGPT_CONTEXT_ARCHIVE_IMAGE_THRESHOLD
     );
   if (shouldArchive) return archivedContextPrompt(compiled, parsed._compactionRequest === true);
