@@ -1460,17 +1460,24 @@ export function createChatGptWebAdapter(
             throw error;
           }
           const turnError = submittedTurnFailure(session, error);
-          const handledError = turnError instanceof ChatGptWebAdapterError && turnError.retryable
+          const autoCompactTransportFailure = turnError instanceof ChatGptWebAdapterError
+            && (turnError.code === "browser_prompt_too_long"
+              || turnError.code === "message_length_exceeds_limit");
+          const handledError = turnError instanceof ChatGptWebAdapterError
+            && turnError.retryable
+            && !autoCompactTransportFailure
             ? chatGptWebTurnRetryPolicy.recordRetryableFailure(retryKey, turnError)
             : turnError;
-          if (!(turnError instanceof ChatGptWebAdapterError && turnError.retryable)) {
+          if (autoCompactTransportFailure
+            || !(turnError instanceof ChatGptWebAdapterError && turnError.retryable)) {
             chatGptWebTurnRetryPolicy.clear(retryKey);
           }
-          if (handledError instanceof ChatGptWebAdapterError && !handledError.retryable) {
+          if (handledError instanceof ChatGptWebAdapterError
+            && !handledError.retryable
+            && !autoCompactTransportFailure) {
             // A deterministic request failure remains replayable so a native reconnect cannot burn
-            // another browser attempt. Every other failure retires the browser session: client
-            // disconnects, stage failures, and retryable ChatGPT errors must start a fresh surface
-            // instead of replaying one rejected browser outcome for the registry's full TTL.
+            // another browser attempt. Prompt-size failures are different: the server owns their
+            // one-shot compact+retry recovery and therefore needs a fresh browser session.
             session.cancel();
           } else {
             chatGptTurnSessions.retire(executionKey, session);
