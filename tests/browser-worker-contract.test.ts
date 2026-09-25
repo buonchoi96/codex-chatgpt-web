@@ -735,6 +735,24 @@ test("launcher page acquisition proves a nonzero operational viewport before DOM
   expect(workerSource).toContain("innerWidth >= width && innerHeight >= height");
 });
 
+test("Luna Free smoke tolerates a late generic model switcher only after authenticated plan proof", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const lunaBranch = workerSource.slice(
+    workerSource.indexOf("if (uiEffortIndex === null)"),
+    workerSource.indexOf("const currentEffort =", workerSource.indexOf("if (uiEffortIndex === null)")),
+  );
+  expect(lunaBranch).toContain("readChatGptUsageAccount(page)");
+  expect(lunaBranch).toContain("chatGptPlanUsesLunaOnly(usageAccount?.planType)");
+  expect(lunaBranch).toContain("this account now exposes a model selector; rerun setup");
+
+  const smokeStart = workerSource.indexOf("private async smokeTestExclusive");
+  const smokeEnd = workerSource.indexOf("private async attachFiles", smokeStart);
+  const smoke = workerSource.slice(smokeStart, smokeEnd);
+  expect(smoke).toContain("chatGptPlanUsesLunaOnly(usageAccount?.planType)");
+  expect(smoke).toContain("solAvailable: false");
+  expect(smoke).toContain("CHATGPT_WEB_LUNA_MODEL_ID");
+});
+
 test("Luna turns without a retained conversation never send connector identity alone", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const runExclusive = workerSource.slice(workerSource.indexOf("  private async runExclusive("));

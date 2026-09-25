@@ -90,7 +90,7 @@ const en = {
   verifySignIn: "Check sign in",
   signedIn: "Signed in",
   stepSmoke: "Run browser smoke test",
-  stepSmokeBody: "Select High, send a small temporary message, and verify a complete streamed response.",
+  stepSmokeBody: "Use the model available to this account (High on Sol accounts, Luna on Free/Go), send a small temporary message, and verify a complete streamed response.",
   runSmoke: "Run smoke test",
   smokePassed: "Smoke test passed",
   stepInstall: "Install into Codex",

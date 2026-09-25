@@ -1,10 +1,20 @@
 import { expect, test } from "bun:test";
 import {
   chatGptLimitsPlanFromHeadings,
+  chatGptPlanUsesLunaOnly,
   chatGptUsageModelFromAnnouncements,
   detectChatGptLimitsPlan,
   readChatGptUsageAccount,
 } from "../src/adapters/chatgpt-web/limits";
+
+test("Free and Go plans are Luna-only while paid Sol-capable plan labels are not", () => {
+  expect(chatGptPlanUsesLunaOnly("free")).toBeTrue();
+  expect(chatGptPlanUsesLunaOnly(" FREE ")).toBeTrue();
+  expect(chatGptPlanUsesLunaOnly("go")).toBeTrue();
+  for (const plan of ["plus", "pro", "team", "business", "enterprise", undefined]) {
+    expect(chatGptPlanUsesLunaOnly(plan)).toBeFalse();
+  }
+});
 
 test("Limits requires an unambiguous current Pro tier instead of a badge or advertised price", () => {
   expect(chatGptLimitsPlanFromHeadings(["Billing", "ChatGPT Pro 20x", "Transaction history"])).toBe("pro_200");

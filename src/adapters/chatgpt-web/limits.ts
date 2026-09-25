@@ -4,6 +4,11 @@ import type { Locator, Page } from "playwright-core";
 export type ChatGptLimitsPlan = "pro_100" | "pro_200" | "unsupported";
 export type ChatGptUsageModel = "gpt-6-pro" | "gpt-5.6-pro" | "pro-unknown" | "other";
 
+export function chatGptPlanUsesLunaOnly(planType: string | undefined): boolean {
+  const normalized = planType?.trim().toLowerCase();
+  return normalized === "free" || normalized === "go";
+}
+
 /** Only stable account identity leaves the page; never export session credentials. */
 export async function readChatGptUsageAccount(page: Page): Promise<{
   accountKey: string;

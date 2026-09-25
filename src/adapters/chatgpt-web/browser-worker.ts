@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
-import { detectChatGptLimitsPlan, readChatGptUsageAccount, readChatGptUsageModel, type ChatGptUsageModel } from "./limits";
+import { chatGptPlanUsesLunaOnly, detectChatGptLimitsPlan, readChatGptUsageAccount, readChatGptUsageModel, type ChatGptUsageModel } from "./limits";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from "playwright-core";
 import {
   atomicWriteFile,
@@ -2562,9 +2562,16 @@ export class ChatGptBrowserWorker {
       await throwIfChatGptRateLimitDialog(page);
       const visibleControls = composerForm.locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true });
       if (await visibleControls.count() > 0) {
-        throw chatGptModelControlUnavailableError(
-          "ChatGPT Luna was selected from a Luna-only capability probe, but the account now exposes a model selector; rerun setup",
-        );
+        // Free/Go can hydrate a generic model-switcher after the Luna-only capability probe has
+        // already reached a stable composer. That control is not evidence of the Sol effort
+        // slider. Trust the authenticated account plan for these Luna-only tiers; every other
+        // plan stays fail-closed so a real capability change cannot silently run the wrong model.
+        const usageAccount = await readChatGptUsageAccount(page).catch(() => undefined);
+        if (!chatGptPlanUsesLunaOnly(usageAccount?.planType)) {
+          throw chatGptModelControlUnavailableError(
+            "ChatGPT Luna was selected from a Luna-only capability probe, but this account now exposes a model selector; rerun setup",
+          );
+        }
       }
       // Enable Think during prompt attachment, after fresh connector selection. Ordinary Luna
       // still clears a previous Think selection here; retained Think is checked on every attach.
@@ -4008,9 +4015,14 @@ export class ChatGptBrowserWorker {
   private async smokeTestExclusive(abortSignal?: AbortSignal): Promise<{ effort: string; response: string }> {
     const page = await this.ensurePage();
     await this.prepareChatSurface(page);
-    const account = await detectChatGptAccountCapabilities(page);
+    const usageAccount = await readChatGptUsageAccount(page).catch(() => undefined);
+    const account = chatGptPlanUsesLunaOnly(usageAccount?.planType)
+      ? { solAvailable: false, extraHighAvailable: false, proAvailable: false }
+      : await detectChatGptAccountCapabilities(page);
     // Core smoke runs before the optional MCP connector is configured, so it must remain a
-    // browser-only transport check. Connector setup has its own explicit verification operation.
+    // browser-only transport check. Free/Go are identified from authenticated account metadata
+    // instead of racing the late-hydrating model switcher. Connector setup has its own explicit
+    // verification operation.
     const capabilities: ChatGptWebCapabilities = { ...account, localToolsEnabled: false };
     const modelId = account.solAvailable ? CHATGPT_WEB_MODEL_ID : CHATGPT_WEB_LUNA_MODEL_ID;
     const reasoning = account.solAvailable ? "high" : "low";
