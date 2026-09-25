@@ -102,9 +102,10 @@ function contextLimits(
 ): ChatGptWebContextLimits {
   return {
     contextWindow,
-    // Codex reports this effective window in its context indicator. Align it with the practical
-    // pre-compaction budget instead of exposing an unreachable underlying model window.
-    effectiveContextWindowPercent: Math.round((autoCompactTokenLimit / contextWindow) * 100),
+    // This field is a hard-context multiplier inside Codex, not a compaction indicator. Routed
+    // Web models own the full advertised model window; auto-compaction remains an independent
+    // threshold for completed history and must not shrink the effective hard cap.
+    effectiveContextWindowPercent: 100,
     autoCompactTokenLimit,
   };
 }
