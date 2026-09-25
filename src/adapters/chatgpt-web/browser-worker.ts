@@ -2254,14 +2254,17 @@ export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[]): Array
 }
 
 function assertChatGptPromptAttachments(prompt: CompiledChatGptWebPrompt): void {
-  validateSkillFiles(prompt.skillFiles);
-  if (prompt.archive || prompt.contextFile) return;
+  if (prompt.archive || prompt.contextFile) {
+    validateSkillFiles(prompt.skillFiles);
+    return;
+  }
   if (prompt.images.length + (prompt.skillFiles?.length ?? 0) > CHATGPT_MAX_INPUT_IMAGES) {
     throw new ChatGptWebAdapterError(
       "Selected skills and images exceed ChatGPT's 10 attachments per message; use context archive transport or reduce attachments.",
       { status: 400, errorType: "invalid_request_error", code: "too_many_attachments", retryable: false },
     );
   }
+  validateSkillFiles(prompt.skillFiles);
 }
 
 function chatGptContextArchivePayload(
