@@ -152,17 +152,17 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", plus)).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 32_000,
+      autoCompactTokenLimit: 922_000,
     });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "medium", plus)).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 80_000,
+      autoCompactTokenLimit: 922_000,
     });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", plus)).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 80_000,
+      autoCompactTokenLimit: 922_000,
     });
     expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, "low", plus)).toEqual({
       browserComposerCharLimit: 211_256,
@@ -178,19 +178,19 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", pro)).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 95_000,
+      autoCompactTokenLimit: 922_000,
     });
     for (const effort of ["medium", "high", "xhigh"] as const) {
       expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, effort, pro)).toEqual({
         contextWindow: 1_050_000,
         effectiveContextWindowPercent: 100,
-        autoCompactTokenLimit: 95_000,
+        autoCompactTokenLimit: 922_000,
       });
     }
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "max", pro)).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 95_000,
+      autoCompactTokenLimit: 922_000,
     });
     expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, "low", pro)).toEqual({
       browserMessageTokenLimit: 103_000,
@@ -215,18 +215,18 @@ describe("fixed ChatGPT Web model routes", () => {
     })).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 600_000,
+      autoCompactTokenLimit: 922_000,
     });
   });
 
-  test("Bigger Context changes compaction staging without enlarging model context", () => {
+  test("Bigger Context changes browser staging without changing the 922K semantic compaction boundary", () => {
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "max", {
       ...pro,
       experimentalBiggerContext: true,
     })).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 285_000,
+      autoCompactTokenLimit: 922_000,
     });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_LUNA_BACKEND_MODEL, "low", {
       solAvailable: false,
@@ -235,7 +235,7 @@ describe("fixed ChatGPT Web model routes", () => {
     })).toEqual({
       contextWindow: 1_050_000,
       effectiveContextWindowPercent: 100,
-      autoCompactTokenLimit: 600_000,
+      autoCompactTokenLimit: 922_000,
     });
   });
 
