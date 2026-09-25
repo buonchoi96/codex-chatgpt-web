@@ -163,12 +163,16 @@ bridge.
 If a Web model reports that native desktop Computer Use is unavailable:
 
 1. Confirm the official Codex Computer Use plugin/capability is enabled in the outer Codex runtime.
-2. Start a fresh Full-harness turn and inspect the native inventory for Computer Use, `node_repl`,
-   or `cua_repl` surfaces.
-3. Do not treat ChatGPT's browser-only computer surface as proof that native desktop access is
+2. Start a fresh Full-harness turn and explicitly inspect the native inventory for `node_repl`.
+   For native Windows apps, prefer `mcp__node_repl__js` and initialize `@oai/sky`; retain the
+   `sky` object and call `sky.list_apps()` before declaring desktop control unavailable.
+3. Treat `cua_repl` as browser-oriented unless its current state explicitly proves native computer
+   APIs are enabled. If it returns `apps=[]`, says native computer APIs are disabled, or reports a
+   missing `sky` trusted service, fall back to `node_repl` + `@oai/sky`.
+4. Do not treat ChatGPT's browser-only computer surface as proof that native desktop access is
    available.
-4. The `codex_windows_computer_use_*` connector tools are legacy compatibility helpers only and
-   work only when the old third-party `windows_computer_use` MCP is actually loaded.
+5. The `codex_windows_computer_use_*` connector tools are legacy compatibility helpers only and
+   must not be called unless the matching `mcp__windows_computer_use` tools are actually present.
 
 If the outer Codex inventory contains no suitable Computer Use capability, collect a safe log and
 report the exact Codex version, selected model, and inventory result.
