@@ -145,7 +145,7 @@ test("manual and automatic compaction both normalize to the same compaction requ
     body: JSON.stringify({
       model,
       stream: false,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "manual source" }] }],
+      input: [{ type: "message", id: "msg_manual_compaction_source", role: "user", content: [{ type: "input_text", text: "manual source" }] }],
     }),
   }), config, factory);
   expect(manual.status).toBe(200);
@@ -169,7 +169,7 @@ test("manual and automatic compaction both normalize to the same compaction requ
       model,
       stream: false,
       client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) },
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "auto source" }] }],
+      input: [{ type: "message", id: "msg_auto_compaction_source", role: "user", content: [{ type: "input_text", text: "auto source" }] }],
     }),
   }), config, factory);
   expect(automatic.status).toBe(200);
