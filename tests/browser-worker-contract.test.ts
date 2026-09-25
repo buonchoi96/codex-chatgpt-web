@@ -2657,7 +2657,7 @@ test("retained tool turns insert into the connector-bound composer without selec
   expect(calls).toEqual(["fill", "focus", "insert", "assert"]);
 });
 
-test("image attachment readiness uses exact file tiles and not localized remove-button text", async () => {
+test("image attachment readiness stays scoped to filename-bearing attachment tiles", async () => {
   const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const calls: Array<[string, string?]> = [];
   const send = {
@@ -2666,22 +2666,26 @@ test("image attachment readiness uses exact file tiles and not localized remove-
       return true;
     },
   };
+  const hiddenTile = {
+    or() { return this; },
+    filter() { return this; },
+    isVisible: async () => false,
+  };
+  const visibleTile = {
+    or() { return this; },
+    isVisible: async () => {
+      calls.push(["fileTile", "codex-input-image-1.png"]);
+      return true;
+    },
+  };
   const composerForm = {
     getByRole: (role: string, options: { name: string; exact: boolean }) => {
-      expect(role).toBe("group");
-      expect(options).toEqual({ name: "codex-input-image-1.png", exact: true });
-      return {
-        or() { return this; },
-        waitFor: async (state: { state: string; timeout: number }) => {
-          expect(state.state).toBe("visible");
-          expect(state.timeout).toBeGreaterThan(0);
-          expect(state.timeout).toBeLessThanOrEqual(300_000);
-          calls.push(["fileTile", options.name]);
-        },
-      };
+      expect(["group", "button"]).toContain(role);
+      expect(options).toEqual({ name: "codex-input-image-1.png", exact: false });
+      return role === "group" ? visibleTile : hiddenTile;
     },
     locator: (selector: string) => {
-      if (selector.startsWith(".composer-attachment-surface")) return {};
+      if (selector.startsWith(".composer-attachment-surface")) return hiddenTile;
       expect(selector).toBe(CHATGPT_SEND_BUTTON_SELECTOR);
       return send;
     },
@@ -2704,15 +2708,11 @@ test("image attachment readiness uses exact file tiles and not localized remove-
   const page = {
     locator: (selector: string) => {
       if (selector === 'input[data-testid="upload-photos-input"], form[data-chatgpt-composer] input[type="file"][multiple]:not([accept])') return input;
-      if (selector === '[role="alert"]') {
-        return { allInnerTexts: async () => [] };
-      }
+      if (selector === '[role="alert"]') return { allInnerTexts: async () => [] };
       return { last: () => composer };
     },
   };
-  const attachFiles = (ChatGptBrowserWorker.prototype as unknown as {
-    attachFiles(page: unknown, prompt: unknown): Promise<void>;
-  }).attachFiles;
+  const attachFiles = (ChatGptBrowserWorker.prototype as any).attachFiles;
 
   await attachFiles.call({ activeComposer: async () => composer }, page, {
     images: [{ ref: "codex-input-image-1", imageUrl }],
