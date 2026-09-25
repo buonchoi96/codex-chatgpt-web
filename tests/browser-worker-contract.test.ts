@@ -3449,8 +3449,10 @@ test("browser preflight separates model context from one-message transport limit
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "xhigh", pro)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "max", pro)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(28_000, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(28_001, 19_809, "gpt-5.6-luna", "low", luna)).toThrow(
-    "ChatGPT Free browser transport budget",
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 183_392, "gpt-5.6-luna", "low", luna)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(1_049_999, 1_041_807, "gpt-5.6-luna", "low", luna)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(1_050_000, 1_041_808, "gpt-5.6-luna", "low", luna)).toThrow(
+    "1,050,000-token context window",
   );
 
   expect(() => assertChatGptWebInputWithinLimits(
