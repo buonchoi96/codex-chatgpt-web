@@ -185,6 +185,8 @@ export function chatGptPromptJsonBytes(text: string): number {
 
 const DROPPED_IMAGE_NOTE =
   `[older image not attached: ChatGPT accepts at most ${CHATGPT_MAX_INPUT_IMAGES} per message]`;
+const COMPACTION_IMAGE_NOTE =
+  "[image omitted from compaction transport; preserve relevant visual facts from supplied text/tool evidence and re-observe the native UI after compaction if needed]";
 
 /**
  * A fresh compaction epoch receives the complete canonical context, so every still-relevant image
@@ -196,6 +198,7 @@ const DROPPED_IMAGE_NOTE =
 interface ImageBudget {
   seen: number;
   dropped: number;
+  dropReason?: "limit" | "compaction";
 }
 
 function inputContent(
@@ -213,7 +216,12 @@ function inputContent(
   return semantic.map(part => {
     if (part.type === "text") return { type: "text", text: part.text };
     budget.seen += 1;
-    if (budget.seen <= budget.dropped) return { type: "text", text: DROPPED_IMAGE_NOTE };
+    if (budget.seen <= budget.dropped) {
+      return {
+        type: "text",
+        text: budget.dropReason === "compaction" ? COMPACTION_IMAGE_NOTE : DROPPED_IMAGE_NOTE,
+      };
+    }
     const ref = `codex-input-image-${images.length + 1}`;
     images.push({ ref, imageUrl: part.imageUrl, ...(part.detail ? { detail: part.detail } : {}) });
     return { type: "image_attachment", attachment_ref: ref, ...(part.detail ? { detail: part.detail } : {}) };
@@ -436,7 +444,10 @@ export function compileChatGptWebPrompt(
   options?: CompileChatGptWebPromptOptions,
 ): CompiledChatGptWebPrompt {
   const manualControl = options?.manualControl === true;
-  const attachSkills = options?.experimentalSkillAttachments === true;
+  // Compaction must remain text-only. Re-uploading task images or skill files can deadlock the
+  // browser turn when the account has exhausted its upload quota, even though the checkpoint
+  // itself needs only textual task state.
+  const attachSkills = options?.experimentalSkillAttachments === true && !parsed._compactionRequest;
   if (attachSkills && (manualControl || isChatGptWebZeroRiskBackendModel(parsed.modelId))) {
     throw new Error("Skills as files is unavailable in Zero Risk mode");
   }
@@ -634,9 +645,13 @@ export function compileChatGptWebPrompt(
     ];
   const build = (sourceMessages: readonly CodexMessage[], omittedMessages = 0): CompiledChatGptWebPrompt => {
     const images: ChatGptWebPromptImage[] = [];
+    const contextImageCount = countChatGptContextImages(sourceMessages);
     const budget: ImageBudget = {
       seen: 0,
-      dropped: Math.max(0, countChatGptContextImages(sourceMessages) - CHATGPT_MAX_INPUT_IMAGES),
+      dropped: parsed._compactionRequest
+        ? contextImageCount
+        : Math.max(0, contextImageCount - CHATGPT_MAX_INPUT_IMAGES),
+      dropReason: parsed._compactionRequest ? "compaction" : "limit",
     };
     const skillFiles: ChatGptSkillFile[] = [];
     const messages = sourceMessages.map(message => {
