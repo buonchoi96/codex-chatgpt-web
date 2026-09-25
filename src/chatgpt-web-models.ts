@@ -32,15 +32,22 @@ export const CHATGPT_WEB_MODEL_CONTEXT_WINDOW = 1_050_000;
  * history small before the next browser turn while allowing one long in-flight Web turn to use the
  * actual model context.
  */
-export const CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT = 32_000;
 /**
- * Zero Risk keeps one visible ChatGPT conversation across sequential Codex turns. Its fixed route
- * therefore uses the requested three-turn compaction interval without enabling Bigger Context's
- * automatic multipart transport; the user still pastes exactly one incremental prompt per turn.
+ * Automatic Web routes reserve the model's full advertised output budget before native compaction:
+ * 1,050,000 context tokens - 128,000 max output tokens = 922,000 input tokens.
+ *
+ * Browser/composer pressure is handled independently by archive/file transport, so it must not
+ * force semantic compaction at the old 32K/80K heuristics.
+ */
+export const CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT = 922_000;
+export const CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
+/**
+ * Zero Risk remains a manual-paste workflow, so preserve its existing manual three-turn budget
+ * independently of automatic archive transport.
  */
 export const CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW = CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
-export const CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT * 3;
-export const CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT = 80_000;
+export const CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT = 96_000;
+export const CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 export const CHATGPT_WEB_INSTANT_COMPOSER_CHAR_LIMIT = 211_256;
 export const CHATGPT_WEB_MEDIUM_HIGH_COMPOSER_CHAR_LIMIT = 1_048_572;
 /** Hidden ChatGPT product prompt and Codex Native schema reserve included in usage estimates. */
@@ -50,7 +57,7 @@ export function chatGptWebImageTokenReserve(detail?: string): number {
   return detail === "original" ? 8_192 : 4_096;
 }
 /** Pro-account usable browser windows and separately measured one-message boundaries. */
-export const CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT = 95_000;
+export const CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 export const CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT = 103_000;
 export const CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT = 104_000;
 // Browser message maxima are transport boundaries only. They must never redefine model context.
@@ -61,8 +68,7 @@ export const CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT = 104_000;
  */
 export const CHATGPT_WEB_ZERO_RISK_PRO_CONTEXT_WINDOW =
   CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
-export const CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT =
-  CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT * 3;
+export const CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT = 285_000;
 export const CHATGPT_WEB_PRO_INSTANT_COMPOSER_CHAR_LIMIT = 545_000;
 // Rechecked 2026-09-19: Pro-account Medium/High accept 500k characters but the server
 // rejects larger messages with HTTP 413 (message_length_exceeds_limit), even below
@@ -80,8 +86,9 @@ export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
  * Leave substantial headroom for a long Luna Web tool turn to compact itself before the hard
  * 1.05M model window. Codex supports mid-turn auto-compaction between sampling/tool cycles.
  */
-export const CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
-export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 3;
+export const CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
+/** Bigger Context changes browser transport only; it must not exceed the model's semantic window. */
+export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 1;
 
 export interface ChatGptWebContextLimits {
   contextWindow: number;
