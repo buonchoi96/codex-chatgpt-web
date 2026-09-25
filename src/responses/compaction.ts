@@ -44,6 +44,10 @@ Include:
 - Important context, constraints, or user preferences
 - What remains to be done (clear next steps)
 - Any critical data, examples, or references needed to continue
+- If native Computer Use / GUI work is active: the application/window identity, the last visibly verified UI state, the exact last native action that completed and its result, any requested action that was NOT executed because compaction started, and the next safe GUI action
+- If node_repl / @oai/sky is active: record that official native path and any important persistent session objects or app identifiers needed to resume
+
+For native GUI work after this checkpoint, the resumed model must re-observe the current desktop/window state before any non-idempotent click, type, invoke, submit, save, or destructive action. Never repeat an action merely because it occurred before compaction; use the checkpoint plus a fresh observation to determine whether it already completed. If the node_repl JavaScript session no longer has the expected @oai/sky object, re-import @oai/sky and re-enumerate/re-observe the target app instead of treating that as task failure.
 
 Be concise, structured, and focused on helping the next LLM seamlessly continue the work.`;
 
