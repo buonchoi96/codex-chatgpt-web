@@ -1,4 +1,4 @@
-import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
+import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
@@ -638,17 +638,26 @@ export async function responseRequest(
     delete compactBody.previous_response_id;
     const headers = new Headers(req.headers);
     headers.set("content-type", "application/json");
-    const compactResponse = await compactRequest(
-      new Request("http://127.0.0.1/v1/responses/compact", {
-        method: "POST",
-        headers,
-        body: JSON.stringify(compactBody),
-        signal: abort.signal,
-      }),
-      config,
-      adapterFactory,
-      { onTurnIdentity: options.onTurnIdentity },
+    const keepAlive = setInterval(
+      () => forwardAdapterEvent({ type: "heartbeat" }),
+      CHATGPT_WEB_ADAPTER_HEARTBEAT_MS,
     );
+    let compactResponse: Response;
+    try {
+      compactResponse = await compactRequest(
+        new Request("http://127.0.0.1/v1/responses/compact", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(compactBody),
+          signal: abort.signal,
+        }),
+        config,
+        adapterFactory,
+        { onTurnIdentity: options.onTurnIdentity },
+      );
+    } finally {
+      clearInterval(keepAlive);
+    }
     if (!compactResponse.ok) {
       const detail = (await compactResponse.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 1_000);
       throw new ChatGptWebAdapterError(
