@@ -100,12 +100,28 @@ export function canonicalizeCompactionHandoff(
 ): string {
   const normalized = summary.trim();
   if (!normalized) throw new Error("ChatGPT returned an empty structured compaction handoff");
-  const latestUserPrompt = userPromptText(extractChatGptCompactionSourceRevision(parsed).content);
-  if (latestUserPrompt === undefined) {
-    throw new Error("ChatGPT compaction source has no canonical latest user prompt");
-  }
-  const appendix = `${LATEST_USER_PROMPT_MARKER}\n${JSON.stringify(latestUserPrompt)}`;
+  const source = extractChatGptCompactionSourceRevision(parsed);
+  const latestUserPrompt = userPromptText(source.content);
   const markerOffset = normalized.lastIndexOf(`\n${LATEST_USER_PROMPT_MARKER}\n`);
+
+  if (latestUserPrompt === undefined) {
+    // Computer Use and file/image-heavy native turns can legitimately end with a user revision
+    // that contains no textual block. The completed compaction summary is still bound to the exact
+    // native source by the structured-compaction owner/checkpoint machinery, so absence of a text
+    // appendix is not a reason to discard a successful Web handoff and make Codex reconnect.
+    //
+    // A marker supplied by the model cannot be authenticated without canonical source text, so
+    // keep that case fail-closed instead of trusting model-authored continuation metadata.
+    if (markerOffset >= 0) {
+      throw new Error("ChatGPT compaction handoff contains an unverifiable latest-user marker");
+    }
+    console.warn(
+      "[chatgpt-web] compaction source has no canonical textual latest user prompt; accepting the completed handoff without a latest-user appendix",
+    );
+    return normalized;
+  }
+
+  const appendix = `${LATEST_USER_PROMPT_MARKER}\n${JSON.stringify(latestUserPrompt)}`;
   if (markerOffset < 0) return `${normalized}\n\n${appendix}`;
   if (normalized.slice(markerOffset + 1).trimEnd() !== appendix) {
     throw new Error("ChatGPT compaction handoff contains a conflicting latest-user marker");
