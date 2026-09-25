@@ -1,0 +1,125 @@
+name: Test 922K Context Archive Windows Pre-release
+
+on:
+  push:
+    branches:
+      - test/922k-context-archive
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: test-922k-context-archive-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-build-prerelease:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and regression tests
+        run: bun run verify
+
+      - name: Build Windows launcher
+        run: bun run --cwd launcher package:win
+
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\codex-e-drive"
+
+      - name: Smoke packaged launcher
+        run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
+
+      - name: Prepare pre-release assets
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version-922k-context-archive-pre.${{ github.run_number }}"
+          $source = Get-ChildItem "launcher/artifacts/*.exe" | Select-Object -First 1
+          if (-not $source) { throw "Windows installer was not produced" }
+          $exe = "codex-web-gpt-$version-922k-context-archive-pre-win-x64.exe"
+          Copy-Item $source.FullName $exe -Force
+          $digest = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $exe" | Set-Content "$exe.sha256" -Encoding ascii
+          "PRE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_SHA=$exe.sha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_DIGEST=$digest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Tag: $tag"
+          Write-Host "Installer: $exe"
+          Write-Host "SHA-256: $digest"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-922k-context-archive-${{ github.sha }}
+          path: |
+            ${{ env.PRE_EXE }}
+            ${{ env.PRE_SHA }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Publish GitHub pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @'
+          Experimental Windows pre-release for branch test/922k-context-archive.
+
+          Validated commit: ${{ github.sha }}
+
+          Experimental changes:
+          - Automatic ChatGPT Web compaction boundary: 922,000 input tokens (1,050,000 context - 128,000 max output).
+          - Large canonical context transported as one ZIP containing context.txt, manifest.json, images/, and optional skills/.
+          - Short outer composer prompt keeps Codex Native2 routing active and instructs the backend to reconstruct the archive.
+          - ZIP rejection/unreadable fallback retries with one UTF-8 context text attachment instead of a giant composer paste or many image attachments.
+          - Compaction Markdown is consumed from the final DOM snapshot to avoid transient block_order_changed reconnects.
+          - Long-response / upload / compaction timeout budgets are increased substantially for near-1M-token turns.
+
+          SHA-256: __DIGEST__
+
+          This is a pre-release for testing only and does not replace the stable main release.
+          '@
+          $notes = $notes.Replace('__DIGEST__', $env:PRE_DIGEST)
+          if (gh release view "$env:PRE_TAG" --repo "$env:GITHUB_REPOSITORY" *> $null) {
+            gh release delete "$env:PRE_TAG" --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
+          }
+          gh release create "$env:PRE_TAG" `
+            "$env:PRE_EXE" `
+            "$env:PRE_SHA" `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --target "${{ github.sha }}" `
+            --prerelease `
+            --title "Codex Web GPT $env:PRE_VERSION - 922K Context Archive Test" `
+            --notes "$notes"
