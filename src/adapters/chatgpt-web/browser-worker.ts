@@ -990,7 +990,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
   if (modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new ChatGptWebAdapterError(
       "Bigger Context is unavailable for Luna because Luna already uses its native 1.05M-token model window with rolling checkpoints; multipart staging is not enabled for this route.",
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+      { status: 400, errorType: "invalid_request_error", code: "unsupported_feature", retryable: false },
     );
   }
   if (modelId !== CHATGPT_WEB_MODEL_ID) {
@@ -1070,7 +1070,7 @@ export function resolveChatGptWebMultipartStagingMode(
   if (modelId === CHATGPT_WEB_LUNA_MODEL_ID || !capabilities.solAvailable) {
     throw new ChatGptWebAdapterError(
       "Bigger Context staging is unavailable for a Luna-only account.",
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+      { status: 400, errorType: "invalid_request_error", code: "unsupported_feature", retryable: false },
     );
   }
   if (modelId !== CHATGPT_WEB_MODEL_ID) {
@@ -1090,7 +1090,7 @@ export function resolveChatGptWebMultipartStagingMode(
   }
   throw new ChatGptWebAdapterError(
     `No ChatGPT effort available to this account can carry a Bigger Context stage with ${maxStageMessageTokens.toLocaleString("en-US")} estimated tokens and ${maxStageChars.toLocaleString("en-US")} characters.`,
-    { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+    { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
   );
 }
 
