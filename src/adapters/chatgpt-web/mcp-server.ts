@@ -38,6 +38,9 @@ const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
   "collaboration__wait_agent",
 ]);
 
+// Legacy compatibility for the third-party windows_computer_use MCP. New native desktop
+// automation should discover and invoke the official outer-Codex Computer Use capability through
+// codex_tool_inventory/codex_tool_call instead of depending on this vendor-specific namespace.
 const WINDOWS_COMPUTER_USE_WIRE_PREFIX = "mcp__windows_computer_use__windows_computer_use_";
 const WINDOWS_COMPUTER_USE_READ_ONLY_TOOLS = new Set([
   "mcp__windows_computer_use__windows_computer_use_health",
@@ -114,10 +117,11 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
   "A successful command, inspection, inventory lookup, or intermediate tool result is progress only. Do not end the response while any requested edit, test, validation, publication, or other actionable requirement remains; continue the Codex Native tool loop.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
-  "For Windows Computer Use observation, use codex_windows_computer_use_observe with the matching operation. Do not route Windows observation through the generic codex_readonly_tool_call unless the dedicated observation bridge is unavailable.",
-  "For Windows Computer Use interaction, use codex_windows_computer_use_action with the matching fixed operation. Use codex_windows_computer_use_call only as a compatibility fallback when the dedicated action bridge is unavailable.",
-  "For native Windows desktop automation, never substitute ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods for the outer Codex Windows Computer Use MCP. Those surfaces may see only the browser and are not evidence of native Win32 application access.",
-  "If a native Windows operation is needed and a dedicated Windows bridge call is unavailable, use codex_tool_inventory and the native discovery path to locate the loaded windows_computer_use MCP, then invoke it through Codex Native. Never execute the literal word tool_search in PowerShell, cmd.exe, or another shell.",
+  "For native desktop automation, prefer an official OpenAI Codex Computer Use or Unified Computer Use capability that is actually present in the current outer Codex registry.",
+  "Use codex_tool_inventory to discover the exact Computer Use surface. When discovery_tools contains tool_search, invoke tool_search through codex_tool_call and continue discovery in the same response; then invoke the exact returned wire_name through codex_tool_call or the native exec gateway.",
+  "Do not treat ChatGPT's browser-only computer surface as evidence of native desktop access. Outer-Codex Computer Use surfaces such as node_repl/cua_repl are allowed when they are genuinely present in the current registry.",
+  "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are legacy compatibility helpers for the third-party windows_computer_use MCP. Do not prefer or require that vendor-specific backend.",
+  "Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command. tool_search is a Codex Native discovery capability, not an operating-system executable.",
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
