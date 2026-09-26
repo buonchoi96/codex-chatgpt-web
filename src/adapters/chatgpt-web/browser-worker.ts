@@ -1320,7 +1320,9 @@ export function chatGptRetryableFailureCanRetainConversation(
 ): boolean {
   if (!turn.conversationKey || turn.retainConversationOnRetry !== true) return false;
   if (!(error instanceof ChatGptWebAdapterError) || error.retryable !== true) return false;
-  if (error.code !== "upstream_server_error" && error.code !== "chatgpt_response_page_rebind_failed") return false;
+  if (error.code !== "upstream_server_error"
+    && error.code !== "chatgpt_response_page_rebind_failed"
+    && error.code !== "browser_response_stalled") return false;
   const progress = turn.externalProgress?.snapshot();
   return (progress?.revision ?? 0) > 0;
 }
