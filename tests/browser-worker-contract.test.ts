@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptStreamRecoveryPollingTimedOut, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -4432,9 +4432,31 @@ test("silent running turns become retryable stalls while real progress resets th
   expect(tracker.update({ ...base, visibleText: "progress", externalToolCallsInFlight: false }, 15_999)).toBeFalse();
   expect(tracker.update({ ...base, visibleText: "progress", externalToolCallsInFlight: false }, 16_000)).toBeTrue();
 
+  // ChatGPT's reconnect / stream-recovery UI may rewrite status rows while no model work occurs.
+  // Status-only churn must not keep the watchdog alive indefinitely.
+  const reconnect = new ChatGptRunningProgressTracker(5_000);
+  expect(reconnect.update({ ...base, traceBlocks: [{ kind: "status", text: "Reconnecting 1" }] }, 1_000)).toBeFalse();
+  expect(reconnect.update({ ...base, traceBlocks: [{ kind: "status", text: "Reconnecting 2" }] }, 3_000)).toBeFalse();
+  expect(reconnect.update({ ...base, traceBlocks: [{ kind: "status", text: "Reconnecting 3" }] }, 6_000)).toBeTrue();
+
+  // Real assistant commentary is semantic progress and does reset the watchdog.
+  expect(reconnect.update({ ...base, traceBlocks: [{ kind: "commentary", text: "Continuing analysis" }] }, 6_001)).toBeFalse();
+  expect(reconnect.update({ ...base, traceBlocks: [{ kind: "commentary", text: "Continuing analysis" }] }, 11_001)).toBeTrue();
+
   expect(tracker.update({ ...base, running: false }, 20_000)).toBeFalse();
-  expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(750_000);
+  expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(5 * 60_000);
   expect(CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS).toBe(15 * 60_000);
+});
+
+test("ChatGPT stream recovery timeout is classified only from the exact upstream UI error", () => {
+  expect(chatGptStreamRecoveryPollingTimedOut("ChatGPT stream recovery polling timed out")).toBeTrue();
+  expect(chatGptStreamRecoveryPollingTimedOut("", [
+    { kind: "status", text: "  ChatGPT   stream recovery polling timed out  " },
+  ])).toBeTrue();
+  expect(chatGptStreamRecoveryPollingTimedOut("The logs mention ChatGPT stream recovery polling timed out")).toBeFalse();
+  expect(chatGptStreamRecoveryPollingTimedOut("", [
+    { kind: "commentary", text: "ChatGPT stream recovery polling timed out" },
+  ])).toBeFalse();
 });
 
 test("stale MCP progress stops suppressing DOM health without penalising long active turns", () => {
