@@ -106,6 +106,7 @@ jobs:
           - ZIP rejection/unreadable fallback retries with one UTF-8 context text attachment instead of a giant composer paste or many image attachments.
           - Compaction Markdown is consumed from the final DOM snapshot to avoid transient block_order_changed reconnects.
           - Long-response / upload / compaction timeout budgets are increased substantially for near-1M-token turns.
+          - Accepted main turns with no assistant response now fail after three minutes with a retryable first-response stall; eligible retries keep the same conversation.
 
           SHA-256: __DIGEST__
 

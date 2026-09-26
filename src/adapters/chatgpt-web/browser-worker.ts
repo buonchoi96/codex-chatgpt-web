@@ -125,6 +125,7 @@ export async function closeChatGptBrowserWorkers(): Promise<void> {
 }
 
 export const CHATGPT_RESPONSE_DOM_GRACE_MS = 150_000;
+export const CHATGPT_FIRST_RESPONSE_STALL_MS = 180_000;
 /**
  * How long a staged Bigger Context part may take to produce its assistant turn. A staged part is two
  * orders of magnitude larger than an ordinary prompt and ChatGPT reads all of it before answering.
@@ -1315,14 +1316,21 @@ export interface BrowserTurn {
 }
 
 export function chatGptRetryableFailureCanRetainConversation(
-  turn: Pick<BrowserTurn, "conversationKey" | "retainConversationOnRetry" | "externalProgress">,
+  turn: Pick<BrowserTurn, "conversationKey" | "retainConversation" | "retainConversationOnRetry" | "externalProgress">,
   error: unknown,
 ): boolean {
-  if (!turn.conversationKey || turn.retainConversationOnRetry !== true) return false;
+  if (!turn.conversationKey) return false;
   if (!(error instanceof ChatGptWebAdapterError) || error.retryable !== true) return false;
   if (error.code !== "upstream_server_error"
     && error.code !== "chatgpt_response_page_rebind_failed"
-    && error.code !== "browser_response_stalled") return false;
+    && error.code !== "browser_response_stalled"
+    && error.code !== "browser_first_response_stalled") return false;
+  // The first-response stall happens before any Codex tool event can be recorded. The accepted
+  // submission itself is the recovery evidence; later transport failures still require progress.
+  if (error.code === "browser_first_response_stalled") {
+    return turn.retainConversation === true || turn.retainConversationOnRetry === true;
+  }
+  if (turn.retainConversationOnRetry !== true) return false;
   const progress = turn.externalProgress?.snapshot();
   return (progress?.revision ?? 0) > 0;
 }
@@ -3337,24 +3345,18 @@ export class ChatGptBrowserWorker {
     graceMs: number = CHATGPT_RESPONSE_DOM_GRACE_MS,
     completionTracker?: ChatGptCompletionTracker,
     recoverObservation?: ChatGptObservationRecovery,
+    retryableFirstResponseStall = true,
   ): Promise<ChatGptAssistantTurnBinding> {
     let observationPage = page;
     let observationBaseline = baseline;
     let recoveryAttempts = 0;
-    let responseDeadline = Math.min(
-      deadline ?? Number.POSITIVE_INFINITY,
-      Date.now() + graceMs,
-    );
+    const firstResponseStallMs = Math.max(CHATGPT_FIRST_RESPONSE_STALL_MS, graceMs);
+    let firstResponseDeadline = Date.now() + firstResponseStallMs;
+    let lastProgressRevision = externalProgress?.snapshot().revision ?? 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
       if (observationPage.isClosed()) throw chatGptBrowserTabClosedError();
       let progress = externalProgress?.snapshot();
-      if (progress?.lastProgressAt !== undefined) {
-        responseDeadline = Math.min(
-          deadline ?? Number.POSITIVE_INFINITY,
-          Math.max(responseDeadline, progress.lastProgressAt + graceMs),
-        );
-      }
       if (deadline !== undefined && Date.now() >= deadline) {
         throw new Error("ChatGPT web turn timed out");
       }
@@ -3401,6 +3403,10 @@ export class ChatGptBrowserWorker {
       // acknowledging its boundary; the pre-probe snapshot can otherwise leave the broker waiting
       // despite this exact iteration having successfully observed the page.
       progress = externalProgress?.snapshot();
+      if (progress && progress.revision > lastProgressRevision) {
+        lastProgressRevision = progress.revision;
+        firstResponseDeadline = Date.now() + firstResponseStallMs;
+      }
       const identity = chatGptNewTurnIdentity(
         observationBaseline.initialTurnIdentities,
         state.responseIdentities,
@@ -3423,17 +3429,26 @@ export class ChatGptBrowserWorker {
         acceptedTurnIdentities: state.turnIdentities,
         acceptedUserTurnIdentities: state.userIdentities,
       };
-      // The power UI can expose Stop for a long reasoning phase before mounting any assistant
-      // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
-      if (state.visibleStopButtonCount > 0) {
-        responseDeadline = Math.min(deadline ?? Number.POSITIVE_INFINITY, Date.now() + graceMs);
+      if (Date.now() >= firstResponseDeadline
+        && !chatGptExternalToolCallsAreInFlight(progress)) {
+        if (state.visibleStopButtonCount > 0) {
+          await observationPage.locator(CHATGPT_STOP_BUTTON_SELECTOR).last().press("Enter", { timeout: 2_000 }).catch(() => {});
+        }
+        if (!retryableFirstResponseStall) {
+          throw new Error("ChatGPT accepted the message but did not expose its assistant turn in the DOM");
+        }
+        throw new ChatGptWebAdapterError(
+          "ChatGPT accepted the message but did not start an assistant response before its first-response deadline. Retry the turn; a retained browser conversation is reused when available.",
+          {
+            status: 504,
+            errorType: "server_error",
+            code: "browser_first_response_stalled",
+            retryable: true,
+          },
+        );
       }
-      // A delayed renderer wake can cross the grace while the assistant appears. Only a fresh
-      // observation can prove it is still missing; the explicit turn deadline remains above.
-      if (Date.now() >= responseDeadline
-        && !chatGptExternalProgressSuppressesDomHealth(progress, Date.now())) {
-        throw new Error("ChatGPT accepted the message but did not expose its assistant turn in the DOM");
-      }
+      // Stop visibility and heartbeat alone do not prove that the model started responding.
+      // A fresh DOM observation above still wins when an assistant turn appears on a delayed wake.
       await this.waitForTurnDomOrExternalProgress(
         observationPage,
         progress?.revision ?? 0,
@@ -5574,6 +5589,9 @@ export class ChatGptBrowserWorker {
                     return recovered;
                   }
                   : undefined,
+                // A staged part has not yet committed the full task context. It cannot use the
+                // active-turn retained-conversation recovery prompt if its acknowledgement fails.
+                false,
               );
               await this.waitForMultipartAcknowledgement(
                 page,

@@ -115,6 +115,27 @@ test("only retryable transport failures after proven tool progress retain an act
   )).toBeFalse();
 });
 
+test("an accepted first-response stall retains the active recovery conversation without tool progress", () => {
+  const stalled = new ChatGptWebAdapterError("first response stalled", {
+    status: 504, errorType: "server_error", code: "browser_first_response_stalled", retryable: true,
+  });
+  const turn = {
+    conversationKey: "a".repeat(64),
+    retainConversationOnRetry: true,
+    externalProgress: {
+      snapshot: () => ({ revision: 0, lastToolBatchRevision: 0, activeToolCalls: 0 }),
+      waitForChange: async () => { throw new Error("unused"); },
+      acknowledgeToolBatch: async () => {},
+    },
+  };
+  expect(chatGptRetryableFailureCanRetainConversation(turn, stalled)).toBeTrue();
+  expect(chatGptRetryableFailureCanRetainConversation({
+    ...turn, retainConversationOnRetry: false, retainConversation: true,
+  }, stalled)).toBeTrue();
+  expect(chatGptRetryableFailureCanRetainConversation({ ...turn, conversationKey: undefined }, stalled)).toBeFalse();
+  expect(chatGptRetryableFailureCanRetainConversation({ ...turn, retainConversationOnRetry: false }, stalled)).toBeFalse();
+});
+
 test("completion receipt settlement gets a bounded grace window before recovery", async () => {
   expect(CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS).toBe(2_000);
   let calls = 0;
@@ -1371,6 +1392,7 @@ test("missing-assistant expiry checks fresh DOM after a delayed wake while prese
     filter() { return this; },
     last() { return this; },
     isVisible: async () => false,
+    press: async () => {},
   };
   const assistantLocator = { id: "assistant" };
   const page = {
@@ -1409,23 +1431,182 @@ test("missing-assistant expiry checks fresh DOM after a delayed wake while prese
       worker.waitForTurnDomOrExternalProgress = async () => {
         if (++waits > (scenario === "running" ? 2 : 1)) throw new Error("missing response was allowed to wait past its grace");
         // Renderer or scheduler resumes after the response grace with a newly rendered turn.
-        now += CHATGPT_RESPONSE_DOM_GRACE_MS + 1;
+        now += 180_001;
       };
       const result = worker.waitForNewAssistantTurn(
         page,
         { initialTurnIdentities: [], domCache: {} },
         scenario === "turn-deadline" ? now + CHATGPT_RESPONSE_DOM_GRACE_MS : undefined,
       );
-      if (scenario === "appeared" || scenario === "running") {
+      if (scenario === "appeared") {
         await expect(result).resolves.toMatchObject({ identity: "conversation-turn-assistant", locator: assistantLocator });
       } else {
-        await expect(result).rejects.toThrow(scenario === "missing" || scenario === "stopped"
-          ? "ChatGPT accepted the message but did not expose its assistant turn in the DOM"
+        await expect(result).rejects.toThrow(scenario === "missing" || scenario === "stopped" || scenario === "running"
+          ? "ChatGPT accepted the message but did not start an assistant response"
           : "ChatGPT web turn timed out");
       }
-      expect(observations).toBe(scenario === "turn-deadline" ? 1 : scenario === "running" ? 3 : 2);
-      expect(waits).toBe(scenario === "running" ? 2 : 1);
+      expect(observations).toBe(scenario === "turn-deadline" ? 1 : 2);
+      expect(waits).toBe(1);
     }
+  } finally {
+    Date.now = realDateNow;
+  }
+});
+
+test("a submitted turn with only heartbeat and Stop visible fails after three minutes without an assistant", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web",
+    baseUrl: `browser://first-response-stall-${Math.random()}`,
+    chatgptWeb: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+  }) as unknown as {
+    waitForNewAssistantTurn(page: Page, baseline: { initialTurnIdentities: string[]; domCache: Record<string, unknown> }, deadline: number | undefined): Promise<unknown>;
+    submissionDomState(): Promise<{ turnIdentities: string[]; userIdentities: string[]; responseIdentities: string[]; visibleStopButtonCount: number }>;
+    waitForTurnDomOrExternalProgress(): Promise<void>;
+  };
+  let now = 1_000;
+  let waits = 0;
+  let stops = 0;
+  const realDateNow = Date.now;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({
+      filter() { return this; },
+      last() { return this; },
+      isVisible: async () => false,
+      press: async () => { stops += 1; },
+    }),
+  } as unknown as Page;
+  worker.submissionDomState = async () => ({
+    turnIdentities: ["conversation-turn-user"],
+    userIdentities: ["conversation-turn-user"],
+    responseIdentities: [],
+    visibleStopButtonCount: 1,
+  });
+  worker.waitForTurnDomOrExternalProgress = async () => {
+    if (++waits > 3) throw new Error("first-response watchdog allowed heartbeat-only waiting past three minutes");
+    now += 60_000;
+  };
+  try {
+    Date.now = () => now;
+    const result = worker.waitForNewAssistantTurn(page, { initialTurnIdentities: [], domCache: {} }, undefined);
+    await expect(result).rejects.toMatchObject({
+      code: "browser_first_response_stalled", status: 504, retryable: true,
+    });
+    expect(now).toBe(181_000);
+    expect(stops).toBe(1);
+  } finally {
+    Date.now = realDateNow;
+  }
+});
+
+test("a submitted turn without Stop waits the full first-response budget before retrying", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web",
+    baseUrl: `browser://first-response-no-stop-${Math.random()}`,
+    chatgptWeb: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+  }) as unknown as {
+    waitForNewAssistantTurn(page: Page, baseline: { initialTurnIdentities: string[]; domCache: Record<string, unknown> }, deadline: number | undefined): Promise<unknown>;
+    submissionDomState(): Promise<{ turnIdentities: string[]; userIdentities: string[]; responseIdentities: string[]; visibleStopButtonCount: number }>;
+    waitForTurnDomOrExternalProgress(): Promise<void>;
+  };
+  let now = 1_000;
+  let waits = 0;
+  const realDateNow = Date.now;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({ filter() { return this; }, last() { return this; }, isVisible: async () => false }),
+  } as unknown as Page;
+  worker.submissionDomState = async () => ({
+    turnIdentities: ["conversation-turn-user"],
+    userIdentities: ["conversation-turn-user"],
+    responseIdentities: [],
+    visibleStopButtonCount: 0,
+  });
+  worker.waitForTurnDomOrExternalProgress = async () => {
+    if (++waits > 2) throw new Error("first-response watchdog did not expire");
+    now += waits === 1 ? 150_001 : 29_999;
+  };
+  try {
+    Date.now = () => now;
+    await expect(worker.waitForNewAssistantTurn(page, { initialTurnIdentities: [], domCache: {} }, undefined))
+      .rejects.toMatchObject({ code: "browser_first_response_stalled", retryable: true });
+    expect(waits).toBe(2);
+  } finally {
+    Date.now = realDateNow;
+  }
+});
+
+test("a staged context part keeps its longer acknowledgement deadline without claiming active-turn recovery", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web",
+    baseUrl: `browser://staged-acknowledgement-${Math.random()}`,
+    chatgptWeb: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+  }) as unknown as {
+    waitForNewAssistantTurn(
+      page: Page,
+      baseline: { initialTurnIdentities: string[]; domCache: Record<string, unknown> },
+      deadline: number | undefined,
+      signal?: AbortSignal,
+      externalProgress?: ChatGptExternalTurnProgress,
+      graceMs?: number,
+      completionTracker?: ChatGptCompletionTracker,
+      recoverObservation?: unknown,
+      retryableFirstResponseStall?: boolean,
+    ): Promise<unknown>;
+    submissionDomState(): Promise<{ turnIdentities: string[]; userIdentities: string[]; responseIdentities: string[]; visibleStopButtonCount: number }>;
+    waitForTurnDomOrExternalProgress(): Promise<void>;
+  };
+  let now = 1_000;
+  const realDateNow = Date.now;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({ filter() { return this; }, last() { return this; }, isVisible: async () => false }),
+  } as unknown as Page;
+  worker.submissionDomState = async () => ({
+    turnIdentities: ["conversation-turn-user"], userIdentities: ["conversation-turn-user"],
+    responseIdentities: [], visibleStopButtonCount: 0,
+  });
+  worker.waitForTurnDomOrExternalProgress = async () => { now += 450_001; };
+  try {
+    Date.now = () => now;
+    await expect(worker.waitForNewAssistantTurn(
+      page, { initialTurnIdentities: [], domCache: {} }, undefined,
+      undefined, undefined, 450_000, undefined, undefined, false,
+    )).rejects.toThrow("ChatGPT accepted the message but did not expose its assistant turn in the DOM");
+  } finally {
+    Date.now = realDateNow;
+  }
+});
+
+test("an assistant turn appearing before the first-response deadline enters normal response observation", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web",
+    baseUrl: `browser://first-response-arrives-${Math.random()}`,
+    chatgptWeb: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+  }) as unknown as {
+    waitForNewAssistantTurn(page: Page, baseline: { initialTurnIdentities: string[]; domCache: Record<string, unknown> }, deadline: number | undefined): Promise<{ identity: string }>;
+    submissionDomState(): Promise<{ turnIdentities: string[]; userIdentities: string[]; responseIdentities: string[]; visibleStopButtonCount: number }>;
+    waitForTurnDomOrExternalProgress(): Promise<void>;
+  };
+  let now = 1_000;
+  let waits = 0;
+  const realDateNow = Date.now;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({ filter() { return this; }, last() { return this; }, isVisible: async () => false }),
+  } as unknown as Page;
+  worker.submissionDomState = async () => ({
+    turnIdentities: waits === 2 ? ["conversation-turn-user", "conversation-turn-assistant"] : ["conversation-turn-user"],
+    userIdentities: ["conversation-turn-user"],
+    responseIdentities: waits === 2 ? ["conversation-turn-assistant"] : [],
+    visibleStopButtonCount: 1,
+  });
+  worker.waitForTurnDomOrExternalProgress = async () => { waits += 1; now += 89_000; };
+  try {
+    Date.now = () => now;
+    await expect(worker.waitForNewAssistantTurn(page, { initialTurnIdentities: [], domCache: {} }, undefined))
+      .resolves.toMatchObject({ identity: "conversation-turn-assistant" });
+    expect(waits).toBe(2);
   } finally {
     Date.now = realDateNow;
   }
