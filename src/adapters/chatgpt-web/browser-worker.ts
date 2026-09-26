@@ -6051,13 +6051,14 @@ export class ChatGptBrowserWorker {
                   },
                 );
               }
-              completionReceiptRecoveryState = advanceChatGptCompletionReceiptRecovery(
+              const recoveryDecision = advanceChatGptCompletionReceiptRecovery(
                 completionReceiptRecoveryState,
                 externalProgressSnapshot?.revision ?? 0,
               );
-              const completionReceiptRecoveries = completionReceiptRecoveryState.recoveries;
-              if (!completionReceiptRecoveryState.allowed) {
-                const stalled = completionReceiptRecoveryState.noProgressRecoveries
+              completionReceiptRecoveryState = recoveryDecision;
+              const completionReceiptRecoveries = recoveryDecision.recoveries;
+              if (!recoveryDecision.allowed) {
+                const stalled = recoveryDecision.noProgressRecoveries
                   > MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES;
                 throw new ChatGptWebAdapterError(
                   stalled
@@ -6074,7 +6075,7 @@ export class ChatGptBrowserWorker {
               await diagnostics.capture(page, `completion-receipt-recovery-${completionReceiptRecoveries}`);
               console.warn(
                 `[chatgpt-web] browser turn ${turn.traceId} rejected premature DOM completion; requesting continuation ${completionReceiptRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES}`
-                + ` (progressed=${completionReceiptRecoveryState.progressed}, noProgress=${completionReceiptRecoveryState.noProgressRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES}, progressRevision=${completionReceiptRecoveryState.progressRevision})`,
+                + ` (progressed=${recoveryDecision.progressed}, noProgress=${recoveryDecision.noProgressRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES}, progressRevision=${recoveryDecision.progressRevision})`,
               );
               turn.onCommentary?.(
                 "ChatGPT reached a final boundary before certifying the full request; continuing unfinished work automatically.",
