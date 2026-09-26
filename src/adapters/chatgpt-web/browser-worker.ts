@@ -1325,9 +1325,37 @@ export function chatGptRetryableFailureCanRetainConversation(
   return (progress?.revision ?? 0) > 0;
 }
 
-export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 2;
+export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 64;
+export const MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES = 2;
 export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 2_000;
 const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
+
+export interface ChatGptCompletionReceiptRecoveryState {
+  recoveries: number;
+  noProgressRecoveries: number;
+  progressRevision: number;
+}
+
+export function advanceChatGptCompletionReceiptRecovery(
+  state: ChatGptCompletionReceiptRecoveryState,
+  currentProgressRevision: number,
+): ChatGptCompletionReceiptRecoveryState & { progressed: boolean; allowed: boolean } {
+  const normalizedRevision = Number.isSafeInteger(currentProgressRevision) && currentProgressRevision >= 0
+    ? currentProgressRevision
+    : state.progressRevision;
+  const progressed = normalizedRevision > state.progressRevision;
+  const next = {
+    recoveries: state.recoveries + 1,
+    noProgressRecoveries: progressed ? 0 : state.noProgressRecoveries + 1,
+    progressRevision: Math.max(state.progressRevision, normalizedRevision),
+  };
+  return {
+    ...next,
+    progressed,
+    allowed: next.recoveries <= MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES
+      && next.noProgressRecoveries <= MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES,
+  };
+}
 
 export async function waitForChatGptCompletionReceipt(
   receiptReady: () => Promise<boolean>,
@@ -1356,6 +1384,8 @@ export function chatGptCompletionReceiptRecoveryPrompt(
       "</codex_native_turn_recovery_json>",
       "Use exactly the turn_token above for every Codex Native call in this recovery. Do not reconstruct it, alter it, or reuse a token from earlier task history.",
     ] : []),
+    "The bridge rejected that final-answer boundary: the Codex task is still open, and final prose cannot complete it until codex_turn_complete is accepted.",
+    "Resume from the next unfinished action in this existing conversation. Preserve verified work already completed; do not restart from the beginning or merely restate the request.",
     "Do not repeat the progress report as a final answer.",
     "Re-read the entire active user request and continue every remaining independently actionable requirement with Codex Native tools.",
     "A missing asset or blocker for one branch does not permit stopping while independent research, implementation, tests, validation, or documentation can still be completed.",
@@ -5764,7 +5794,11 @@ export class ChatGptBrowserWorker {
       let sawRunning = false;
       let loggedCompletionWait = false;
       let capturedResponse = false;
-      let completionReceiptRecoveries = 0;
+      let completionReceiptRecoveryState: ChatGptCompletionReceiptRecoveryState = {
+        recoveries: 0,
+        noProgressRecoveries: 0,
+        progressRevision: 0,
+      };
       const sentAt = Date.now();
       let visibleTrace = new ChatGptVisibleTraceTracker();
       let markdownBuffer = new ChatGptMarkdownBuffer();
@@ -6017,10 +6051,18 @@ export class ChatGptBrowserWorker {
                   },
                 );
               }
-              completionReceiptRecoveries += 1;
-              if (completionReceiptRecoveries > MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES) {
+              completionReceiptRecoveryState = advanceChatGptCompletionReceiptRecovery(
+                completionReceiptRecoveryState,
+                externalProgressSnapshot?.revision ?? 0,
+              );
+              const completionReceiptRecoveries = completionReceiptRecoveryState.recoveries;
+              if (!completionReceiptRecoveryState.allowed) {
+                const stalled = completionReceiptRecoveryState.noProgressRecoveries
+                  > MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES;
                 throw new ChatGptWebAdapterError(
-                  "ChatGPT repeatedly tried to finish the Codex task without an accepted full-task completion receipt.",
+                  stalled
+                    ? "ChatGPT repeatedly reached a final boundary without an accepted full-task completion receipt or any new Codex Native progress."
+                    : `ChatGPT exceeded the hard safety cap of ${MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES} completion-receipt recoveries without certifying the full task.`,
                   {
                     status: 502,
                     errorType: "server_error",
@@ -6031,7 +6073,8 @@ export class ChatGptBrowserWorker {
               }
               await diagnostics.capture(page, `completion-receipt-recovery-${completionReceiptRecoveries}`);
               console.warn(
-                `[chatgpt-web] browser turn ${turn.traceId} rejected premature DOM completion; requesting continuation ${completionReceiptRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES}`,
+                `[chatgpt-web] browser turn ${turn.traceId} rejected premature DOM completion; requesting continuation ${completionReceiptRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES}`
+                + ` (progressed=${completionReceiptRecoveryState.progressed}, noProgress=${completionReceiptRecoveryState.noProgressRecoveries}/${MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES}, progressRevision=${completionReceiptRecoveryState.progressRevision})`,
               );
               turn.onCommentary?.(
                 "ChatGPT reached a final boundary before certifying the full request; continuing unfinished work automatically.",
