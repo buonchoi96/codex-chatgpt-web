@@ -5,6 +5,7 @@ import {
   chatGptPromptJsonBytes,
   chatGptReadOnlyContextWarning,
   compileChatGptWebPrompt,
+  compiledChatGptWebArchiveTextFileFallback,
   compiledChatGptWebCompactionTextOnlyFallback,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
