@@ -97,6 +97,12 @@ test("only retryable transport failures after proven tool progress retain an act
   )).toBeTrue();
   expect(chatGptRetryableFailureCanRetainConversation(
     turn,
+    new ChatGptWebAdapterError("stalled stream", {
+      status: 504, errorType: "server_error", code: "browser_response_stalled", retryable: true,
+    }),
+  )).toBeTrue();
+  expect(chatGptRetryableFailureCanRetainConversation(
+    turn,
     new ChatGptWebAdapterError("capability dead", {
       status: 503, errorType: "connector_error", code: "chatgpt_developer_mcp_conversation_unavailable", retryable: true,
     }),
