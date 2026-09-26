@@ -1396,6 +1396,17 @@ export function chatGptCompletionReceiptRecoveryPrompt(
   ].join("\n");
 }
 
+export function chatGptStreamRecoveryPollingTimedOut(
+  visibleText: string,
+  traceBlocks: readonly ChatGptVisibleTraceBlock[] = [],
+): boolean {
+  const timedOut = (text: string): boolean => (
+    text.replace(/\s+/g, " ").trim().toLowerCase() === "chatgpt stream recovery polling timed out"
+  );
+  return timedOut(visibleText)
+    || traceBlocks.some(block => block.kind === "status" && timedOut(block.text));
+}
+
 export function chatGptFinalIndicatesSafetyBlocked(text: string): boolean {
   const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
   if (!normalized) return false;
@@ -1788,7 +1799,7 @@ export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 15 * 60_000;
  * or native-tool progress is not useful liveness. Bound that silent-running state so a wedged Web
  * generation becomes a retryable adapter failure instead of looking alive forever.
  */
-export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 750_000;
+export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
 /** Near-1M compaction can spend materially longer in backend reasoning than an ordinary turn. */
 export const CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 
@@ -1810,9 +1821,15 @@ export class ChatGptRunningProgressTracker {
       this.lastProgressAt = undefined;
       return false;
     }
+    // ChatGPT's own reconnect / stream-recovery UI can mutate status rows for many minutes
+    // without the model producing new output. Status-only churn is not semantic task progress:
+    // native tool activity is tracked separately, while real assistant commentary remains a
+    // liveness signal here.
     const signature = JSON.stringify([
       state.visibleText,
-      state.traceBlocks.map(block => [block.kind, block.key ?? null, block.text, block.complete ?? null]),
+      state.traceBlocks
+        .filter(block => block.kind === "commentary")
+        .map(block => [block.kind, block.key ?? null, block.text, block.complete ?? null]),
       state.externalLastProgressAt ?? null,
     ]);
     if (state.externalToolCallsInFlight || this.signature !== signature || this.lastProgressAt === undefined) {
@@ -5927,6 +5944,18 @@ export class ChatGptBrowserWorker {
           }
         }
         if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
+        if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
+          await diagnostics.capture(page, "stream-recovery-polling-timeout").catch(() => {});
+          throw new ChatGptWebAdapterError(
+            "ChatGPT stream recovery polling timed out after the browser response stopped advancing. Retry the active Codex turn.",
+            {
+              status: 502,
+              errorType: "server_error",
+              code: "upstream_server_error",
+              retryable: true,
+            },
+          );
+        }
         if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
         // The page was read successfully, so the fault budget is genuinely consecutive even when
         // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
