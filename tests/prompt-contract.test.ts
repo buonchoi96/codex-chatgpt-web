@@ -706,8 +706,20 @@ test("keeps large contexts intact inside one archive while the composer stays sm
   expect(compiled.text).not.toContain(largeContent);
   expect(compiled.archive!.contextText.length).toBeGreaterThan(600_000);
   expect(compiled.archive!.contextText).toContain(largeContent);
-  expect(compiled.archive!.contextText).toContain(token);
+  // The live capability must stay in the current user message. Hiding it only inside an uploaded
+  // ZIP can leave ChatGPT with the connector visually selected but without an actionable current
+  // turn capability.
+  expect(compiled.text).toContain(`<codex_native_turn_json>`);
+  expect(compiled.text).toContain(token);
+  expect(compiled.text).toContain("supersedes any retired or historical capability handle");
+  expect(compiled.archive!.contextText).not.toContain(token);
+  expect(compiled.archive!.contextText).toContain("current live turn capability is supplied inline");
   expect(compiled.archive!.contextText).toContain(`<codex_context_json>`);
   expect(compiled.text).toContain("context.txt");
   expect(compiled.text).toContain("Codex Native2");
+
+  const textFallback = compiledChatGptWebArchiveTextFileFallback(compiled);
+  expect(textFallback.text).toContain(`<codex_native_turn_json>`);
+  expect(textFallback.text).toContain(token);
+  expect(textFallback.contextFile?.text).not.toContain(token);
 });

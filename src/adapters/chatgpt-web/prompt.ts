@@ -190,11 +190,26 @@ export const CHATGPT_CONTEXT_ARCHIVE_INLINE_CHAR_THRESHOLD = 100_000;
 export const CHATGPT_CONTEXT_ARCHIVE_IMAGE_THRESHOLD = 4;
 export const CHATGPT_CONTEXT_ARCHIVE_UNREADABLE_MARKER = "CODEX_CONTEXT_ARCHIVE_UNREADABLE";
 
+const LIVE_TURN_CONTROL_BLOCK = /<codex_native_turn_json>\n[\s\S]*?\n<\/codex_native_turn_json>/;
+
+function liveTurnControlBlock(text: string): string | undefined {
+  return text.match(LIVE_TURN_CONTROL_BLOCK)?.[0];
+}
+
+function withoutLiveTurnControlBlock(text: string): string {
+  return text.replace(LIVE_TURN_CONTROL_BLOCK, [
+    "<codex_native_turn_json>",
+    "[current live turn capability is supplied inline in the outer ChatGPT message]",
+    "</codex_native_turn_json>",
+  ].join("\n"));
+}
+
 function archivedContextPrompt(
   compiled: CompiledChatGptWebPrompt,
   compaction: boolean,
 ): CompiledChatGptWebPrompt {
-  const contextText = compiled.text
+  const liveTurnControl = liveTurnControlBlock(compiled.text);
+  const contextText = withoutLiveTurnControlBlock(compiled.text)
     .replace(
       "Each image_attachment in the context refers to the correspondingly named image attached to this ChatGPT message; inspect it directly.",
       "Each image_attachment in the context refers to a file under images/ in the attached context ZIP; resolve it through manifest.json and inspect that file directly.",
@@ -211,6 +226,11 @@ function archivedContextPrompt(
     .slice(0, 16);
   const name = `codex-context-${digest}.zip`;
   const text = [
+    ...(liveTurnControl ? [
+      "Current live Codex Native capability for this exact browser turn:",
+      liveTurnControl,
+      "Use exactly the inline turn_token above for every Codex Native call in this response. It supersedes any retired or historical capability handle inside task history. Do not reconstruct it from context.txt or any attachment.",
+    ] : []),
     `A complete Codex context bundle is attached as ${name}. Open and inspect this ZIP before responding.`,
     "Archive layout:",
     "- context.txt: the complete Codex transport contract and canonical task history. Read it fully first and preserve its original instruction priorities.",
@@ -311,9 +331,15 @@ export function compiledChatGptWebArchiveTextFileFallback(
   const skillFiles = new Map((prepared.skillFiles ?? []).map(file => [file.name, file] as const));
   const rewritten = rewriteInlineCompactionEnvelope(prepared.archive.contextText, skillFiles);
   const stem = prepared.archive.name.replace(/\.zip$/i, "");
+  const liveTurnControl = liveTurnControlBlock(prepared.text);
   return {
     ...prepared,
     text: [
+      ...(liveTurnControl ? [
+        "Current live Codex Native capability for this exact browser turn:",
+        liveTurnControl,
+        "Use exactly the inline turn_token above for every Codex Native call in this response. Do not recover a token from the attached text file.",
+      ] : []),
       "The preferred ZIP context bundle was unavailable on this ChatGPT surface.",
       "Read the attached UTF-8 context file completely before responding.",
       "Historical image payloads are omitted only in this fallback. Preserve visual conclusions already recorded in text and re-observe the native UI later if fresh visual evidence is still required.",
