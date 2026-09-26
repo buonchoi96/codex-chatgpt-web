@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
-import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError, chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
+import { ChatGptWebAdapterError, chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
 import {
   ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS,
+  COMPACTION_HANDOFF_FINAL_SETTLE_GRACE_MS,
   MAX_COMPACTION_HANDOFF_TIMEOUT_MS,
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
@@ -325,8 +326,9 @@ test("active compaction drains an MCP call already queued without an outer Codex
   }
 });
 
-test("a completed retained agent returns an exact checkpoint and its browser is physically retired", async () => {
+test("a completed retained agent waits for the handoff response to settle naturally", async () => {
   expect(MAX_COMPACTION_HANDOFF_TIMEOUT_MS).toBe(15 * 60_000);
+  expect(COMPACTION_HANDOFF_FINAL_SETTLE_GRACE_MS).toBe(10_000);
   const sourceRequest = request(false);
   const conversationKey = chatGptConversationKey(sourceRequest, "provider")!;
   const source = new ChatGptTurnSession({
@@ -340,7 +342,7 @@ test("a completed retained agent returns an exact checkpoint and its browser is 
     cancel() {},
   });
   let captured: BrowserTurn | undefined;
-  let browserRetired = false;
+  let browserSettledNaturally = false;
   let transactionAborted = false;
   let transactionTtl = 0;
   const broker = {
@@ -360,14 +362,9 @@ test("a completed retained agent returns an exact checkpoint and its browser is 
       const prepared = await turn.prepareResume!();
       expect(prepared.text).toContain("wire_name codex.control.compaction_handoff");
       prepared.release();
-      return await new Promise<string>((_resolve, reject) => {
-        const onAbort = () => {
-          browserRetired = true;
-          reject(new DOMException("retained handoff browser closed", "AbortError"));
-        };
-        if (turn.abortSignal?.aborted) onAbort();
-        else turn.abortSignal?.addEventListener("abort", onAbort, { once: true });
-      });
+      await Bun.sleep(1);
+      browserSettledNaturally = true;
+      return "Checkpoint handoff response settled";
     },
   };
 
@@ -385,8 +382,7 @@ test("a completed retained agent returns an exact checkpoint and its browser is 
   expect(captured?.requireRetainedConversation).toBeTrue();
   expect(captured?.nativeConnector).toBeTrue();
   expect(captured?.capabilities.localToolsEnabled).toBeFalse();
-  expect(browserRetired).toBeTrue();
-  expect(captured?.abortSignal?.reason).toBeInstanceOf(ChatGptCompactionHandoffAccepted);
+  expect(browserSettledNaturally).toBeTrue();
   expect(transactionAborted).toBeTrue();
   expect(transactionTtl).toBe(MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
 });

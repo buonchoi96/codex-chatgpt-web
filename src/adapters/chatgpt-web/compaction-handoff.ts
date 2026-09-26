@@ -146,6 +146,8 @@ function currentToolResults(
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 15 * 60_000;
 export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 15_000;
+/** Give a successful structured handoff time to render its natural final boundary before forced retirement. */
+export const COMPACTION_HANDOFF_FINAL_SETTLE_GRACE_MS = 10_000;
 
 function activeCompactionSourceStalledError(timeoutMs: number): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
@@ -186,6 +188,26 @@ function withCompactionAbort<T>(promise: Promise<T>, signal?: AbortSignal): Prom
       },
     );
   });
+}
+
+async function waitForCompactionBrowserSettlement(
+  browser: Promise<string>,
+  signal: AbortSignal,
+  graceMs: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const grace = new Promise<boolean>(resolve => {
+    timer = setTimeout(() => resolve(false), Math.max(0, graceMs));
+    timer.unref?.();
+  });
+  try {
+    return await withCompactionAbort(Promise.race([
+      browser.then(() => true),
+      grace,
+    ]), signal);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function settleActiveCompactionSource(
@@ -395,14 +417,23 @@ export async function requestRetainedCompactionHandoff(
       ]),
       operationSignal,
     );
-    // The one-shot control submission is the terminal event for this purpose-built response.
-    // ChatGPT may render no assistant text after a tool-only response, and therefore no Copy
-    // action. End our owned turn explicitly and wait for the launcher/helper cleanup handshake.
-    browserAbort.abort(new ChatGptCompactionHandoffAccepted());
-    await withCompactionAbort(
-      browser.then(() => undefined, () => undefined),
+    // The structured control submission already carries the authoritative checkpoint, but do not
+    // finish the outer /compact turn while ChatGPT is still visibly reasoning. Give the owned Web
+    // response a bounded chance to reach its natural final boundary first. Some Web builds still
+    // expose no terminal assistant action after a tool-only response, so retain the accepted-handoff
+    // abort as a fallback rather than turning a successful checkpoint into an unbounded wait.
+    const settledNaturally = await waitForCompactionBrowserSettlement(
+      browser,
       operationSignal,
+      Math.min(COMPACTION_HANDOFF_FINAL_SETTLE_GRACE_MS, operationTimeoutMs),
     );
+    if (!settledNaturally) {
+      browserAbort.abort(new ChatGptCompactionHandoffAccepted());
+      await withCompactionAbort(
+        browser.then(() => undefined, () => undefined),
+        operationSignal,
+      );
+    }
     return summary;
   } finally {
     browserAbort.abort();

@@ -1337,7 +1337,7 @@ export function chatGptRetryableFailureCanRetainConversation(
 
 export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 64;
 export const MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES = 2;
-export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 2_000;
+export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 10_000;
 const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
 
 export interface ChatGptCompletionReceiptRecoveryState {
@@ -6130,7 +6130,6 @@ export class ChatGptBrowserWorker {
                 "ChatGPT reached a final boundary before certifying the full request; continuing unfinished work automatically.",
               );
               bufferedFinalDeltas = [];
-              submissionBaseline = await this.captureSubmissionBaseline(page);
               completionTracker = new ChatGptCompletionTracker();
               const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();
               await this.runStage(
@@ -6155,6 +6154,11 @@ export class ChatGptBrowserWorker {
                 chatGptSuspensionClock,
                 true,
               );
+              // Connector selection can run a personalization proof that itself submits a temporary
+              // ChatGPT message. Capture the semantic submission baseline only after attachment and
+              // connector preflight have finished, otherwise the real recovery send can appear as
+              // two new conversation turns and poison the same-chat continuation.
+              submissionBaseline = await this.captureSubmissionBaseline(page);
               await this.runStage(
                 turn.traceId,
                 `completion_receipt_recovery_${completionReceiptRecoveries}_send`,

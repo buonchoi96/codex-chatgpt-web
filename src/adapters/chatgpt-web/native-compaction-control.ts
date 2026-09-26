@@ -68,7 +68,7 @@ export function structuredCompactionHandoffInstruction(
     "Automatic Codex context compaction has started. Stop ordinary task work and do not call any more work tools.",
     COMPACT_PROMPT,
     ...compactionControlBinding(transaction),
-    "After the control call returns submitted=true, call no more tools. The bridge will close this one-purpose Web response after accepting the checkpoint.",
-    "The outer bridge accepts compaction only after the structured checkpoint is valid and its owned browser turn has physically settled.",
+    "After the control call returns submitted=true, call no more tools. Finish this one-purpose Web response normally with a brief final acknowledgement; do not regenerate or repeat the checkpoint text.",
+    "The outer bridge accepts compaction only after the structured checkpoint is valid and gives the owned browser turn a bounded chance to reach its natural final boundary before forced retirement.",
   ].join("\n");
 }

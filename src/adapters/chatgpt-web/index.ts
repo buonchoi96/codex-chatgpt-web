@@ -730,7 +730,7 @@ export function createChatGptWebAdapter(
         ...(parsed._compactionRequest ? { compaction: true } : {}),
         ...submissionLifecycle,
         ...multipartProgressLifecycle,
-        onReasoningSummary: (text, continuation) => trace.push({ kind: "reasoning", text, ...(continuation ? { continuation: true } : {}) }),
+        onReasoningSummary: (text, continuation) => trace.push({ kind: parsed.options.hideThinkingSummary && !parsed._compactionRequest ? "commentary" : "reasoning", text, ...(continuation ? { continuation: true } : {}) }),
         onCommentary: (text, continuation) => trace.push({ kind: "commentary", text, ...(continuation ? { continuation: true } : {}) }),
         onTextDelta: delta => text.push(delta),
         ...(captureLunaCheckpoint ? {
@@ -806,7 +806,7 @@ export function createChatGptWebAdapter(
       ...(parsed._compactionRequest ? { compaction: true } : {}),
       ...submissionLifecycle,
       ...multipartProgressLifecycle,
-      onReasoningSummary: (text, continuation) => trace.push({ kind: "reasoning", text, ...(continuation ? { continuation: true } : {}) }),
+      onReasoningSummary: (text, continuation) => trace.push({ kind: parsed.options.hideThinkingSummary && !parsed._compactionRequest ? "commentary" : "reasoning", text, ...(continuation ? { continuation: true } : {}) }),
       onCommentary: (text, continuation) => trace.push({ kind: "commentary", text, ...(continuation ? { continuation: true } : {}) }),
       onTextDelta: delta => text.push(delta),
       externalProgress,

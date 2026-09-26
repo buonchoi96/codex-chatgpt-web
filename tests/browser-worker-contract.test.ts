@@ -137,7 +137,7 @@ test("an accepted first-response stall retains the active recovery conversation 
 });
 
 test("completion receipt settlement gets a bounded grace window before recovery", async () => {
-  expect(CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS).toBe(2_000);
+  expect(CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS).toBe(10_000);
   let calls = 0;
   expect(await waitForChatGptCompletionReceipt(async () => {
     calls += 1;
