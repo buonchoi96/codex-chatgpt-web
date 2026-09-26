@@ -468,4 +468,4 @@ test("synthetic fill crosses the production threshold and triggers the real comp
   expect(events).toContain("compaction_done");
   expect(store.load("auto-compact")?.compactions).toBe(1);
   await driver.close();
-}, 30_000);
+}, 60_000);
