@@ -724,3 +724,10 @@ test("keeps large contexts intact inside one archive while the composer stays sm
   expect(textFallback.text).toContain(token);
   expect(textFallback.contextFile?.text).not.toContain(token);
 });
+
+
+test("compaction prompt preserves exact post-compaction validation probes", () => {
+  expect(COMPACT_PROMPT).toContain("Exact validation sentinels, probe labels and values");
+  expect(COMPACT_PROMPT).toContain("copy them verbatim");
+  expect(COMPACT_PROMPT).toContain("promised post-compaction validations");
+});
