@@ -3126,9 +3126,14 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
     isVisible: async () => false,
   };
   const visibleControls = { count: async () => 0 };
+  const page = {
+    locator: () => hiddenDialog,
+    getByRole: () => ({ filter: () => ({ count: async () => 0 }) }),
+  };
   const composerForm = {
     locator: () => ({ filter: () => visibleControls }),
     getByRole: () => ({ filter: () => ({ count: async () => 0 }) }),
+    page: () => page,
   };
   const composer = { locator: () => composerForm };
   const selectModelAndEffort = (ChatGptBrowserWorker.prototype as unknown as {
@@ -3143,9 +3148,7 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
 
   const mode = await selectModelAndEffort.call({
     activeComposer: async () => composer,
-  }, {
-    locator: () => hiddenDialog,
-  }, "gpt-5.6-luna", "low", {
+  }, page, "gpt-5.6-luna", "low", {
     localToolsEnabled: true,
     solAvailable: false,
     extraHighAvailable: false, proAvailable: false,
