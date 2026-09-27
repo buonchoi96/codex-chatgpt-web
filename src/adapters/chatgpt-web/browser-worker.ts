@@ -3920,18 +3920,22 @@ export class ChatGptBrowserWorker {
         await this.assertPromptAttached(page, prompt, abortSignal);
         return;
       }
-      const selectedComposer = await this.selectConnector(
+      let selectedComposer = await this.selectConnector(
         page,
         captureDiagnostic,
         catalogRefreshAvailable,
         connectorAttemptBudget,
         abortSignal,
       );
-      // selectConnector owns and rolls back every mutation until it returns. From this point the
-      // attachment owns the selected pill and prompt text as one transaction.
+      // Selecting a connector pill can replace ChatGPT's Lexical editor. Do not derive Think-mode
+      // locators from the pre-reconciliation editor: Free/Go Luna Medium would otherwise wait on a
+      // detached composer and never activate /think. Reacquire before Think, then once more because
+      // applying /think can itself re-render the editor.
       composerMutationStarted = true;
       if (requireThink) {
+        selectedComposer = await this.activeComposer(page, 30_000, abortSignal);
         await setChatGptThinkMode(selectedComposer.locator("xpath=ancestor::form[1]"), true, captureDiagnostic, abortSignal);
+        selectedComposer = await this.activeComposer(page, 30_000, abortSignal);
       }
       await selectedComposer.focus({ signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
       await selectedComposer.press(CHATGPT_COMPOSER_DOCUMENT_END_KEY, {
