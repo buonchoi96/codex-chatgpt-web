@@ -11,7 +11,7 @@ import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adap
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { CHATGPT_CONNECTOR_NAME, DEV_CHATGPT_CONNECTOR_NAME, defaultChromeExecutable, legacyChatGptConnectorMigrationMessage } from "../src/config";
-import { CHATGPT_SEND_BUTTON_SELECTOR, parseChatGptEffortSliderState } from "../src/chatgpt-session";
+import { CHATGPT_COMPOSER_SELECTOR, CHATGPT_SEND_BUTTON_SELECTOR, parseChatGptEffortSliderState } from "../src/chatgpt-session";
 import { ChatGptExternalTurnProgress, chatGptExternalToolCallsAreInFlight } from "../src/adapters/chatgpt-web/turn-progress";
 import type { CodexProviderConfig } from "../src/types";
 import { compileChatGptWebPrompt, formatChatGptWebMultipartCommit, formatChatGptWebMultipartStage } from "../src/adapters/chatgpt-web/prompt";
@@ -3164,9 +3164,14 @@ function thinkSlashFixture() {
     waitFor: async () => { if (!state.optionCount) throw new Error("Think command is unavailable"); } };
   const rows = { filter: () => rows, first: () => row, count: async () => state.optionCount };
   const popup = { filter: () => popup, locator: () => rows, count: async () => state.popupCount };
-  const page = { locator: (selector: string) => selector === '[role="dialog"]' ? dialogPage("").page.locator(selector) : popup };
+  const page = {
+    locator: (selector: string) => selector === '[role="dialog"]'
+      ? dialogPage("").page.locator(selector)
+      : selector === CHATGPT_COMPOSER_SELECTOR ? composer : popup,
+    getByRole: () => ({ filter: () => controls }),
+  };
   const composer = {
-    filter: () => composer, first: () => composer, locator: () => composerForm,
+    filter: () => composer, first: () => composer, last: () => composer, locator: () => composerForm,
     evaluate: async () => ({ text: state.draft.trim(), connectors: [...state.connectors] }),
     focus: async () => {},
     fill: async (text: string) => { state.draft = text; state.connectors = []; },
