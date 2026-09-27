@@ -255,15 +255,32 @@ export async function settleActiveCompactionSource(
       // superseded source so the caller can retire it and rebuild the checkpoint from canonical
       // Codex history on a fresh browser surface.
       const sourceStalled = new Promise<never>((_resolve, reject) => {
-        sourceSettleTimer = setTimeout(() => {
-          const error = activeCompactionSourceStalledError(sourceSettleGraceMs);
-          console.warn(
-            `[chatgpt-web] active compaction source exceeded settle grace (${sourceSettleGraceMs}ms); cancelling retained source and rebuilding compaction`,
-          );
-          source.cancel(error);
-          reject(error);
-        }, sourceSettleGraceMs);
-        sourceSettleTimer.unref?.();
+        let deliveries = broker.compactionDeliveryCount(token!);
+        let deadline = Date.now() + sourceSettleGraceMs;
+        const poll = () => {
+          const now = Date.now();
+          const currentDeliveries = broker.compactionDeliveryCount(token!);
+          if (currentDeliveries > deliveries) {
+            deliveries = currentDeliveries;
+            deadline = now + sourceSettleGraceMs;
+            console.info(
+              `[chatgpt-web] active compaction source received interrupt delivery; reset settle grace (${sourceSettleGraceMs}ms)`,
+            );
+          }
+          const remaining = deadline - now;
+          if (remaining <= 0) {
+            const error = activeCompactionSourceStalledError(sourceSettleGraceMs);
+            console.warn(
+              `[chatgpt-web] active compaction source exceeded settle grace (${sourceSettleGraceMs}ms) after its latest compaction boundary; cancelling retained source and rebuilding compaction`,
+            );
+            source.cancel(error);
+            reject(error);
+            return;
+          }
+          sourceSettleTimer = setTimeout(poll, Math.min(250, remaining));
+          sourceSettleTimer.unref?.();
+        };
+        poll();
       });
 
       const browserOutcome = await withCompactionAbort(
