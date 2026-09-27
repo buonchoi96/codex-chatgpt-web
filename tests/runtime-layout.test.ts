@@ -18,6 +18,7 @@ import {
   resolveInteractionConnectorIdentities,
   runtimeCommandForProcess,
   ZERO_RISK_CHATGPT_CONNECTOR_NAME,
+  validateConnectorNameSuffix,
 } from "../src/config";
 import { removeLegacyRuntimeArtifacts } from "../src/service";
 import { processRunning } from "../src/process";

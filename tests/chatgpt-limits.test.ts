@@ -5,6 +5,7 @@ import {
   chatGptUsageModelFromAnnouncements,
   detectChatGptLimitsPlan,
   readChatGptUsageAccount,
+  supportsChatGptUsageTracking,
 } from "../src/adapters/chatgpt-web/limits";
 
 test("Free and Go plans are Luna-only while paid Sol-capable plan labels are not", () => {
@@ -62,7 +63,12 @@ test("unsupported plans and payment problems never activate browser plan inspect
     getByRole: () => { throw new Error("Must not touch the browser for this account"); },
   };
   expect((await detectChatGptLimitsPlan(page as never)).plan).toBe("unsupported");
-  planType = "pro";
-  needsAttention = true;
-  await expect(detectChatGptLimitsPlan(page as never)).rejects.toThrow("subscription payment problem");
+  for (const supported of ["pro", "prolite"]) {
+    planType = supported;
+    needsAttention = true;
+    await expect(detectChatGptLimitsPlan(page as never)).rejects.toThrow("subscription payment problem");
+  }
+  for (const personal of [false, true]) for (const planType of ["free", "plus", "pro", "prolite", "business", "unknown"]) {
+    expect(supportsChatGptUsageTracking({ personal, planType })).toBe(personal && ["pro", "prolite"].includes(planType));
+  }
 });

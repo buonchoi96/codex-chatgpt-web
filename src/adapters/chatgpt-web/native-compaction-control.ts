@@ -6,7 +6,8 @@ export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_R
 
 function compactionControlBinding(transaction: CompactionTransactionHandle): string[] {
   return [
-    "Submit the complete checkpoint through the attached Codex Native control plane by calling codex_tool_call exactly once with the binding below.",
+    "Submit the summary to the pending Codex task through the attached Codex Native plugin using codex_tool_call with the binding below.",
+    "The reserved codex.control.compaction_handoff operation stores this summary for task continuation. It does not run commands, read or edit files, or invoke other tools, and it is not listed by tool inventory.",
     "This one-shot control token is valid only for the reserved compaction operation; do not use it with codex_exec, codex_tool_inventory, or any outer Codex tool.",
     "<codex_compaction_control>",
     `turn_token ${transaction.token}`,
