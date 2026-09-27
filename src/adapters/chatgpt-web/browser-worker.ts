@@ -139,6 +139,28 @@ export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
 const CHATGPT_CONNECTOR_MENTION_QUERY = "@codex";
 const CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS = 10_000;
+
+/**
+ * ChatGPT currently has two selected-connector DOM representations:
+ * - legacy plugin pills: data-id/data-keyword
+ * - current app mentions: app-mention-path/app-mention-display-name
+ *
+ * Keep one canonical selector so Think-mode draft checks, prompt extraction, diagnostics and
+ * connector verification cannot drift and mistake a connector pill for user-authored prompt text.
+ */
+export function chatGptSelectedConnectorSelector(appName?: string): string {
+  const legacy = appName === undefined
+    ? '[data-id^="plugin:"][data-keyword]'
+    : `[data-id^="plugin:"][data-keyword=${JSON.stringify(appName)}]`;
+  const appMention = appName === undefined
+    ? '[app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]'
+    : `[app-mention-path^="app://"][app-mention-display-name=${JSON.stringify(appName)}][contenteditable="false"]`;
+  return `${legacy}, ${appMention}`;
+}
+
+export const CHATGPT_SELECTED_CONNECTOR_SELECTOR = chatGptSelectedConnectorSelector();
+export const CHATGPT_COMPOSER_NON_DRAFT_SELECTOR =
+  `${CHATGPT_SELECTED_CONNECTOR_SELECTOR}, [data-inline-selection-pill-cursor-target]`;
 const CHATGPT_SMOKE_TEXT = "Reply with exactly: CODEX WEB GPT READY";
 const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
 /**
@@ -1564,15 +1586,21 @@ export async function setChatGptThinkMode(
   const target = enabled ? "true" : "false";
   if (pressed !== target) {
     const composer = page.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true }).last();
-    const composerState = () => composer.evaluate(element => {
+    const composerState = () => composer.evaluate((element, selectors) => {
       const copy = element.cloneNode(true) as HTMLElement;
-      const pills = [...copy.querySelectorAll('[data-id^="plugin:"][data-keyword]')];
-      const connectors = pills.map(pill => pill.getAttribute("data-keyword")).sort();
-      for (const pill of pills) pill.remove();
+      const pills = [...copy.querySelectorAll(selectors.selectedConnector)];
+      const connectors = pills
+        .map(pill => pill.getAttribute("data-keyword") ?? pill.getAttribute("app-mention-display-name"))
+        .filter((value): value is string => value !== null)
+        .sort();
+      copy.querySelectorAll(selectors.nonDraft).forEach(part => part.remove());
       const text = element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
         ? element.value : copy.textContent ?? "";
       return { text: text.trim(), connectors };
-    }, undefined, actionOptions);
+    }, {
+      selectedConnector: CHATGPT_SELECTED_CONNECTOR_SELECTOR,
+      nonDraft: CHATGPT_COMPOSER_NON_DRAFT_SELECTOR,
+    }, actionOptions);
     const before = await composerState();
     if (before.text) throw new Error("ChatGPT Think selection requires an empty prompt draft");
     await composer.focus(actionOptions);
@@ -2081,6 +2109,8 @@ class ChatGptBrowserDiagnostics {
           stopButtonSelector,
           completionActionSelector,
           appName,
+          selectedConnectorSelector,
+          nonDraftSelector,
         }) => {
           const rendered = (element: Element): boolean => {
             const candidate = element as HTMLElement;
@@ -2116,7 +2146,7 @@ class ChatGptBrowserDiagnostics {
           const composers = [...document.querySelectorAll(composerSelector)].filter(rendered);
           const assistantTurns = [...document.querySelectorAll(assistantTurnSelector)].filter(rendered);
           const selectedConnectors = composers.flatMap(composer => (
-            [...composer.querySelectorAll('[data-id^="plugin:"][data-keyword], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]')]
+            [...composer.querySelectorAll(selectedConnectorSelector)]
           ))
             .filter(rendered);
           const exactConnectorRows = [...document.querySelectorAll('.__menu-item[tabindex="0"], [data-mention-list-scroll-area] button[data-list-navigation-item="true"]')]
@@ -2146,6 +2176,14 @@ class ChatGptBrowserDiagnostics {
                 element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
                   ? element.value : element.textContent ?? ""
               ).length),
+              draftTextChars: composers.map(element => {
+                if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+                  return element.value.trim().length;
+                }
+                const clone = element.cloneNode(true) as HTMLElement;
+                clone.querySelectorAll(nonDraftSelector).forEach(part => part.remove());
+                return (clone.textContent ?? "").trim().length;
+              }),
               editors: composers.map(element => ({
                 tag: element.tagName.toLowerCase(),
                 contentEditable: (element as HTMLElement).isContentEditable,
@@ -2224,6 +2262,8 @@ class ChatGptBrowserDiagnostics {
           stopButtonSelector: CHATGPT_STOP_BUTTON_SELECTOR,
           completionActionSelector: CHATGPT_COMPLETION_ACTION_SELECTOR,
           appName: this.appName,
+          selectedConnectorSelector: CHATGPT_SELECTED_CONNECTOR_SELECTOR,
+          nonDraftSelector: CHATGPT_COMPOSER_NON_DRAFT_SELECTOR,
         })),
       ]);
       const capturedAt = new Date().toISOString();
@@ -3527,17 +3567,14 @@ export class ChatGptBrowserWorker {
 
   private async attachedPromptText(page: Page, abortSignal?: AbortSignal): Promise<string> {
     const composer = await this.activeComposer(page, 30_000, abortSignal);
-    return composer.evaluate(element => {
+    return composer.evaluate((element, nonDraftSelector) => {
       const clone = element.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll(
-        '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]',
-      )
-        .forEach(part => part.remove());
+      clone.querySelectorAll(nonDraftSelector).forEach(part => part.remove());
       return [...clone.childNodes]
         .map(child => child.textContent ?? "")
         .join("\n")
         .trimStart();
-    }, undefined, { timeout: 20_000, signal: abortSignal });
+    }, CHATGPT_COMPOSER_NON_DRAFT_SELECTOR, { timeout: 20_000, signal: abortSignal });
   }
 
   private async assertPromptAttached(
@@ -3566,10 +3603,7 @@ export class ChatGptBrowserWorker {
 
   private selectedConnectorControl(composer: Locator): Locator {
     return composer
-      .locator([
-        `[data-id^="plugin:"][data-keyword=${JSON.stringify(this.config.appName)}]`,
-        `[app-mention-path^="app://"][app-mention-display-name=${JSON.stringify(this.config.appName)}][contenteditable="false"]`,
-      ].join(", "))
+      .locator(chatGptSelectedConnectorSelector(this.config.appName))
       .filter({ visible: true });
   }
 
