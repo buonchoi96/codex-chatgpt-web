@@ -1542,7 +1542,11 @@ export async function setChatGptThinkMode(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   throwIfPromptAttachmentAborted(abortSignal);
-  const controls = composerForm
+  const page = composerForm.page();
+  // Free/Go can render the selected connector pill on a composer surface that is no longer
+  // enclosed by the pre-selection <form>. Resolve Think and the editor from the live page rather
+  // than from that ancestor so connector reconciliation cannot strand Medium on a stale form.
+  const controls = page
     .getByRole("button", { name: "Think", exact: true })
     .filter({ visible: true });
   const count = await controls.count();
@@ -1559,7 +1563,7 @@ export async function setChatGptThinkMode(
   }
   const target = enabled ? "true" : "false";
   if (pressed !== target) {
-    const composer = composerForm.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true }).first();
+    const composer = page.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true }).last();
     const composerState = () => composer.evaluate(element => {
       const copy = element.cloneNode(true) as HTMLElement;
       const pills = [...copy.querySelectorAll('[data-id^="plugin:"][data-keyword]')];
@@ -1576,7 +1580,7 @@ export async function setChatGptThinkMode(
     await composer.pressSequentially("/think", { ...actionOptions, delay: 25 });
     await captureDiagnostic?.("think-slash-triggered");
     // The command popup shares menu-item classes with sidebar history. Count only this popup.
-    const popup = composerForm.page().locator('.popover[aria-busy="false"]').filter({ visible: true });
+    const popup = page.locator('.popover[aria-busy="false"]').filter({ visible: true });
     const rows = popup.locator('.__menu-item[tabindex="0"]').filter({ visible: true });
     await rows.first().waitFor({ state: "visible", timeout: 5_000, signal: abortSignal });
     if (await popup.count() !== 1 || await rows.count() !== 1) {
