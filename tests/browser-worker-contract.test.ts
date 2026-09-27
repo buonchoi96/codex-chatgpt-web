@@ -3253,6 +3253,7 @@ test("Think attachment rolls back a lost connector and never inserts the prompt"
   let insertions = 0;
   let cleanup = 0;
   const worker = {
+    activeComposer: async () => ui.composer,
     connectorIsSelected: async () => ui.state.connectors.includes("Codex Native2"),
     selectConnector: async () => { ui.state.connectors = ["Codex Native2"]; return ui.composer; },
     insertPromptText: async () => { insertions += 1; },
