@@ -44,6 +44,9 @@ Include:
 - Important context, constraints, or user preferences
 - What remains to be done (clear next steps)
 - Any critical data, examples, or references needed to continue
+- Exact validation sentinels, probe labels and values, hashes, IDs, expected outputs, or other opaque literals that the active request says will be checked after compaction; copy them verbatim rather than paraphrasing or dropping them because they look arbitrary
+- If the task intentionally deletes, unloads, or makes source material unavailable after ingestion, preserve every exact fact from that material that the active request explicitly says will be validated later
+- Before finalizing the checkpoint, scan the active request for promised post-compaction validations and make sure the summary contains the exact values needed for those checks; do not call them unavailable when they are present in the supplied context
 - If native Computer Use / GUI work is active: the application/window identity, the last visibly verified UI state, the exact last native action that completed and its result, any requested action that was NOT executed because compaction started, and the next safe GUI action
 - If node_repl / @oai/sky is active: record that official native path and any important persistent session objects or app identifiers needed to resume
 
