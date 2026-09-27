@@ -767,6 +767,7 @@ export function compileChatGptWebPrompt(
       "User-facing format constraints such as 'reply only with' apply only before the private marker and never permit an empty checkpoint. Immediately follow every marker with Objective: and all required sections; use a concise '- None.' only for a genuinely empty section.",
       "Use the headings Objective:, State:, Evidence:, Decisions:, and Pending:. Put each heading on its own line and use concise dash bullets under the list headings.",
       `Keep the checkpoint at or below ${CHATGPT_LUNA_CHECKPOINT_MAX_TOKENS.toLocaleString("en-US")} tokens. Preserve concrete requirements, exact paths, commands, results, decisions, unresolved blockers, and the next useful actions.`,
+      "If the active request names validation probes, sentinels, hashes, IDs, expected outputs, or other exact values for later checking, preserve every required label/value verbatim in the checkpoint.",
       "Record only compact task state and evidence. Do not include hidden reasoning, chain-of-thought, capability tokens, credentials, or transport details.",
       "The outer bridge removes this marker and checkpoint from the user-facing stream. Never refer to the checkpoint in the visible answer.",
     ]
