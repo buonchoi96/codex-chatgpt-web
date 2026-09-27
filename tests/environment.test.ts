@@ -268,6 +268,37 @@ describe("trusted current Codex environment envelope", () => {
     expect(extractChatGptTurnEnvironment(request).cwd).toBe(primary);
   });
 
+  test("same-thread reconnect reuses cached authority when only historical environment XML is replayed", () => {
+    const threadId = "thread_reconnect_history";
+    const store = new ChatGptThreadEnvironmentStore();
+    const initial = currentWire({ threadId });
+    expect(store.resolve(initial).cwd).toBe(root);
+
+    const reconnect = structuredClone(initial);
+    const body = reconnect._rawBody as { input: Array<Record<string, unknown>> };
+    body.input.push(
+      { type: "message", id: "msg_prior_answer", role: "assistant",
+        content: [{ type: "output_text", text: "Tool work is still in progress." }] },
+      { type: "message", id: "msg_reconnect", role: "user",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn_current" },
+        content: [{ type: "input_text", text: "Continue the same task after reconnect." }] },
+    );
+    reconnect.context.tools = [{ name: "reconnect_tool", description: "current", parameters: { type: "object" } }];
+
+    expect(() => extractChatGptTurnEnvironment(reconnect)).toThrow("missing cwd");
+    expect(store.resolve(reconnect)).toEqual({
+      cwd: root, roots: [root], writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" }, tools: reconnect.context.tools,
+    });
+
+    body.input.push({
+      type: "message", id: "msg_bad_current_environment", role: "user",
+      internal_chat_message_metadata_passthrough: { turn_id: "turn_current" },
+      content: [{ type: "input_text", text: "<environment_context><cwd/></environment_context>" }],
+    });
+    expect(() => store.resolve(reconnect)).toThrow("missing cwd");
+  });
+
   test("does not hide malformed cwd markup behind workspace-root recovery", () => {
     const malformedEnvironment = `<environment_context>
   <cwd/>

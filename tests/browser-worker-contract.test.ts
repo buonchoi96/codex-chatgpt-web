@@ -5100,3 +5100,15 @@ test("a stage that spans a system sleep is not charged for the slept time", asyn
   await stage;
   expect(outcome).toEqual(["ChatGPT browser stage timed out: probe"]);
 }, 10_000);
+
+test("Luna Think attachment reacquires the composer after connector and Think DOM mutations", () => {
+  const source = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = source.indexOf("let selectedComposer = await this.selectConnector(");
+  const end = source.indexOf("await this.assertPromptAttached(page, prompt, abortSignal);", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const connectorBlock = source.slice(start, end);
+  const reacquires = connectorBlock.match(/selectedComposer = await this\.activeComposer\(page, 30_000, abortSignal\);/g) ?? [];
+  expect(reacquires.length).toBe(2);
+  expect(connectorBlock).toContain("await setChatGptThinkMode(selectedComposer.locator(\"xpath=ancestor::form[1]\"), true");
+});
