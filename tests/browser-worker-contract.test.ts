@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptStreamRecoveryPollingTimedOut, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptStreamRecoveryPollingTimedOut, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSelectedConnectorSelector, CHATGPT_SELECTED_CONNECTOR_SELECTOR, CHATGPT_COMPOSER_NON_DRAFT_SELECTOR, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -3191,6 +3191,25 @@ function thinkSlashFixture() {
   const composerForm = { getByRole: () => ({ filter: () => controls }), locator: () => composer, page: () => page };
   return { state, composer, composerForm, page };
 }
+
+test("modern app-mention connector pills are connector state, not Think prompt draft text", () => {
+  const { createWindow } = require("@mixmark-io/domino");
+  const window = createWindow(
+    '<div id="editor" contenteditable="true">'
+    + '<span app-mention-path="app://codex-native2" app-mention-display-name="Codex Native2" contenteditable="false">@Codex Native2</span>'
+    + '<span data-inline-selection-pill-cursor-target="true"></span>'
+    + '</div>',
+  );
+  const editor = window.document.getElementById("editor");
+  const clone = editor.cloneNode(true) as HTMLElement;
+  const pills = [...clone.querySelectorAll(CHATGPT_SELECTED_CONNECTOR_SELECTOR)];
+  expect(pills.map(pill => pill.getAttribute("data-keyword") ?? pill.getAttribute("app-mention-display-name")))
+    .toEqual(["Codex Native2"]);
+  clone.querySelectorAll(CHATGPT_COMPOSER_NON_DRAFT_SELECTOR).forEach(part => part.remove());
+  expect((clone.textContent ?? "").trim()).toBe("");
+  expect(chatGptSelectedConnectorSelector("Codex Native2"))
+    .toContain('app-mention-display-name="Codex Native2"');
+});
 
 test("Think slash toggles only when needed, preserves connectors, and normal Luna clears it", async () => {
   const { state, composerForm } = thinkSlashFixture();
