@@ -846,6 +846,36 @@ test("active compaction fails over a source that does not settle after compactio
   expect(cancellations).toBe(1);
 });
 
+test("active compaction gives the source a full settle grace after the interrupt is actually delivered", async () => {
+  let finishBrowser!: (answer: string) => void;
+  const browser = new Promise<string>(resolve => { finishBrowser = resolve; });
+  let deliveries = 0;
+  let cancellations = 0;
+  const broker = {
+    requestCompaction: () => 0,
+    compactionDeliveryCount: () => deliveries,
+    completeTool() { throw new Error("no tool result should be delivered"); },
+    revoke() {},
+  } as unknown as TurnBroker;
+  const source = new ChatGptTurnSession({
+    mode: "tools", token: Promise.resolve("turn_active_delivery_reset"),
+    externalProgress: { recordToolResult() {} } as never,
+    browser, physicalSettlement: browser.then(() => undefined),
+    trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(),
+    cancel: () => { cancellations += 1; },
+  });
+  setTimeout(() => { deliveries = 1; }, 40);
+  setTimeout(() => finishBrowser("Settled after receiving the compaction interrupt."), 100);
+
+  await expect(settleActiveCompactionSource(
+    request(true), source, broker, undefined, 80,
+  )).resolves.toEqual({
+    answer: "Settled after receiving the compaction interrupt.",
+    compactionInstructionDelivered: true,
+  });
+  expect(cancellations).toBe(0);
+});
+
 test("active compaction aborts its source when the shared handoff deadline expires", async () => {
   const controller = new AbortController();
   const deadlineError = new Error("shared compaction deadline expired");
