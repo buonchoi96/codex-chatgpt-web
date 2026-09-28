@@ -1,14 +1,30 @@
 import { expect, test } from "bun:test";
 import {
   CHATGPT_NATIVE_MCP_INSTRUCTIONS,
+  CHATGPT_WEB_COMMAND_YIELD_MAX_MS,
   CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS,
   CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS,
+  COMMAND_SESSION_TRANSPORT_RULE,
   PARALLEL_COMMAND_RULE,
   WRITE_STDIN_TRANSPORT_RULE,
+  chatGptCommandYieldMs,
   chatGptWriteStdinYieldMs,
 } from "../src/adapters/chatgpt-web/mcp-server";
 import { readFileSync } from "node:fs";
 
+test("exec_command yields before the MCP invocation deadline", () => {
+  expect(CHATGPT_WEB_COMMAND_YIELD_MAX_MS).toBe(30_000);
+  expect(chatGptCommandYieldMs(undefined)).toBe(30_000);
+  expect(chatGptCommandYieldMs(5_000)).toBe(5_000);
+  expect(chatGptCommandYieldMs(300_000)).toBe(30_000);
+  expect(COMMAND_SESSION_TRANSPORT_RULE).toContain("30 seconds");
+  expect(CHATGPT_NATIVE_MCP_INSTRUCTIONS).toContain(COMMAND_SESSION_TRANSPORT_RULE);
+
+  const source = readFileSync("src/adapters/chatgpt-web/mcp-server.ts", "utf8");
+  expect(source).toContain("isExecCommandToolName(name)");
+  expect(source).toContain("yield_time_ms: chatGptCommandYieldMs");
+  expect(source).toContain("maximum: CHATGPT_WEB_COMMAND_YIELD_MAX_MS");
+});
 test("write_stdin polling remains below the MCP invocation deadline", () => {
   expect(CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS).toBe(90_000);
   expect(CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS).toBe(60_000);
