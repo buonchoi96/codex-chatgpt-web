@@ -15,6 +15,7 @@ import {
   CHATGPT_LUNA_CHECKPOINT_MARKER,
   CHATGPT_LUNA_CHECKPOINT_MAX_TOKENS,
 } from "./rolling-checkpoint";
+import { CODEX_OUTPUT_CONTROL_PROMPT } from "./native-output-control";
 
 export interface ChatGptWebPromptImage {
   ref: string;
@@ -53,6 +54,8 @@ export interface CompileChatGptWebPromptOptions {
   activeTurnRecovery?: boolean;
   experimentalSkillAttachments?: boolean;
   experimentalMultipartParts?: ChatGptWebMultipartPartCount;
+  /** Stream public progress/reasoning/final text through the bound Native2 output control. */
+  nativeOutputTunnel?: boolean;
   /**
    * Manual Zero Risk transport keeps ChatGPT model/effort selection and prompt submission under the
    * user's control. The browser bridge may open the owned tab and copy this prompt, but it never
@@ -638,6 +641,7 @@ export function compileChatGptWebPrompt(
     : resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, capabilities);
   const captureLunaCheckpoint = options?.captureLunaCheckpoint === true;
   const activeTurnRecovery = options?.activeTurnRecovery === true;
+  const nativeOutputTunnel = options?.nativeOutputTunnel === true;
   const multipartParts = options?.experimentalMultipartParts;
   const multipartEnabled = multipartParts !== undefined;
   if (manualControl) {
@@ -759,6 +763,11 @@ export function compileChatGptWebPrompt(
         "</codex_output_schema_json>",
       ]
       : []),
+    ...(nativeOutputTunnel ? [
+      "<codex_native_output_control>",
+      ...CODEX_OUTPUT_CONTROL_PROMPT,
+      "</codex_native_output_control>",
+    ] : []),
   ];
   const checkpointContract = captureLunaCheckpoint
     ? [
