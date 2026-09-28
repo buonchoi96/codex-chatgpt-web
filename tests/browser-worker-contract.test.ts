@@ -2063,6 +2063,7 @@ test("repeated connector verification reuses its selected pill before clearing t
     config: { appName: "Codex Native2 DEV" },
     activeComposer: async () => selectedComposer,
     connectorIsSelected: async () => true,
+    attachedPromptText: async () => "",
   }, page, async checkpoint => { checkpoints.push(checkpoint); })).resolves.toBe(selectedComposer);
 
   expect(fillCalls).toBe(0);
@@ -4416,7 +4417,7 @@ test("browser DOM health fails closed on a vanished or empty ChatGPT response", 
   const missing = new ChatGptTurnDomHealthTracker(1_000, 500);
   const absent = {
     responsePresent: false,
-    running: true,
+    running: false,
     currentText: "",
     completionActionVisible: false,
   };
@@ -4442,6 +4443,17 @@ test("browser DOM health fails closed on a vanished or empty ChatGPT response", 
   expect(missingCompletionAction.update(completedWithoutMarker, 1_000)).toBeUndefined();
   expect(missingCompletionAction.update(completedWithoutMarker, 1_749)).toBeUndefined();
   expect(missingCompletionAction.update(completedWithoutMarker, 1_750)).toContain("DOM may have changed");
+});
+
+test("visible generation suspends DOM health and restarts its grace when Stop disappears", () => {
+  const tracker = new ChatGptTurnDomHealthTracker(1_000, 500);
+  const absent = { responsePresent: false, running: false, currentText: "", completionActionVisible: false };
+  expect(tracker.update(absent, 0)).toBeUndefined();
+  expect(tracker.update({ ...absent, running: true }, 500)).toBeUndefined();
+  expect(tracker.update({ ...absent, running: true }, 60_000)).toBeUndefined();
+  expect(tracker.update(absent, 61_000)).toBeUndefined();
+  expect(tracker.update(absent, 61_999)).toBeUndefined();
+  expect(tracker.update(absent, 62_000)).toContain("did not create a response DOM");
 });
 
 test("stalled-turn diagnostics record DOM metrics without response or overlay content", () => {
@@ -4488,7 +4500,7 @@ test("suspending DOM health for proven MCP progress restarts the missing-respons
   const tracker = new ChatGptTurnDomHealthTracker(1_000, 500);
   const absent = {
     responsePresent: false,
-    running: true,
+    running: false,
     currentText: "",
     completionActionVisible: false,
   };
@@ -4513,7 +4525,7 @@ test("clearing the missing-response window preserves whether a response was ever
     currentText: "partial",
     completionActionVisible: false,
   };
-  const absent = { ...present, responsePresent: false, currentText: "" };
+  const absent = { ...present, responsePresent: false, running: false, currentText: "" };
 
   expect(tracker.update(present, 1_000)).toBeUndefined();
   expect(tracker.update(absent, 1_500)).toBeUndefined();
@@ -4606,7 +4618,7 @@ test("live external progress still records that a response DOM was observed", ()
   const tracker = new ChatGptTurnDomHealthTracker(1_000, 500);
   const absent = {
     responsePresent: false,
-    running: true,
+    running: false,
     currentText: "",
     completionActionVisible: false,
   };

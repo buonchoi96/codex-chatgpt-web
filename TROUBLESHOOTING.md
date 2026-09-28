@@ -239,11 +239,15 @@ FORBIDDEN result repeats in every fresh chat, verify that the launcher browser i
 intended account/workspace, that Developer Mode is enabled there, and that its plan/workspace policy
 permits the connector's actions. The launcher cannot override an account-side developer-MCP gate.
 
-### Windows: `unable to verify the first certificate`
+### Windows: `unable to verify the first certificate` or `SELF_SIGNED_CERT_IN_CHAIN`
 
-For this error during **Connect harness**, check the affected host with Windows `curl.exe -Iv`
+The Windows launcher and packaged CLI use Windows-trusted certificates by default, including
+certificates installed by your company or antivirus. Explicit `NODE_USE_SYSTEM_CA` settings are
+preserved. Certificate verification remains enabled.
+
+If it still fails, check the affected host with Windows `curl.exe -Iv`
 (for example, `curl.exe -Iv https://api.openai.com/`). If it uses Schannel and receives an HTTP
-response, Windows trusts that connection. Fully quit the launcher, then start it from PowerShell:
+response, Windows trusts that connection. For an older launcher, fully quit it and start it from PowerShell:
 
 ```powershell
 $env:NODE_USE_SYSTEM_CA = "1"
