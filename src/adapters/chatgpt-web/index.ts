@@ -958,6 +958,14 @@ export function createChatGptWebAdapter(
         const mode = manualRequest
           ? { localTools: true }
           : resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, turnCapabilities);
+        const observerNativeOutputTunnel = shouldUseNativeOutputTunnel(parsed, {
+          requested: true,
+          localTools: mode.localTools,
+          luna: parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID,
+          manualControl: manualRequest,
+          captureLunaCheckpoint: false,
+          multipart: experimentalBiggerContext === true,
+        });
         const structuredOutputValidator = parsed._compactionRequest
           ? undefined
           : createChatGptStructuredOutputValidator(parsed.options.outputFormat);
@@ -1288,7 +1296,7 @@ export function createChatGptWebAdapter(
         if (!manualRequest) {
           const admission = accountSafety.admit(
             traceId,
-            retainedConversationKey ?? nativeIdentity.threadId ?? traceId,
+            nativeIdentity.threadId ?? traceId,
             automaticWebSessionLimitCount,
             automaticWebSessionLimitMinutes,
             chatGptTurnSessions.activeTraceIds(),
@@ -1437,12 +1445,12 @@ export function createChatGptWebAdapter(
               const emitNewTrace = (trace: ChatGptTraceEvent[]) => {
                 roundReasoning.push(...trace.map(event => event.text));
                 session.appendRoundReasoning(roundKey, trace.map(event => event.text));
-                if (!useNativeOutputTunnel) {
+                if (!observerNativeOutputTunnel) {
                   emitRoundBatch(buffer => emitTraceEvents(trace, buffer));
                 }
               };
               const emitNewText = (deltas: string[]) => {
-                if (!useNativeOutputTunnel && !bufferStructuredOutput) {
+                if (!observerNativeOutputTunnel && !bufferStructuredOutput) {
                   emitRoundBatch(buffer => emitTextDeltas(deltas, buffer));
                 }
               };
@@ -1480,7 +1488,7 @@ export function createChatGptWebAdapter(
                   : Promise.reject(error))
                 : undefined;
               let nextTools = armNextTools();
-              const armNextOutput = () => useNativeOutputTunnel && turnToken
+              const armNextOutput = () => observerNativeOutputTunnel && turnToken
                 ? broker.nextOutput(turnToken, session.nativeOutputAfterSequence(), toolWaitAbort.signal)
                   .then(event => ({ type: "native-output" as const, event }))
                   .catch(error => toolWaitAbort.signal.aborted
@@ -1504,7 +1512,7 @@ export function createChatGptWebAdapter(
                   if (turnToken) await broker.revoke(turnToken);
                   throw new Error("ChatGPT browser Markdown stream did not reproduce the completed answer");
                 }
-                const tunneledFinal = useNativeOutputTunnel ? session.nativeFinalAnswer() : undefined;
+                const tunneledFinal = observerNativeOutputTunnel ? session.nativeFinalAnswer() : undefined;
                 if (tunneledFinal !== undefined
                   && tunneledFinal.trim() !== completedOutcome.answer.trim()) {
                   if (turnToken) await broker.revoke(turnToken);
@@ -1512,7 +1520,7 @@ export function createChatGptWebAdapter(
                 }
                 const finalAnswer = tunneledFinal ?? completedOutcome.answer;
                 structuredOutputValidator?.(finalAnswer);
-                if (useNativeOutputTunnel) {
+                if (observerNativeOutputTunnel) {
                   if (session.nativeOutputAfterSequence() === 0 && roundReasoning.length > 0) {
                     emitRoundBatch(buffer => emitTraceEvents(
                       roundReasoning.map(text => ({ kind: "commentary" as const, text })),
