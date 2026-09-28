@@ -140,8 +140,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $old = "test/922k-context-archive"
-          git ls-remote --exit-code --heads origin $old *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $match = git ls-remote --heads origin $old
+          if ($LASTEXITCODE -ne 0) { throw "Failed to query retired branch $old" }
+          if ($match) {
             Write-Host "Deleting retired branch $old"
             git push origin --delete $old
             if ($LASTEXITCODE -ne 0) { throw "Failed to delete retired branch $old" }
