@@ -31,6 +31,11 @@ import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGpt
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
 import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
 import { shouldUseNativeOutputTunnel } from "./native-output-control";
+import { passiveRecoveryCheckpointInstruction } from "./native-compaction-control";
+import {
+  EnhancedRecoveryCheckpointStore,
+  ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
+} from "./enhanced-recovery-checkpoint";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
@@ -476,6 +481,11 @@ export function createChatGptWebAdapter(
       ? resolve(expandUserPath(provider.chatgptWeb.lunaCheckpointStatePath))
       : undefined,
   );
+  const enhancedRecoveryCheckpointStore = new EnhancedRecoveryCheckpointStore(
+    provider.chatgptWeb?.enhancedRecoveryCheckpointStatePath
+      ? resolve(expandUserPath(provider.chatgptWeb.enhancedRecoveryCheckpointStatePath))
+      : undefined,
+  );
   const currentUsageInput = (parsed: CodexParsedRequest): CodexParsedRequest => (
     parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !parsed._compactionRequest
       ? lunaCheckpointStore.apply(parsed).parsed
@@ -512,9 +522,17 @@ export function createChatGptWebAdapter(
       captureLunaCheckpoint,
       multipart: experimentalBiggerContext === true,
     });
+    const captureEnhancedRecoveryCheckpoint = !manualRequest
+      && mode.localTools
+      && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
+      && !parsed._compactionRequest
+      && !freshConversationPerTurn
+      && Boolean(retainedLauncherDescriptor);
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
-      : { parsed, applied: false };
+      : captureEnhancedRecoveryCheckpoint
+        ? enhancedRecoveryCheckpointStore.apply(parsed)
+        : { parsed, applied: false };
     // Ordinary paid-model retention follows the thread/compaction epoch. Luna stays fresh across
     // native turns, but gets a turn-scoped recovery identity so a transient browser failure after
     // extensive tool work can reuse the exact active Temporary Chat instead of replaying a huge
@@ -535,8 +553,11 @@ export function createChatGptWebAdapter(
       : undefined;
     const conversationKey = retainedConversationKey ?? lunaRecoveryConversationKey;
     const lunaActiveTurnRecovery = lunaRecoveryConversationKey !== undefined;
+    // A healthy retained paid-model page already owns its full browser history, so send only
+    // the ordinary canonical suffix. The durable checkpoint is consumed only when a fresh page is
+    // actually prepared, where checkpointInput.parsed replaces old assistant/tool transcript.
     const resumeInput = retainedConversationKey
-      ? retainedConversationResumeRequest(checkpointInput.parsed)
+      ? retainedConversationResumeRequest(parsed)
       : lunaActiveTurnRecovery
         ? retainedActiveTurnRecoveryRequest(checkpointInput.parsed)
         : undefined;
@@ -564,6 +585,10 @@ export function createChatGptWebAdapter(
     if (captureLunaCheckpoint) {
       console.info(
         `[chatgpt-web] Luna rolling checkpoint applied=${checkpointInput.applied}${checkpointInput.reason ? ` reason=${checkpointInput.reason}` : ""}`,
+      );
+    } else if (captureEnhancedRecoveryCheckpoint) {
+      console.info(
+        `[chatgpt-web] Enhanced recovery checkpoint applied=${checkpointInput.applied}${checkpointInput.reason ? ` reason=${checkpointInput.reason}` : ""}`,
       );
     }
     let capturedCheckpoint: CapturedChatGptLunaCheckpoint | undefined;
