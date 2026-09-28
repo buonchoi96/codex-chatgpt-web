@@ -1585,6 +1585,9 @@ export async function setChatGptThinkMode(
   }
   const target = enabled ? "true" : "false";
   if (pressed !== target) {
+    if (count !== 1) {
+      throw new Error(`ChatGPT Think button is unavailable while trying to ${enabled ? "enable" : "disable"} Think mode`);
+    }
     const composer = page.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true }).last();
     const composerState = () => composer.evaluate((element, selectors) => {
       const copy = element.cloneNode(true) as HTMLElement;
@@ -1603,33 +1606,21 @@ export async function setChatGptThinkMode(
     }, actionOptions);
     const before = await composerState();
     if (before.text) throw new Error("ChatGPT Think selection requires an empty prompt draft");
-    await composer.focus(actionOptions);
-    await composer.press(CHATGPT_COMPOSER_DOCUMENT_END_KEY, actionOptions);
-    await composer.pressSequentially("/think", { ...actionOptions, delay: 25 });
-    await captureDiagnostic?.("think-slash-triggered");
-    // The command popup shares menu-item classes with sidebar history. Count only this popup.
-    const popup = page.locator('.popover[aria-busy="false"]').filter({ visible: true });
-    const rows = popup.locator('.__menu-item[tabindex="0"]').filter({ visible: true });
-    await rows.first().waitFor({ state: "visible", timeout: 5_000, signal: abortSignal });
-    if (await popup.count() !== 1 || await rows.count() !== 1) {
-      throw new Error("ChatGPT Think slash menu must expose exactly one command option");
-    }
-    const row = rows.first();
-    if (await row.getAttribute("data-highlighted", actionOptions) === null) {
-      await composer.press("ArrowDown", actionOptions);
-    }
-    if (await row.getAttribute("data-highlighted", actionOptions) === null) {
-      throw new Error("ChatGPT Think slash option is not highlighted");
-    }
-    await captureDiagnostic?.("think-slash-menu-ready");
+
+    // Current Free/Go UI exposes Think as a real toggle beside Send. Slash-command activation is
+    // no longer reliable: the editor accepts "/think" as literal text and displays "No commands".
+    // Click the semantic toggle directly, then verify its pressed state and connector preservation.
+    await captureDiagnostic?.("think-button-ready");
     throwIfPromptAttachmentAborted(abortSignal);
-    await composer.press("Enter", actionOptions);
+    await control.click(actionOptions);
+    await captureDiagnostic?.("think-button-clicked");
+
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline) {
       throwIfPromptAttachmentAborted(abortSignal);
       const currentCount = await controls.count();
       if (currentCount > 1) throw new Error(`ChatGPT exposed ${currentCount} visible Think controls`);
-      pressed = currentCount === 1 ? await control.getAttribute("aria-pressed", actionOptions) : null;
+      pressed = currentCount === 1 ? await controls.first().getAttribute("aria-pressed", actionOptions) : null;
       if (pressed === target) break;
       if (currentCount === 1 && pressed !== "true" && pressed !== "false") {
         throw new Error("ChatGPT Think control lost its semantic pressed state");
@@ -1637,11 +1628,11 @@ export async function setChatGptThinkMode(
       await withBrowserTurnAbort(new Promise(resolveSleep => setTimeout(resolveSleep, 100)), abortSignal);
     }
     if (pressed !== target) {
-      throw new Error(`ChatGPT did not ${enabled ? "enable" : "disable"} Think mode`);
+      throw new Error(`ChatGPT did not ${enabled ? "enable" : "disable"} Think mode after clicking its button`);
     }
     const after = await composerState();
     if (after.text || JSON.stringify(after.connectors) !== JSON.stringify(before.connectors)) {
-      throw new Error("ChatGPT Think slash selection did not preserve the empty draft and selected connectors");
+      throw new Error("ChatGPT Think button did not preserve the empty draft and selected connectors");
     }
   }
   await captureDiagnostic?.(enabled ? "think-enabled" : "think-disabled");
