@@ -1,0 +1,56 @@
+name: Temporary Merge Diagnostics
+
+on:
+  push:
+    branches:
+      - merge/upstream-6.1.3
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Inspect merge conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main test/986k-enhanced-cherrypicks
+          echo "=== HEADS ==="
+          git log -1 --oneline HEAD
+          git log -1 --oneline origin/main
+          git log -1 --oneline origin/test/986k-enhanced-cherrypicks
+          echo "=== ENHANCED vs MAIN conflict files ==="
+          rm -rf /tmp/merge1 && git worktree add --detach /tmp/merge1 origin/main
+          (
+            cd /tmp/merge1
+            set +e
+            git merge --no-commit --no-ff origin/test/986k-enhanced-cherrypicks
+            rc=$?
+            echo "merge_rc=$rc"
+            git diff --name-only --diff-filter=U || true
+            git status --short
+            git merge --abort >/dev/null 2>&1 || true
+          )
+          git worktree remove --force /tmp/merge1
+          echo "=== ENHANCED vs UPSTREAM-6.1.3 conflict files ==="
+          rm -rf /tmp/merge2 && git worktree add --detach /tmp/merge2 origin/test/986k-enhanced-cherrypicks
+          (
+            cd /tmp/merge2
+            set +e
+            git merge --no-commit --no-ff "$GITHUB_SHA"
+            rc=$?
+            echo "merge_rc=$rc"
+            git diff --name-only --diff-filter=U || true
+            echo "=== CONFLICT MARKERS (bounded) ==="
+            for f in $(git diff --name-only --diff-filter=U); do
+              echo "----- $f -----"
+              grep -n -B 8 -A 12 -E '^(<<<<<<<|=======|>>>>>>>)' "$f" | head -n 500 || true
+            done
+            git merge --abort >/dev/null 2>&1 || true
+          )
+          git worktree remove --force /tmp/merge2
