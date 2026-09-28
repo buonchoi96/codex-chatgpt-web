@@ -7,6 +7,7 @@ import { estimateChatGptWebInputTokens } from "../adapters/chatgpt-web/usage";
 import { RemoteTurnBroker, type TurnBrokerOwner } from "../adapters/chatgpt-web/turn-broker";
 import {
   requireChatGptWebModelRoute,
+  resolvedChatGptWebContextWindow,
   resolveChatGptWebContextLimits,
 } from "../chatgpt-web-models";
 import type { AppConfig } from "../config";
@@ -599,7 +600,7 @@ export class DevChatDriver {
     });
     const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, this.config);
     const autoCompactTokenLimit = limits.autoCompactTokenLimit;
-    const contextWindow = limits.contextWindow;
+    const contextWindow = resolvedChatGptWebContextWindow(limits);
     return {
       model: state.model,
       inputTokens,
