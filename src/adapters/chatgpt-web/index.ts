@@ -30,6 +30,7 @@ import { ChatGptBrowserWorker } from "./browser-worker";
 import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGptAbortedTurnIds } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
 import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
+import { shouldUseNativeOutputTunnel } from "./native-output-control";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
@@ -498,6 +499,14 @@ export function createChatGptWebAdapter(
     const captureLunaCheckpoint = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
       && !parsed._compactionRequest
       && Boolean(identity.threadId && identity.turnId);
+    const useNativeOutputTunnel = shouldUseNativeOutputTunnel(parsed, {
+      requested: true,
+      localTools: mode.localTools,
+      luna: parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID,
+      manualControl: manualRequest,
+      captureLunaCheckpoint,
+      multipart: experimentalBiggerContext === true,
+    });
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
       : { parsed, applied: false };
@@ -539,6 +548,7 @@ export function createChatGptWebAdapter(
         : undefined;
       return {
         captureLunaCheckpoint,
+        ...(useNativeOutputTunnel ? { nativeOutputTunnel: true } : {}),
         ...(activeTurnRecovery ? { activeTurnRecovery: true } : {}),
         experimentalSkillAttachments,
         ...(experimentalMultipartParts !== undefined
@@ -1427,10 +1437,14 @@ export function createChatGptWebAdapter(
               const emitNewTrace = (trace: ChatGptTraceEvent[]) => {
                 roundReasoning.push(...trace.map(event => event.text));
                 session.appendRoundReasoning(roundKey, trace.map(event => event.text));
-                emitRoundBatch(buffer => emitTraceEvents(trace, buffer));
+                if (!useNativeOutputTunnel) {
+                  emitRoundBatch(buffer => emitTraceEvents(trace, buffer));
+                }
               };
               const emitNewText = (deltas: string[]) => {
-                if (!bufferStructuredOutput) emitRoundBatch(buffer => emitTextDeltas(deltas, buffer));
+                if (!useNativeOutputTunnel && !bufferStructuredOutput) {
+                  emitRoundBatch(buffer => emitTextDeltas(deltas, buffer));
+                }
               };
               if (replay.length === 0 && !parsed._compactionRequest) {
                 emitRoundBatch(buffer => emitReadOnlyContextWarning(parsed, turnCapabilities, buffer));
@@ -1466,27 +1480,53 @@ export function createChatGptWebAdapter(
                   : Promise.reject(error))
                 : undefined;
               let nextTools = armNextTools();
+              const armNextOutput = () => useNativeOutputTunnel && turnToken
+                ? broker.nextOutput(turnToken, session.nativeOutputAfterSequence(), toolWaitAbort.signal)
+                  .then(event => ({ type: "native-output" as const, event }))
+                  .catch(error => toolWaitAbort.signal.aborted
+                    ? new Promise<never>(() => {})
+                    : Promise.reject(error))
+                : undefined;
+              let nextOutput = armNextOutput();
               const browserOutcome = session.browserOutcome.then(outcome => ({ type: "browser" as const, outcome }));
               const finishBrowserOutcome = async (completedOutcome: ChatGptBrowserOutcome): Promise<void> => {
-                // Zero Risk completion and its owner-only empty-batch signal are resolved by the
-                // same broker transition. Drain once more so the accepted final answer cannot be
-                // overtaken by the terminal owner notification.
+                // Browser state remains the completion authority. Native2 output is answer transport,
+                // and the DOM stays a verified fallback while this experimental path is exercised.
                 emitNewTrace(session.runtime.trace.drain());
                 emitNewText(session.runtime.text.drain());
                 session.setFinalReasoning(roundReasoning);
                 session.setFinalEvents(session.roundEvents(roundKey));
-                if (turnToken) await broker.revoke(turnToken);
-                if (completedOutcome.type === "error") throw completedOutcome.error;
+                if (completedOutcome.type === "error") {
+                  if (turnToken) await broker.revoke(turnToken);
+                  throw completedOutcome.error;
+                }
                 if (session.runtime.text.value() !== completedOutcome.answer) {
+                  if (turnToken) await broker.revoke(turnToken);
                   throw new Error("ChatGPT browser Markdown stream did not reproduce the completed answer");
                 }
-                structuredOutputValidator?.(completedOutcome.answer);
-                if (bufferStructuredOutput) {
-                  emitRoundBatch(buffer => emitTextDeltas([completedOutcome.answer], buffer));
+                const tunneledFinal = useNativeOutputTunnel ? session.nativeFinalAnswer() : undefined;
+                if (tunneledFinal !== undefined
+                  && tunneledFinal.trim() !== completedOutcome.answer.trim()) {
+                  if (turnToken) await broker.revoke(turnToken);
+                  throw new Error("ChatGPT Native2 final output conflicts with the browser-verified final answer");
                 }
+                const finalAnswer = tunneledFinal ?? completedOutcome.answer;
+                structuredOutputValidator?.(finalAnswer);
+                if (useNativeOutputTunnel) {
+                  if (session.nativeOutputAfterSequence() === 0 && roundReasoning.length > 0) {
+                    emitRoundBatch(buffer => emitTraceEvents(
+                      roundReasoning.map(text => ({ kind: "commentary" as const, text })),
+                      buffer,
+                    ));
+                  }
+                  emitRoundBatch(buffer => emitTextDeltas([finalAnswer], buffer));
+                } else if (bufferStructuredOutput) {
+                  emitRoundBatch(buffer => emitTextDeltas([finalAnswer], buffer));
+                }
+                if (turnToken) await broker.revoke(turnToken);
                 emitRoundBatch(buffer => emitBrowserCompletion(
-                  completedOutcome,
-                  estimateChatGptWebUsage(currentUsageInput(parsed), { answer: completedOutcome.answer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
+                  { type: "final", answer: finalAnswer },
+                  estimateChatGptWebUsage(currentUsageInput(parsed), { answer: finalAnswer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                   buffer,
                 ));
                 session.completeRound(roundKey);
@@ -1508,6 +1548,7 @@ export function createChatGptWebAdapter(
                 const next = await withAbort(
                   Promise.race([
                     ...(nextTools ? [nextTools] : []),
+                    ...(nextOutput ? [nextOutput] : []),
                     browserOutcome,
                     nextTrace,
                     nextText,
@@ -1522,6 +1563,17 @@ export function createChatGptWebAdapter(
                 if (next.type === "text") {
                   emitNewText(session.runtime.text.drain());
                   nextText = waitForText();
+                  continue;
+                }
+                if (next.type === "native-output") {
+                  session.acceptNativeOutput(next.event);
+                  if (next.event.kind === "commentary" || next.event.kind === "reasoning") {
+                    emitRoundBatch(buffer => emitTraceEvents([{
+                      kind: "commentary",
+                      text: next.event.text,
+                    }], buffer));
+                  }
+                  nextOutput = next.event.kind === "final" ? undefined : armNextOutput();
                   continue;
                 }
                 emitNewTrace(session.runtime.trace.drain());
