@@ -268,11 +268,12 @@ function emitBrowserCompletion(outcome: ChatGptBrowserOutcome, usage: CodexUsage
 function emitTraceEvents(trace: ChatGptTraceEvent[], emit: (event: AdapterEvent) => void): void {
   for (const event of trace) {
     if (!event.continuation) emit({ type: "assistant_boundary" });
-    if (event.kind === "commentary") {
-      emit({ type: "text_delta", text: event.text, phase: "commentary" });
-    } else {
-      emit({ type: "thinking_delta", thinking: event.text });
-    }
+    // These events come only from text ChatGPT has already rendered visibly in its public turn DOM.
+    // Codex clients can suppress Responses reasoning-summary deltas depending on UI/summary mode,
+    // which made this public progress disappear while tool calls remained visible. Emit the visible
+    // status/reasoning summaries as commentary so Codex consistently shows the same public progress.
+    // Hidden chain-of-thought is never sourced by ChatGptVisibleTraceTracker and remains untouched.
+    emit({ type: "text_delta", text: event.text, phase: "commentary" });
   }
 }
 
