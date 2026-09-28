@@ -145,7 +145,10 @@ function currentToolResults(
 }
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 15 * 60_000;
-export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 15_000;
+// Near-1M active turns can take tens of seconds to render a terminal boundary after the
+// compaction interrupt is actually delivered. Keep the retained handoff path alive long enough
+// to finish naturally before rebuilding the checkpoint from canonical history.
+export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 60_000;
 /** Give a successful structured handoff time to render its natural final boundary before forced retirement. */
 export const COMPACTION_HANDOFF_FINAL_SETTLE_GRACE_MS = 10_000;
 
