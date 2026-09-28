@@ -467,6 +467,12 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
       wireName: "exec_command",
       arguments: { cmd: "echo never-delivered" },
     }, null);
+    // Attach the rejection handler before cancel_invoke rejects the broker-side promise so Bun
+    // never observes a transient unhandled rejection.
+    const pendingOutcome = pending.then(
+      () => ({ type: "value" as const }),
+      error => ({ type: "error" as const, message: error instanceof Error ? error.message : String(error) }),
+    );
 
     await Bun.sleep(25);
     expect(await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(socketPath, {
@@ -474,7 +480,10 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
       bindingId: claimed.bindingId,
       callId,
     })).toEqual({ cancelled: true, delivered: false, pending: false });
-    await expect(pending).rejects.toThrow("abandoned before delivery");
+    expect(await pendingOutcome).toEqual({
+      type: "error",
+      message: "Codex Native invocation was abandoned before delivery",
+    });
 
     const resolved = await callTurnBroker<{ environment: { cwd: string } }>(socketPath, {
       method: "resolve",

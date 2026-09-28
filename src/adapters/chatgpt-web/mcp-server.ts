@@ -695,7 +695,10 @@ export async function runChatGptMcpServer(options: {
             },
           );
         } catch (cancelError) {
-          // If we cannot prove the call was never delivered, preserve the old fail-closed rule.
+          // If the turn deadline expired at the same instant as the invocation deadline, broker
+          // pruning may have retired the binding before cancel_invoke can inspect delivery state.
+          // Once release is confirmed (including its idempotent retired-binding result), the state
+          // is fail-closed and can still be reported as the ordinary structured timeout.
           try {
             await callTurnBroker(options.brokerSocketPath, { method: "release", bindingId });
           } catch (releaseError) {
@@ -704,10 +707,16 @@ export async function runChatGptMcpServer(options: {
               "Codex Native invocation timed out and its delivery state could not be made safe",
             );
           }
-          throw new AggregateError(
-            [error, cancelError],
-            "Codex Native invocation timed out and its delivery state could not be determined",
+          console.error(
+            `[chatgpt-web-mcp] ${toolName} timed out while its binding was already retiring; preserved fail-closed timeout semantics`,
           );
+          return result({
+            code: "codex_tool_timeout",
+            tool: toolName,
+            timeout_ms: timeoutMs,
+            retryable: false,
+            message: `Codex tool ${toolName} did not complete before the MCP transport deadline. The current turn binding is retired; do not retry it in this ChatGPT response.`,
+          }, true);
         }
         if (abandoned.cancelled && !abandoned.delivered) {
           console.error(
