@@ -249,7 +249,7 @@ test("Bigger Context preserves the 986K DEV semantic window and fails closed for
   const biggerStatus = bigger.status(biggerState);
   expect(biggerStatus).toMatchObject({
     autoCompactTokenLimit: 986_000,
-    contextWindow: 1_105_264,
+    contextWindow: 1_050_000,
   });
   expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 986_000) * 1_000) / 10);
   const luna = new DevChatDriver({
