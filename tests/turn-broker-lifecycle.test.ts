@@ -460,7 +460,7 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
     const token = await broker.register(environment, undefined, "queued-timeout");
     const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
     const callId = "call_queued_timeout_123456789";
-    const pending = callTurnBroker(socketPath, {
+    const pending = callTurnBroker<{ content: unknown[] }>(socketPath, {
       method: "invoke",
       bindingId: claimed.bindingId,
       callId,
@@ -469,7 +469,7 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
     }, null);
 
     await Bun.sleep(25);
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(socketPath, {
       method: "cancel_invoke",
       bindingId: claimed.bindingId,
       callId,
@@ -513,7 +513,7 @@ test("a delivered invocation cannot be marked safe-to-retry by timeout cleanup",
 
     const batch = await broker.nextToolBatch(token);
     expect(batch.map(item => item.callId)).toEqual([callId]);
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(socketPath, {
       method: "cancel_invoke",
       bindingId: claimed.bindingId,
       callId,
