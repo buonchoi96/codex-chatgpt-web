@@ -131,6 +131,7 @@ interface BrokerRequest {
     | "resolve"
     | "release"
     | "invoke"
+    | "cancel_invoke"
     | "owner_status"
     | "owner_register"
     | "owner_register_safe"
@@ -1252,7 +1253,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "cancel_invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1558,6 +1559,29 @@ export class TurnBroker implements TurnBrokerOwner {
         ? `${retiredTurnLabel(retiredTurn)} has already finished; this Codex Native action can no longer run.`
         : "internal Codex turn binding is invalid or expired");
     }
+    if (request.method === "cancel_invoke") {
+      const callId = request.callId?.trim();
+      if (!callId || !/^call_[A-Za-z0-9_-]{16,128}$/.test(callId)) {
+        throw new Error("turn broker invocation call id is invalid");
+      }
+      const invocation = binding.channel.invocations.get(callId);
+      if (!invocation) {
+        return { cancelled: false, delivered: false, pending: false };
+      }
+      if (binding.channel.deliveredCallIds.has(callId)) {
+        // Once Codex has received the call it may already be executing a side effect. The caller
+        // must fail closed rather than making a retry look safe.
+        return { cancelled: false, delivered: true, pending: true };
+      }
+      binding.channel.invocations.delete(callId);
+      binding.channel.queuedCallIds = binding.channel.queuedCallIds.filter(id => id !== callId);
+      binding.channel.activityRevision += 1;
+      invocation.reject(new Error("Codex Native invocation was abandoned before delivery"));
+      console.info(
+        `[chatgpt-web] broker trace=${binding.channel.traceId} abandoned queued call=${callId.slice(0, 17)} bindingRetained=true`,
+      );
+      return { cancelled: true, delivered: false, pending: false };
+    }
     if (request.method === "release") {
       this.revoke(binding.token);
       return { released: true };
@@ -1576,7 +1600,14 @@ export class TurnBroker implements TurnBrokerOwner {
 
     const wireName = request.wireName?.trim();
     if (!wireName) throw new Error("wire tool name is required");
-    const callId = opaqueId("call");
+    const requestedCallId = request.callId?.trim();
+    if (requestedCallId !== undefined && !/^call_[A-Za-z0-9_-]{16,128}$/.test(requestedCallId)) {
+      throw new Error("turn broker invocation call id is invalid");
+    }
+    const callId = requestedCallId ?? opaqueId("call");
+    if (binding.channel.invocations.has(callId) || binding.channel.deliveredCallIds.has(callId)) {
+      throw new Error("turn broker invocation call id is already active");
+    }
     const toolRequest: BrokerToolRequest = {
       callId,
       wireName,

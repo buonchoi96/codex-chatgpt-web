@@ -443,3 +443,86 @@ test("turn broker names the finished turn that owns a replayed handle", async ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("an undelivered timed-out invocation can be abandoned without retiring its turn binding", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-abandon-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const environment = {
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" as const },
+      tools: [],
+    };
+    const token = await broker.register(environment, undefined, "queued-timeout");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    const callId = "call_queued_timeout_123456789";
+    const pending = callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId,
+      wireName: "exec_command",
+      arguments: { cmd: "echo never-delivered" },
+    }, null);
+
+    await Bun.sleep(25);
+    expect(await callTurnBroker(socketPath, {
+      method: "cancel_invoke",
+      bindingId: claimed.bindingId,
+      callId,
+    })).toEqual({ cancelled: true, delivered: false, pending: false });
+    await expect(pending).rejects.toThrow("abandoned before delivery");
+
+    const resolved = await callTurnBroker<{ environment: { cwd: string } }>(socketPath, {
+      method: "resolve",
+      bindingId: claimed.bindingId,
+    });
+    expect(resolved.environment.cwd).toBe(root);
+    const replay = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    expect(replay.bindingId).toBe(claimed.bindingId);
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a delivered invocation cannot be marked safe-to-retry by timeout cleanup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-delivered-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "delivered-timeout");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    const callId = "call_delivered_timeout_1234567";
+    const pending = callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId,
+      wireName: "exec_command",
+      arguments: { cmd: "echo delivered" },
+    }, null);
+
+    const batch = await broker.nextToolBatch(token);
+    expect(batch.map(item => item.callId)).toEqual([callId]);
+    expect(await callTurnBroker(socketPath, {
+      method: "cancel_invoke",
+      bindingId: claimed.bindingId,
+      callId,
+    })).toEqual({ cancelled: false, delivered: true, pending: true });
+
+    broker.completeTool(token, callId, { content: [{ type: "text", text: "ok" }] });
+    expect(await pending).toEqual({ content: [{ type: "text", text: "ok" }] });
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
