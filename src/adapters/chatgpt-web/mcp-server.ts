@@ -786,7 +786,9 @@ export async function runChatGptMcpServer(options: {
       ].join(" ")),
       inputSchema: {
         ...turnReferenceInput(contract),
-        cmd: z.string().min(1).max(100_000),
+        cmd: z.string().min(1).max(100_000).describe(
+          "One logical OS operation per call. For inspection/probing, do not combine multiple reads, git queries, hashes, parser probes, or section-marker output in one shell/PowerShell command; use separate codex_exec calls.",
+        ),
         workdir: z.string().max(16_384).optional(),
         yield_time_ms: z.number().int().min(250).max(30_000).optional(),
         max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
