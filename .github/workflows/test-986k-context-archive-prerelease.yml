@@ -1,9 +1,9 @@
-name: Test 922K Context Archive Windows Pre-release
+name: Test 986K Context Archive Windows Pre-release
 
 on:
   push:
     branches:
-      - test/922k-context-archive
+      - test/986k-context-archive
   workflow_dispatch:
 
 permissions:
@@ -11,7 +11,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: test-922k-context-archive-${{ github.ref }}
+  group: test-986k-context-archive-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -62,10 +62,10 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tag = "v$version-922k-context-archive-pre.${{ github.run_number }}"
+          $tag = "v$version-986k-context-archive-pre.${{ github.run_number }}"
           $source = Get-ChildItem "launcher/artifacts/*.exe" | Select-Object -First 1
           if (-not $source) { throw "Windows installer was not produced" }
-          $exe = "codex-web-gpt-$version-922k-context-archive-pre-win-x64.exe"
+          $exe = "codex-web-gpt-$version-986k-context-archive-pre-win-x64.exe"
           Copy-Item $source.FullName $exe -Force
           $digest = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$digest  $exe" | Set-Content "$exe.sha256" -Encoding ascii
@@ -81,7 +81,7 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-922k-context-archive-${{ github.sha }}
+          name: windows-installer-986k-context-archive-${{ github.sha }}
           path: |
             ${{ env.PRE_EXE }}
             ${{ env.PRE_SHA }}
@@ -89,38 +89,62 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+      - name: Remove older archive-test releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tags = gh release list --repo "$env:GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName'
+          foreach ($tag in $tags) {
+            if ($tag -like "v*-922k-context-archive-pre.*" -or $tag -like "v*-986k-context-archive-pre.*") {
+              Write-Host "Deleting old test release/tag: $tag"
+              gh release delete "$tag" --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
+              if ($LASTEXITCODE -ne 0) { throw "Failed to delete old release/tag $tag" }
+            }
+          }
+
       - name: Publish GitHub pre-release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $notes = @'
-          Experimental Windows pre-release for branch test/922k-context-archive.
+          Experimental Windows pre-release for branch test/986k-context-archive.
 
           Validated commit: ${{ github.sha }}
 
           Experimental changes:
-          - Automatic ChatGPT Web compaction boundary: 922,000 input tokens (1,050,000 context - 128,000 max output).
-          - Large canonical context transported as one ZIP containing context.txt, manifest.json, images/, and optional skills/.
-          - Short outer composer prompt keeps Codex Native2 routing active and instructs the backend to reconstruct the archive.
-          - ZIP rejection/unreadable fallback retries with one UTF-8 context text attachment instead of a giant composer paste or many image attachments.
-          - Compaction Markdown is consumed from the final DOM snapshot to avoid transient block_order_changed reconnects.
-          - Long-response / upload / compaction timeout budgets are increased substantially for near-1M-token turns.
-          - Accepted main turns with no assistant response now fail after three minutes with a retryable first-response stall; eligible retries keep the same conversation.
+          - Automatic ChatGPT Web compaction boundary: 986,000 input tokens inside the 1,050,000 hard model window, leaving 64,000 tokens of headroom before the hard context boundary.
+          - Active-source compaction receives a full 60-second settle grace after its latest delivered compaction interrupt before falling back to canonical-history rebuild.
+          - Public reasoning/status text already visible in the ChatGPT DOM is forwarded as Codex commentary so progress is visible alongside native commands and MCP tools. Hidden chain-of-thought remains hidden.
+          - Free Luna Medium activates Think by clicking the visible Think toggle and verifies aria-pressed plus connector/draft preservation before sending.
+          - Large canonical context is transported through the archive/file path; compaction handoff preserves exact validation probes and expected values.
 
           SHA-256: __DIGEST__
 
           This is a pre-release for testing only and does not replace the stable main release.
           '@
           $notes = $notes.Replace('__DIGEST__', $env:PRE_DIGEST)
-          if (gh release view "$env:PRE_TAG" --repo "$env:GITHUB_REPOSITORY" *> $null) {
-            gh release delete "$env:PRE_TAG" --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
-          }
           gh release create "$env:PRE_TAG" `
             "$env:PRE_EXE" `
             "$env:PRE_SHA" `
             --repo "$env:GITHUB_REPOSITORY" `
             --target "${{ github.sha }}" `
             --prerelease `
-            --title "Codex Web GPT $env:PRE_VERSION - 922K Context Archive Test" `
+            --title "Codex Web GPT $env:PRE_VERSION - 986K Context Archive Test" `
             --notes "$notes"
+
+      - name: Retire old 922K test branch
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $old = "test/922k-context-archive"
+          git ls-remote --exit-code --heads origin $old *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Deleting retired branch $old"
+            git push origin --delete $old
+            if ($LASTEXITCODE -ne 0) { throw "Failed to delete retired branch $old" }
+          } else {
+            Write-Host "Retired branch $old is already absent"
+          }
