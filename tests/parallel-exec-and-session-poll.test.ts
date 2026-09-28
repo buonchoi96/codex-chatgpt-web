@@ -29,10 +29,15 @@ test("parallel command bridge preserves single-purpose command safety", () => {
   expect(CHATGPT_NATIVE_MCP_INSTRUCTIONS).toContain(PARALLEL_COMMAND_RULE);
 
   const source = readFileSync("src/adapters/chatgpt-web/mcp-server.ts", "utf8");
-  expect(source).toContain('"codex_parallel_exec"');
-  expect(source).toContain("z.array(z.object({");
-  expect(source).toContain("})).min(2).max(8)");
-  expect(source).toContain("Promise.all(input.commands.map");
-  expect(source).toContain("Parallel calls always use the default sandbox");
-  expect(source).not.toMatch(/codex_parallel_exec[\s\S]{0,5000}require_escalated/);
+  const start = source.indexOf('server.registerTool(\n    "codex_parallel_exec"');
+  const end = source.indexOf('server.registerTool(\n    "codex_write_stdin"', start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const parallelBlock = source.slice(start, end);
+  expect(parallelBlock).toContain("z.array(z.object({");
+  expect(parallelBlock).toContain("})).min(2).max(8)");
+  expect(parallelBlock).toContain("Promise.all(input.commands.map");
+  expect(parallelBlock).toContain("Parallel calls always use the default sandbox");
+  expect(parallelBlock).not.toContain("require_escalated");
+  expect(parallelBlock).not.toContain("sandbox_permissions");
 });

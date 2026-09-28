@@ -2933,6 +2933,7 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(listed.tools.map(tool => tool.name).sort()).toEqual([
         "codex_apply_patch",
         "codex_exec",
+        "codex_parallel_exec",
         "codex_readonly_tool_call",
         "codex_tool_call",
         "codex_tool_inventory",
@@ -2953,7 +2954,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }));
       // The explicit name, schema and annotation assertions below are the connector ABI contract.
       // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
-      expect(publicConnectorAbi).toHaveLength(11);
+      expect(publicConnectorAbi).toHaveLength(12);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -2961,6 +2962,12 @@ describe("ChatGPT outer-native harness v4", () => {
         expect(tool.outputSchema).toBeUndefined();
       }
       expect(listed.tools.find(tool => tool.name === "codex_exec")?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+      expect(listed.tools.find(tool => tool.name === "codex_parallel_exec")?.annotations).toMatchObject({
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: false,

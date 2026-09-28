@@ -1002,12 +1002,15 @@ export async function runChatGptMcpServer(options: {
         };
         const startedAt = Date.now();
         const results = await Promise.all(input.commands.map((command, index) => runOne(command, index)));
+        const failedCount = results.filter(item => item.ok === false).length;
         return result({
           parallel: true,
           command_count: input.commands.length,
           elapsed_ms: Date.now() - startedAt,
+          succeeded: results.length - failedCount,
+          failed: failedCount,
           results,
-        }, results.some(item => item.ok === false));
+        }, failedCount === results.length);
       },
     ),
   );

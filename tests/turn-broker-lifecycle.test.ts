@@ -594,3 +594,49 @@ test("Computer Use telemetry measures result-to-next-tool decision latency witho
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("parallel native invocations are delivered as one broker tool batch", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-parallel-batch-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "parallel-batch");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+
+    const firstId = "call_parallel_first_123456789";
+    const secondId = "call_parallel_second_12345678";
+    const first = callTurnBroker<{ content: unknown[] }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: firstId,
+      wireName: "exec_command",
+      arguments: { cmd: "git status --short" },
+    }, null);
+    const second = callTurnBroker<{ content: unknown[] }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: secondId,
+      wireName: "exec_command",
+      arguments: { cmd: "git rev-parse HEAD" },
+    }, null);
+
+    const batch = await broker.nextToolBatch(token);
+    expect(batch.map(item => item.callId).sort()).toEqual([firstId, secondId].sort());
+    expect(batch).toHaveLength(2);
+
+    broker.completeTool(token, firstId, { content: [{ type: "text", text: "first" }] });
+    broker.completeTool(token, secondId, { content: [{ type: "text", text: "second" }] });
+    expect(await first).toEqual({ content: [{ type: "text", text: "first" }] });
+    expect(await second).toEqual({ content: [{ type: "text", text: "second" }] });
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
