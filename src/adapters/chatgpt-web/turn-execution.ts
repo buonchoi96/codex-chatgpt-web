@@ -508,6 +508,7 @@ export class ChatGptTurnSessions {
   private readonly retirements = new Map<string, Promise<void>>();
   private readonly ownerRetirements = new Map<string, Promise<void>>();
   private readonly conversationRetirements = new Map<string, Promise<void>>();
+  private readonly agentGraph = new ChatGptAgentSessionGraph();
 
   constructor(
     private readonly ttlMs = 30 * 60_000,
@@ -735,11 +736,53 @@ export class ChatGptTurnSessions {
     return matches.length;
   }
 
+  linkAgentThreads(parentThreadId: string, childThreadId: string): void {
+    this.agentGraph.link(parentThreadId, childThreadId);
+  }
+
+  linkAgentReference(parentThreadId: string, reference: string): void {
+    this.agentGraph.linkReference(parentThreadId, reference);
+  }
+
+  retireAgentThread(threadId: string): number {
+    const matches = [...this.entries].filter(([, session]) => session.nativeThreadId === threadId);
+    for (const [key, session] of matches) {
+      this.entries.delete(key);
+      this.forgetConversationHead(session);
+      this.beginRetirement(key, session);
+    }
+    this.agentGraph.forget([threadId]);
+    return matches.length;
+  }
+
+  retireAgentThreadTree(threadId: string): number {
+    const ids = this.agentGraph.descendants(threadId);
+    let retired = 0;
+    for (const id of ids) {
+      const matches = [...this.entries].filter(([, session]) => session.nativeThreadId === id);
+      for (const [key, session] of matches) {
+        this.entries.delete(key);
+        this.forgetConversationHead(session);
+        this.beginRetirement(key, session);
+        retired += 1;
+      }
+    }
+    this.agentGraph.forget(ids);
+    return retired;
+  }
+
+  retireAgentReference(parentThreadId: string, reference: string, descendants: boolean): number {
+    const threadId = this.agentGraph.resolveReference(parentThreadId, reference);
+    if (!threadId) return 0;
+    return descendants ? this.retireAgentThreadTree(threadId) : this.retireAgentThread(threadId);
+  }
+
   clear(): number {
     const cancelled = this.entries.size;
     for (const [key, session] of this.entries) this.beginRetirement(key, session);
     this.entries.clear();
     this.conversationHeads.clear();
+    this.agentGraph.clear();
     return cancelled;
   }
 
