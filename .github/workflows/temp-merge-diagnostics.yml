@@ -154,13 +154,17 @@ jobs:
           Path(p).write_text(text, encoding="utf-8")
           PY
 
+          git add -A
           unresolved="$(git diff --name-only --diff-filter=U)"
           if [ -n "$unresolved" ]; then
             echo "Unresolved files:"
             echo "$unresolved"
             exit 1
           fi
-          git add -A
+          if git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . ':!bun.lock' ':!launcher/bun.lock' ; then
+            echo "Conflict markers remain after resolution"
+            exit 1
+          fi
           git diff --cached --check
           git commit -m "merge: upstream 6.1.3 into enhanced 986K main integration"
 
