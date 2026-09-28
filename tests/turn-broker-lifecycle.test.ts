@@ -535,3 +535,62 @@ test("a delivered invocation cannot be marked safe-to-retry by timeout cleanup",
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("Computer Use telemetry measures result-to-next-tool decision latency without payload logging", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-cu-latency-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  const originalInfo = console.info;
+  const logs: string[] = [];
+  console.info = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "cu-latency");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+
+    const firstCallId = "call_computer_use_latency_1234";
+    const first = callTurnBroker<{ content: unknown[] }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: firstCallId,
+      wireName: "mcp__node_repl__js",
+      arguments: { code: "SECRET_SCREEN_PAYLOAD_SHOULD_NOT_BE_LOGGED" },
+    }, null);
+    const firstBatch = await broker.nextToolBatch(token);
+    expect(firstBatch.map(item => item.callId)).toEqual([firstCallId]);
+    broker.completeTool(token, firstCallId, {
+      content: [{ type: "text", text: "SECRET_UI_RESULT_SHOULD_NOT_BE_LOGGED" }],
+    });
+    await first;
+
+    const secondCallId = "call_computer_use_next_123456";
+    const second = callTurnBroker<{ content: unknown[] }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: secondCallId,
+      wireName: "mcp__node_repl__js",
+      arguments: { code: "next()" },
+    }, null);
+    const secondBatch = await broker.nextToolBatch(token);
+    expect(secondBatch.map(item => item.callId)).toEqual([secondCallId]);
+    broker.completeTool(token, secondCallId, { content: [{ type: "text", text: "ok" }] });
+    await second;
+
+    const joined = logs.join("\n");
+    expect(joined).toContain("[computer-use]");
+    expect(joined).toContain("toolComplete tool=mcp__node_repl__js");
+    expect(joined).toContain("decisionLatencyMs=");
+    expect(joined).not.toContain("SECRET_SCREEN_PAYLOAD_SHOULD_NOT_BE_LOGGED");
+    expect(joined).not.toContain("SECRET_UI_RESULT_SHOULD_NOT_BE_LOGGED");
+  } finally {
+    console.info = originalInfo;
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

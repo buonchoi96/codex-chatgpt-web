@@ -102,6 +102,7 @@ const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
 export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
 export const COMMAND_SAFETY_TRANSPORT_RULE = "Codex command-safety compatibility: keep shell and PowerShell calls single-purpose and minimal. Do not batch unrelated read-only probes into one command with semicolons, command chains, multiple interpreter invocations, Write-Output separators, large loops, or compound pipelines. Prefer one file read, hash, search, parser invocation, or other independent operation per command and make additional calls as needed. If a command is blocked before execution, do not retry the same compound form; split it into smaller read-only commands that preserve the requested work.";
+export const COMPUTER_USE_FAST_PATH_RULE = "Computer Use fast path: keep the persistent node_repl/@oai/sky session and reuse already-discovered module, app, window, and control state across calls. Prefer structured app/window/control state over a new screenshot whenever it is sufficient to choose the next action. Do not re-describe or re-analyze an unchanged screen. When a screenshot is necessary, focus on the relevant or changed UI region when the capability supports it, preserve enough detail for reliable coordinates/text, then choose the next action immediately. When no intermediate branch, confirmation, or safety-sensitive decision is required, execute a short deterministic sequence of low-risk UI actions before observing again. Re-observe after a meaningful UI state transition, when the target is ambiguous, or before a destructive/irreversible action. Avoid repeating list_apps, imports, discovery, or full-screen observation when the persistent session already has valid state.";
 // The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
@@ -124,6 +125,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For native desktop automation, prefer an official OpenAI Codex Computer Use capability that is actually present in the current outer Codex registry.",
   "For native Windows app control, explicitly query codex_tool_inventory for node_repl. When mcp__node_repl__js is available, prefer persistent node_repl + @oai/sky: import @oai/sky, retain sky in the REPL session, call sky.list_apps(), and continue through the native app/window operations exposed by sky.",
+  COMPUTER_USE_FAST_PATH_RULE,
   "Use codex_tool_inventory to discover the exact Computer Use surface. When discovery_tools contains tool_search, invoke tool_search through codex_tool_call and continue discovery in the same response; then invoke the exact returned wire_name through codex_tool_call or the native exec gateway.",
   "Treat cua_repl as browser-oriented unless its current description/state explicitly proves native computer APIs are enabled. apps=[], 'Native computer APIs are disabled', a missing sky trusted service, or an equivalent native-surface error is a signal to try node_repl + @oai/sky instead of declaring native Windows unavailable.",
   "Do not treat ChatGPT's browser-only computer surface as evidence of native desktop access.",
@@ -258,6 +260,13 @@ function isCommandExecutionToolName(name: string): boolean {
     || name.endsWith("__shell_command");
 }
 
+function isComputerUseFastPathToolName(name: string): boolean {
+  return name === "mcp__node_repl__js"
+    || name === "node_repl__js"
+    || name === "node_repl"
+    || name.startsWith(WINDOWS_COMPUTER_USE_WIRE_PREFIX);
+}
+
 function browserToolDescription(tool: CodexTool): string {
   if (!tool.namespace && tool.name === "exec") {
     return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE} This rule is enforced for wait_agent calls made inside exec; recursive raw exec is unavailable.\n\n${COMMAND_SAFETY_TRANSPORT_RULE}`;
@@ -265,6 +274,7 @@ function browserToolDescription(tool: CodexTool): string {
   const rules: string[] = [];
   if (isAgentWaitTool(tool)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
   if (isCommandExecutionToolName(wireName(tool))) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
+  if (isComputerUseFastPathToolName(wireName(tool))) rules.push(COMPUTER_USE_FAST_PATH_RULE);
   return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 
@@ -365,6 +375,7 @@ function gatewayToolDescription(tool: GatewayToolDescriptor): string {
   const rules: string[] = [];
   if (isGatewayAgentWaitTool(tool.name)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
   if (isCommandExecutionToolName(tool.name)) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
+  if (isComputerUseFastPathToolName(tool.name)) rules.push(COMPUTER_USE_FAST_PATH_RULE);
   return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 

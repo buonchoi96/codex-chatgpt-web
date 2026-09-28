@@ -99,6 +99,8 @@ interface TurnChannel {
   waiters: Set<ToolWaiter>;
   toolCallsQueued: number;
   toolCallsCompleted: number;
+  lastComputerUseCompletedAt?: number;
+  lastComputerUseCompletedTool?: string;
   requireNativeCompletionReceipt: boolean;
   pendingNativeCompletionReceipt?: { activityId: string; receipt: NativeCompletionReceipt };
   nativeCompletionReceipt?: { receipt: NativeCompletionReceipt; revision: number };
@@ -252,6 +254,12 @@ export interface BrokerToolResultDiagnostic {
  * whether Codex returned completed child payloads to the bridge while keeping subagent findings out
  * of launcher diagnostics.
  */
+export function isComputerUseTelemetryTool(wireName: string): boolean {
+  return wireName === "mcp__node_repl__js"
+    || wireName === "node_repl__js"
+    || wireName.startsWith("mcp__windows_computer_use__windows_computer_use_");
+}
+
 export function brokerToolResultDiagnostic(
   request: BrokerToolRequest,
   result: BrokerToolResult,
@@ -612,6 +620,13 @@ export class TurnBroker implements TurnBrokerOwner {
     console.info(
       `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
     );
+    if (isComputerUseTelemetryTool(invocation.request.wireName)) {
+      channel.lastComputerUseCompletedAt = Date.now();
+      channel.lastComputerUseCompletedTool = invocation.request.wireName;
+      console.info(
+        `[computer-use] trace=${channel.traceId} toolComplete tool=${invocation.request.wireName}`,
+      );
+    }
     const diagnostic = brokerToolResultDiagnostic(invocation.request, result);
     if (diagnostic) {
       console.info(
@@ -1614,6 +1629,15 @@ export class TurnBroker implements TurnBrokerOwner {
       freeform: request.freeform === true,
       ...(request.freeform === true ? { input: request.input ?? "" } : { arguments: request.arguments ?? {} }),
     };
+    if (binding.channel.lastComputerUseCompletedAt !== undefined) {
+      const decisionLatencyMs = Math.max(0, Date.now() - binding.channel.lastComputerUseCompletedAt);
+      console.info(
+        `[computer-use] trace=${binding.channel.traceId} decisionLatencyMs=${decisionLatencyMs}`
+        + ` previousTool=${binding.channel.lastComputerUseCompletedTool ?? "unknown"} nextTool=${wireName}`,
+      );
+      binding.channel.lastComputerUseCompletedAt = undefined;
+      binding.channel.lastComputerUseCompletedTool = undefined;
+    }
     return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
       binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke });
       binding.channel.queuedCallIds.push(callId);
