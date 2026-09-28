@@ -1840,14 +1840,33 @@ export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 15 * 60_000;
  * generation becomes a retryable adapter failure instead of looking alive forever.
  */
 export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
+/**
+ * Once a turn has demonstrated real Codex Native progress, allow a longer quiet reasoning phase.
+ *
+ * A long tool-capable task can legitimately spend several minutes synthesizing results after its
+ * last command. Retrying that proven-live turn at the same five-minute threshold used for a turn
+ * that never did any work discards useful browser state and is especially harmful to subagents.
+ */
+export const CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 /** Near-1M compaction can spend materially longer in backend reasoning than an ordinary turn. */
 export const CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 
 export class ChatGptRunningProgressTracker {
   private signature?: string;
   private lastProgressAt?: number;
+  private sawExternalProgress = false;
 
-  constructor(private readonly stallMs = CHATGPT_RUNNING_NO_PROGRESS_STALL_MS) {}
+  constructor(
+    private readonly stallMs = CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
+    private readonly provenProgressStallMs = Math.max(
+      stallMs,
+      CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS,
+    ),
+  ) {}
+
+  currentStallMs(): number {
+    return this.sawExternalProgress ? this.provenProgressStallMs : this.stallMs;
+  }
 
   update(state: {
     running: boolean;
@@ -1859,8 +1878,10 @@ export class ChatGptRunningProgressTracker {
     if (!state.running) {
       this.signature = undefined;
       this.lastProgressAt = undefined;
+      this.sawExternalProgress = false;
       return false;
     }
+    if (state.externalLastProgressAt !== undefined) this.sawExternalProgress = true;
     // ChatGPT's own reconnect / stream-recovery UI can mutate status rows for many minutes
     // without the model producing new output. Status-only churn is not semantic task progress.
     // Public Activity-renderer summaries are different: they record concrete model actions
@@ -1884,7 +1905,7 @@ export class ChatGptRunningProgressTracker {
       this.lastProgressAt = now;
       return false;
     }
-    return now - this.lastProgressAt >= this.stallMs;
+    return now - this.lastProgressAt >= this.currentStallMs();
   }
 }
 
@@ -6147,7 +6168,7 @@ export class ChatGptBrowserWorker {
           await diagnostics.capture(page, "response-no-progress-5m").catch(() => {});
           await stop.press("Enter").catch(() => {});
           throw new ChatGptWebAdapterError(
-            `ChatGPT remained in a running state for ${(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS / 60_000).toFixed(1)} minutes without visible response, reasoning, ChatGPT activity, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
+            `ChatGPT remained in a running state for ${(runningProgressTracker.currentStallMs() / 60_000).toFixed(1)} minutes without visible response, reasoning, ChatGPT activity, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
             {
               status: 504,
               errorType: "server_error",
