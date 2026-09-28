@@ -246,6 +246,54 @@ function brokerResult(message: CodexToolResultMessage): BrokerToolResult {
   };
 }
 
+const CODEX_AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CODEX_AGENT_REFERENCE = /^\/?[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/;
+
+function validAgentReference(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 1024
+    && (CODEX_AGENT_ID.test(value) || CODEX_AGENT_REFERENCE.test(value));
+}
+
+function applyNativeAgentLifecycle(
+  session: ChatGptTurnSession,
+  message: CodexToolResultMessage,
+  parentThreadId: string | undefined,
+): void {
+  if (!parentThreadId) return;
+  const request = session.outstanding().find(candidate => candidate.callId === message.toolCallId);
+  if (!request || message.isError) return;
+  const result = brokerResult(message);
+  const structured = result.structuredContent;
+  if (request.wireName === "multi_agent_v1__spawn_agent"
+    && structured && typeof structured === "object" && !Array.isArray(structured)) {
+    const agentId = (structured as { agent_id?: unknown }).agent_id;
+    if (typeof agentId === "string" && CODEX_AGENT_ID.test(agentId)) {
+      chatGptTurnSessions.linkAgentThreads(parentThreadId, agentId);
+      chatGptTurnSessions.linkAgentReference(parentThreadId, agentId);
+    }
+    return;
+  }
+  if (request.wireName === "collaboration__spawn_agent"
+    && structured && typeof structured === "object" && !Array.isArray(structured)) {
+    const reference = (structured as { task_name?: unknown }).task_name;
+    if (validAgentReference(reference)) chatGptTurnSessions.linkAgentReference(parentThreadId, reference);
+    return;
+  }
+  const interrupt = request.wireName === "multi_agent_v1__interrupt_agent"
+    || request.wireName === "collaboration__interrupt_agent";
+  const close = request.wireName === "multi_agent_v1__close_agent"
+    || request.wireName === "collaboration__close_agent";
+  if (!interrupt && !close) return;
+  const target = request.arguments?.target;
+  if (!validAgentReference(target)) return;
+  if (CODEX_AGENT_ID.test(target)) {
+    if (close) chatGptTurnSessions.retireAgentThreadTree(target);
+    else chatGptTurnSessions.retireAgentThread(target);
+    return;
+  }
+  chatGptTurnSessions.retireAgentReference(parentThreadId, target, close);
+}
+
 function emitToolBatch(requests: BrokerToolRequest[], usage: CodexUsage, emit: (event: AdapterEvent) => void): void {
   for (const request of requests) {
     emit({ type: "tool_call_start", id: request.callId, name: request.wireName });
@@ -1196,6 +1244,10 @@ export function createChatGptWebAdapter(
         const nativeIdentity = extractChatGptTurnIdentity(parsed);
         const nativeTurnId = nativeIdentity.turnId;
         if (!nativeTurnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser ownership");
+        if (nativeIdentity.threadId && nativeIdentity.parentThreadId
+          && nativeIdentity.threadId !== nativeIdentity.parentThreadId) {
+          chatGptTurnSessions.linkAgentThreads(nativeIdentity.parentThreadId, nativeIdentity.threadId);
+        }
         const abortedTurnIds = manualRequest ? new Set(priorChatGptAbortedTurnIds(parsed)) : undefined;
         if (abortedTurnIds?.size) {
           chatGptTurnSessions.retireAbortedOwnerTurns(ownerKey, abortedTurnIds, executionKey);
@@ -1307,6 +1359,7 @@ export function createChatGptWebAdapter(
                   throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
                 for (const message of results) {
+                  applyNativeAgentLifecycle(session, message, nativeIdentity.threadId);
                   await broker.completeTool(turnToken, message.toolCallId, brokerResult(message));
                   session.runtime.externalProgress.recordToolResult();
                   session.markResultDelivered(message.toolCallId);
