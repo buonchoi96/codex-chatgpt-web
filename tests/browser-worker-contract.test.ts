@@ -3158,19 +3158,28 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
   expect(checkpoints).toEqual(["luna-default-confirmed"]);
 });
 
-function thinkSlashFixture() {
-  const state = { pressed: false, controlPresent: true, highlighted: true, popupCount: 1, optionCount: 1,
-    draft: "", connectors: [] as string[], loseConnector: false, commands: [] as string[], enters: 0 };
-  const control = { getAttribute: async () => state.pressed ? "true" : "false" };
+function thinkButtonFixture() {
+  const state = {
+    pressed: false,
+    controlPresent: true,
+    draft: "",
+    connectors: [] as string[],
+    loseConnector: false,
+    clicks: 0,
+  };
+  const control = {
+    getAttribute: async () => state.pressed ? "true" : "false",
+    click: async () => {
+      state.clicks += 1;
+      state.pressed = !state.pressed;
+      if (state.loseConnector) state.connectors = [];
+    },
+  };
   const controls = { count: async () => state.controlPresent ? 1 : 0, first: () => control };
-  const row = { getAttribute: async () => state.highlighted ? "" : null,
-    waitFor: async () => { if (!state.optionCount) throw new Error("Think command is unavailable"); } };
-  const rows = { filter: () => rows, first: () => row, count: async () => state.optionCount };
-  const popup = { filter: () => popup, locator: () => rows, count: async () => state.popupCount };
   const page = {
     locator: (selector: string) => selector === '[role="dialog"]'
       ? dialogPage("").page.locator(selector)
-      : selector === CHATGPT_COMPOSER_SELECTOR ? composer : popup,
+      : composer,
     getByRole: () => ({ filter: () => controls }),
   };
   const composer = {
@@ -3178,15 +3187,7 @@ function thinkSlashFixture() {
     evaluate: async () => ({ text: state.draft.trim(), connectors: [...state.connectors] }),
     focus: async () => {},
     fill: async (text: string) => { state.draft = text; state.connectors = []; },
-    pressSequentially: async (text: string) => { state.commands.push(text); state.draft += text; },
-    press: async (key: string) => {
-      if (key === "ArrowDown") state.highlighted = true;
-      if (key === "Enter") {
-        if (state.draft !== "/think" || !state.highlighted) throw new Error("Unexpected composer submission");
-        state.enters += 1; state.pressed = !state.pressed; state.controlPresent = true; state.draft = "";
-        if (state.loseConnector) state.connectors = [];
-      }
-    },
+    press: async () => {},
   };
   const composerForm = { getByRole: () => ({ filter: () => controls }), locator: () => composer, page: () => page };
   return { state, composer, composerForm, page };
@@ -3211,44 +3212,39 @@ test("modern app-mention connector pills are connector state, not Think prompt d
     .toContain('app-mention-display-name="Codex Native2"');
 });
 
-test("Think slash toggles only when needed, preserves connectors, and normal Luna clears it", async () => {
-  const { state, composerForm } = thinkSlashFixture();
+test("Think button toggles only when needed, preserves connectors, and normal Luna clears it", async () => {
+  const { state, composerForm } = thinkButtonFixture();
   state.connectors = ["Codex Native2"];
   const checkpoints: string[] = [];
 
   await setChatGptThinkMode(composerForm as never, true, async checkpoint => { checkpoints.push(checkpoint); });
   expect(state.pressed).toBeTrue();
-  expect(state.commands).toEqual(["/think"]);
+  expect(state.clicks).toBe(1);
   expect(state.connectors).toEqual(["Codex Native2"]);
   await setChatGptThinkMode(composerForm as never, true);
-  expect(state.commands).toEqual(["/think"]);
+  expect(state.clicks).toBe(1);
   await setChatGptThinkMode(composerForm as never, false, async checkpoint => { checkpoints.push(checkpoint); });
   expect(state.pressed).toBeFalse();
-  expect(state.commands).toEqual(["/think", "/think"]);
+  expect(state.clicks).toBe(2);
   expect(state.draft).toBe("");
-  expect(checkpoints.filter(checkpoint => !checkpoint.startsWith("think-slash-"))).toEqual(["think-enabled", "think-disabled"]);
+  expect(checkpoints).toEqual([
+    "think-button-ready", "think-button-clicked", "think-enabled",
+    "think-button-ready", "think-button-clicked", "think-disabled",
+  ]);
 });
 
-test("Think slash requires one command and verifies a newly exposed control", async () => {
-  const ui = thinkSlashFixture();
+test("Think activation fails closed when the visible semantic button is unavailable", async () => {
+  const ui = thinkButtonFixture();
   ui.state.controlPresent = false;
-  await setChatGptThinkMode(ui.composerForm as never, true);
-  expect(ui.state.pressed).toBeTrue();
-  const ambiguous = thinkSlashFixture();
-  ambiguous.state.optionCount = 2;
-  await expect(setChatGptThinkMode(ambiguous.composerForm as never, true)).rejects.toThrow("exactly one command option");
-  expect(ambiguous.state.enters).toBe(0);
-  const unavailable = thinkSlashFixture();
-  unavailable.state.controlPresent = false;
-  unavailable.state.optionCount = 0;
-  await expect(setChatGptThinkMode(unavailable.composerForm as never, true)).rejects.toThrow("Think command is unavailable");
-  expect(unavailable.state.enters).toBe(0);
+  await expect(setChatGptThinkMode(ui.composerForm as never, true))
+    .rejects.toThrow("Think button is unavailable");
+  expect(ui.state.clicks).toBe(0);
 });
 
 test("Think attachment runs after fresh connector selection and rechecks retained and Browser-only turns", async () => {
   const attach = (ChatGptBrowserWorker.prototype as unknown as { attachPrompt: (...args: unknown[]) => Promise<void> }).attachPrompt;
   for (const [localTools, retained] of [[true, false], [true, true], [false, false]]) {
-    const ui = thinkSlashFixture();
+    const ui = thinkButtonFixture();
     if (retained) ui.state.connectors = ["Codex Native2"];
     let connectorSelections = 0;
     const submitted: boolean[] = [];
@@ -3268,14 +3264,14 @@ test("Think attachment runs after fresh connector selection and rechecks retaine
       ui.state.pressed = false;
       await attach.call(worker, ui.page, "follow-up task", localTools, undefined, undefined, false, undefined, retained, true);
       expect(submitted).toEqual([true, true]);
-      expect(ui.state.commands).toEqual(["/think", "/think"]);
+      expect(ui.state.clicks).toBe(2);
       expect(connectorSelections).toBe(1);
     }
   }
 });
 
 test("Think attachment rolls back a lost connector and never inserts the prompt", async () => {
-  const ui = thinkSlashFixture();
+  const ui = thinkButtonFixture();
   ui.state.loseConnector = true;
   let insertions = 0;
   let cleanup = 0;
@@ -5129,7 +5125,7 @@ test("a stage that spans a system sleep is not charged for the slept time", asyn
   expect(outcome).toEqual(["ChatGPT browser stage timed out: probe"]);
 }, 10_000);
 
-test("Luna Think attachment reacquires the composer after connector and Think DOM mutations", () => {
+test("Luna Think attachment reacquires the composer and uses the visible Think toggle", () => {
   const source = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const start = source.indexOf("let selectedComposer = await this.selectConnector(");
   const end = source.indexOf("await this.assertPromptAttached(page, prompt, abortSignal);", start);
@@ -5139,4 +5135,9 @@ test("Luna Think attachment reacquires the composer after connector and Think DO
   const reacquires = connectorBlock.match(/selectedComposer = await this\.activeComposer\(page, 30_000, abortSignal\);/g) ?? [];
   expect(reacquires.length).toBe(2);
   expect(connectorBlock).toContain("await setChatGptThinkMode(selectedComposer.locator(\"xpath=ancestor::form[1]\"), true");
+  const thinkStart = source.indexOf("export async function setChatGptThinkMode(");
+  const thinkEnd = source.indexOf("export function chatGptNewTurnIdentity(", thinkStart);
+  const thinkBlock = source.slice(thinkStart, thinkEnd);
+  expect(thinkBlock).toContain("await control.click(actionOptions)");
+  expect(thinkBlock).not.toContain('pressSequentially("/think"');
 });
