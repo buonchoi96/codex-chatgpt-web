@@ -602,6 +602,12 @@ export class ChatGptTurnSessions {
     return session;
   }
 
+  activeTraceIds(): string[] {
+    return [...new Set([...this.entries.values()]
+      .filter(session => session.isActive() && session.traceId)
+      .map(session => session.traceId!))];
+  }
+
   findConversationHead(conversationKey: string): ChatGptTurnSession | undefined {
     const session = this.conversationHeads.get(conversationKey);
     session?.touch();
