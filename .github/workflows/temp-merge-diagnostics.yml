@@ -1,4 +1,4 @@
-name: Temporary Merge Diagnostics
+name: Temporary Main Integration
 
 on:
   push:
@@ -6,53 +6,176 @@ on:
       - merge/upstream-6.1.3
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  integrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Inspect merge conflicts
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Merge enhanced branch, main ancestry, and upstream 6.1.3
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main test/986k-enhanced-cherrypicks
-          echo "=== HEADS ==="
-          git log -1 --oneline HEAD
-          git log -1 --oneline origin/main
-          git log -1 --oneline origin/test/986k-enhanced-cherrypicks
-          echo "=== ENHANCED vs MAIN conflict files ==="
-          rm -rf /tmp/merge1 && git worktree add --detach /tmp/merge1 origin/main
-          (
-            cd /tmp/merge1
-            set +e
-            git merge --no-commit --no-ff origin/test/986k-enhanced-cherrypicks
-            rc=$?
-            echo "merge_rc=$rc"
-            git diff --name-only --diff-filter=U || true
-            git status --short
-            git merge --abort >/dev/null 2>&1 || true
-          )
-          git worktree remove --force /tmp/merge1
-          echo "=== ENHANCED vs UPSTREAM-6.1.3 conflict files ==="
-          rm -rf /tmp/merge2 && git worktree add --detach /tmp/merge2 origin/test/986k-enhanced-cherrypicks
-          (
-            cd /tmp/merge2
-            set +e
-            git merge --no-commit --no-ff "$GITHUB_SHA"
-            rc=$?
-            echo "merge_rc=$rc"
-            git diff --name-only --diff-filter=U || true
-            echo "=== CONFLICT MARKERS (bounded) ==="
-            for f in $(git diff --name-only --diff-filter=U); do
-              echo "----- $f -----"
-              grep -n -B 8 -A 12 -E '^(<<<<<<<|=======|>>>>>>>)' "$f" | head -n 500 || true
-            done
-            git merge --abort >/dev/null 2>&1 || true
-          )
-          git worktree remove --force /tmp/merge2
+
+          git switch --detach origin/test/986k-enhanced-cherrypicks
+          git switch -c integration/main-986k-upstream
+
+          # Keep the enhanced implementation for the two overlapping custom hunks while
+          # recording current main as a real merge parent.
+          git merge --no-ff -X ours -m "merge: integrate enhanced 986K branch with main" origin/main
+
+          # Merge the real upstream 6.1.3 commit. Resolve only the five known overlapping files;
+          # all other upstream changes use Git's normal 3-way result.
+          set +e
+          git merge --no-ff --no-commit fa2d2c6c24926078b46eedb2186f69f2e8d548d7
+          merge_rc=$?
+          set -e
+          if [ "$merge_rc" -ne 0 ] && [ "$merge_rc" -ne 1 ]; then
+            exit "$merge_rc"
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def resolve_markers(path: str, choice: str) -> str:
+              text = Path(path).read_text(encoding="utf-8")
+              lines = text.splitlines(keepends=True)
+              out = []
+              i = 0
+              while i < len(lines):
+                  if not lines[i].startswith("<<<<<<< "):
+                      out.append(lines[i])
+                      i += 1
+                      continue
+                  i += 1
+                  ours = []
+                  while i < len(lines) and not lines[i].startswith("======="):
+                      # Default merge style has no base section; fail closed if one appears.
+                      if lines[i].startswith("||||||| "):
+                          raise RuntimeError(f"unexpected diff3 base marker in {path}")
+                      ours.append(lines[i])
+                      i += 1
+                  if i >= len(lines):
+                      raise RuntimeError(f"unterminated ours block in {path}")
+                  i += 1
+                  theirs = []
+                  while i < len(lines) and not lines[i].startswith(">>>>>>> "):
+                      theirs.append(lines[i])
+                      i += 1
+                  if i >= len(lines):
+                      raise RuntimeError(f"unterminated theirs block in {path}")
+                  i += 1
+                  out.extend(ours if choice == "ours" else theirs)
+              resolved = "".join(out)
+              if "<<<<<<< " in resolved or "=======" in resolved or ">>>>>>> " in resolved:
+                  raise RuntimeError(f"unresolved conflict marker in {path}")
+              return resolved
+
+          # Upstream fixed turn ownership while the enhanced branch independently extended the
+          # browser worker. Select only upstream's overlapping hunk; all non-conflicting enhanced
+          # code remains in the auto-merged file.
+          p = "src/adapters/chatgpt-web/browser-worker.ts"
+          Path(p).write_text(resolve_markers(p, "theirs"), encoding="utf-8")
+
+          # Existing fork tests cover custom authentication lifecycle behavior. Keep those
+          # overlapping tests while retaining upstream's automatically merged non-conflicting tests.
+          p = "launcher/tests/browser-host.test.cjs"
+          Path(p).write_text(resolve_markers(p, "ours"), encoding="utf-8")
+
+          # Preserve the fork's Luna-only account helper, while taking upstream's stable plan-code
+          # Limits implementation.
+          p = "src/adapters/chatgpt-web/limits.ts"
+          text = resolve_markers(p, "theirs")
+          marker = '/** ChatGPT uses distinct account plan codes for Pro and Pro Light, independent of UI labels. */'
+          helper = '''export function chatGptPlanUsesLunaOnly(planType: string | undefined): boolean {
+            const normalized = planType?.trim().toLowerCase();
+            return normalized === "free" || normalized === "go";
+          }
+
+          '''
+          if "export function chatGptPlanUsesLunaOnly" not in text:
+              if marker not in text:
+                  raise RuntimeError("limits insertion marker missing")
+              text = text.replace(marker, helper + marker, 1)
+          Path(p).write_text(text, encoding="utf-8")
+
+          # Keep the Luna-only regression test and use upstream's new plan-code regression instead
+          # of the removed Billing-heading parser tests.
+          p = "tests/chatgpt-limits.test.ts"
+          text = resolve_markers(p, "theirs")
+          import_marker = 'import {\n'
+          if "chatGptPlanUsesLunaOnly," not in text:
+              text = text.replace(import_marker, import_marker + "  chatGptPlanUsesLunaOnly,\n", 1)
+          test_marker = 'test("Limits reads exact personal account tiers without inspecting billing UI"'
+          luna_test = '''test("Free and Go plans are Luna-only while paid Sol-capable plan labels are not", () => {
+            expect(chatGptPlanUsesLunaOnly("free")).toBeTrue();
+            expect(chatGptPlanUsesLunaOnly(" FREE ")).toBeTrue();
+            expect(chatGptPlanUsesLunaOnly("go")).toBeTrue();
+            for (const plan of ["plus", "pro", "team", "business", "enterprise", undefined]) {
+              expect(chatGptPlanUsesLunaOnly(plan)).toBeFalse();
+            }
+          });
+
+          '''
+          if "Free and Go plans are Luna-only" not in text:
+              if test_marker not in text:
+                  raise RuntimeError("limits test insertion marker missing")
+              text = text.replace(test_marker, luna_test + test_marker, 1)
+          Path(p).write_text(text, encoding="utf-8")
+
+          # Keep the fork's developer-MCP recovery guidance and upstream's Windows CA fix.
+          p = "TROUBLESHOOTING.md"
+          text = resolve_markers(p, "theirs")
+          heading = '### Windows: `unable to verify the first certificate` or `SELF_SIGNED_CERT_IN_CHAIN`'
+          forbidden = '''If ChatGPT itself returns `FORBIDDEN: This conversation does not support developer MCPs`, the
+          request was rejected by ChatGPT before it reached the Tunnel or local broker. Automatic mode now
+          retires that capability-dead conversation and retries the Codex turn on a fresh ChatGPT surface
+          instead of spending the completion-receipt recovery budget on the same conversation. If the same
+          FORBIDDEN result repeats in every fresh chat, verify that the launcher browser is signed into the
+          intended account/workspace, that Developer Mode is enabled there, and that its plan/workspace policy
+          permits the connector's actions. The launcher cannot override an account-side developer-MCP gate.
+
+          '''
+          if "capability-dead conversation" not in text:
+              if heading not in text:
+                  raise RuntimeError("troubleshooting insertion marker missing")
+              text = text.replace(heading, forbidden + heading, 1)
+          Path(p).write_text(text, encoding="utf-8")
+          PY
+
+          unresolved="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$unresolved" ]; then
+            echo "Unresolved files:"
+            echo "$unresolved"
+            exit 1
+          fi
+          git add -A
+          git diff --cached --check
+          git commit -m "merge: upstream 6.1.3 into enhanced 986K main integration"
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Verify integrated source
+        run: bun run verify
+
+      - name: Push verified integration branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin HEAD:refs/heads/integration/main-986k-upstream
