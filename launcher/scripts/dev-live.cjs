@@ -28,8 +28,8 @@ let reloadAgain = false;
 const watchers = [];
 const pending = { runtime: false, electron: false };
 
-const log = message => process.stdout.write(\`[dev-live] \${message}\n\`);
-const warn = message => process.stderr.write(\`[dev-live] \${message}\n\`);
+const log = message => process.stdout.write(`[dev-live] ${message}\n`);
+const warn = message => process.stderr.write(`[dev-live] ${message}\n`);
 
 function liveEnvironment(extra = {}) {
   const env = {
@@ -74,13 +74,13 @@ function runChecked(command, args, options = {}) {
     windowsHide: true,
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(\`\${path.basename(command)} exited with status \${result.status ?? 1}\`);
+  if (result.status !== 0) throw new Error(`${path.basename(command)} exited with status ${result.status ?? 1}`);
 }
 
 function buildBrowserHelper() {
   const started = Date.now();
   runChecked(bun, ["run", "scripts/build-browser-helper.ts"], { cwd: repoRoot });
-  log(\`browser helper rebuilt in \${Date.now() - started} ms\`);
+  log(`browser helper rebuilt in ${Date.now() - started} ms`);
 }
 
 async function waitForVite() {
@@ -92,7 +92,7 @@ async function waitForVite() {
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 150));
   }
-  throw new Error(\`Vite did not become ready on \${viteUrl}\`);
+  throw new Error(`Vite did not become ready on ${viteUrl}`);
 }
 
 function startVite() {
@@ -103,7 +103,7 @@ function startVite() {
   });
   vite.once("exit", code => {
     if (!stopped && code !== 0) {
-      warn(\`Vite exited with code \${code}\`);
+      warn(`Vite exited with code ${code}`);
       void stop(1);
     }
   });
@@ -117,18 +117,18 @@ function startElectron() {
     env: liveEnvironment({ VITE_DEV_SERVER_URL: viteUrl }),
   });
   electron.once("error", error => {
-    warn(\`Electron failed to start: \${error.message}\`);
+    warn(`Electron failed to start: ${error.message}`);
     if (!stopped) void stop(1);
   });
   electron.once("exit", code => {
     electron = undefined;
     if (stopped || electronRestarting) return;
-    warn(\`Electron exited unexpectedly (\${code ?? 0}); restarting source launcher\`);
+    warn(`Electron exited unexpectedly (${code ?? 0}); restarting source launcher`);
     setTimeout(() => {
       if (!stopped && !electron) startElectron();
     }, 500);
   });
-  log(\`source launcher started with persistent state at \${liveHome}\`);
+  log(`source launcher started with persistent state at ${liveHome}`);
 }
 
 async function waitForElectronExit(child, timeoutMs = 10_000) {
@@ -181,7 +181,7 @@ async function health(config, timeoutMs = 1_500) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(\`http://\${config.host}:\${config.port}/healthz\`, { signal: controller.signal });
+    const response = await fetch(`http://${config.host}:${config.port}/healthz`, { signal: controller.signal });
     if (!response.ok) return undefined;
     return await response.json();
   } catch {
@@ -192,14 +192,14 @@ async function health(config, timeoutMs = 1_500) {
 }
 
 async function control(config, action) {
-  const response = await fetch(\`http://\${config.host}:\${config.port}/admin/\${action}\`, {
+  const response = await fetch(`http://${config.host}:${config.port}/admin/${action}`, {
     method: "POST",
-    headers: { authorization: \`Bearer \${config.controlToken}\` },
+    headers: { authorization: `Bearer ${config.controlToken}` },
   });
   let body;
   try { body = await response.json(); } catch { body = undefined; }
   if (!response.ok) {
-    throw new Error(\`\${action} returned HTTP \${response.status}\${body ? \`: \${JSON.stringify(body)}\` : ""}\`);
+    throw new Error(`${action} returned HTTP ${response.status}${body ? `: ${JSON.stringify(body)}` : ""}`);
   }
   return body;
 }
@@ -218,14 +218,14 @@ async function restartDaemonFromSource() {
 
   const oldPid = before.pid;
   const deadline = Date.now() + Math.max(1_000, idleRestartTimeoutMs);
-  log(\`draining Responses daemon pid \${oldPid} before source reload\`);
+  log(`draining Responses daemon pid ${oldPid} before source reload`);
   for (;;) {
     const state = await control(config, "drain");
     if (state?.active_http_turns === 0 && state?.active_browser_turns === 0) break;
     if (Date.now() >= deadline) {
       await control(config, "resume").catch(() => {});
       throw new Error(
-        \`source reload timed out waiting for \${state?.active_http_turns ?? "?"} HTTP and \${state?.active_browser_turns ?? "?"} browser turn(s) to finish\`,
+        `source reload timed out waiting for ${state?.active_http_turns ?? "?"} HTTP and ${state?.active_browser_turns ?? "?"} browser turn(s) to finish`,
       );
     }
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -236,7 +236,7 @@ async function restartDaemonFromSource() {
   while (Date.now() < restartDeadline) {
     const next = await health(config);
     if (next && Number.isInteger(next.pid) && next.pid !== oldPid && next.accepting_turns === true) {
-      log(\`Responses daemon reloaded from source: \${oldPid} -> \${next.pid}\`);
+      log(`Responses daemon reloaded from source: ${oldPid} -> ${next.pid}`);
       return;
     }
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -258,7 +258,7 @@ function tryConnectRoute() {
   const result = routeCommand("connect");
   if (result.error || result.status !== 0) {
     const detail = String(result.stderr || result.stdout || result.error || "").trim();
-    warn(\`could not connect the live Codex route yet\${detail ? \`: \${detail}\` : ""}\`);
+    warn(`could not connect the live Codex route yet${detail ? `: ${detail}` : ""}`);
     return false;
   }
   log("real Codex route is connected to the source runtime");
@@ -282,7 +282,7 @@ function restorePreviousRoute() {
   const result = routeCommand("disconnect");
   if (result.error || result.status !== 0) {
     const detail = String(result.stderr || result.stdout || result.error || "").trim();
-    warn(\`could not restore the previous Codex route\${detail ? \`: \${detail}\` : ""}\`);
+    warn(`could not restore the previous Codex route${detail ? `: ${detail}` : ""}`);
     return;
   }
   log("previous Codex route restored");
@@ -317,7 +317,7 @@ function watchPortable(root, callback) {
 function scheduleReload(kind, changedPath) {
   if (stopped) return;
   pending[kind] = true;
-  log(\`\${kind === "electron" ? "launcher" : "runtime"} change detected: \${path.relative(repoRoot, changedPath)}\`);
+  log(`${kind === "electron" ? "launcher" : "runtime"} change detected: ${path.relative(repoRoot, changedPath)}`);
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => { void flushReload(); }, reloadDelayMs);
 }
@@ -337,7 +337,7 @@ async function flushReload() {
     if (electronChanged) await restartElectron();
     else if (runtimeChanged) await restartDaemonFromSource();
   } catch (error) {
-    warn(\`reload failed: \${error instanceof Error ? error.message : String(error)}\`);
+    warn(`reload failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     reloadRunning = false;
     if (reloadAgain || pending.electron || pending.runtime) {
@@ -379,7 +379,7 @@ async function main() {
   assertProductionLauncherStopped();
   fs.mkdirSync(liveHome, { recursive: true });
   fs.mkdirSync(liveUserData, { recursive: true });
-  log(\`persistent live home: \${liveHome}\`);
+  log(`persistent live home: ${liveHome}`);
   log("the installed launcher must stay closed while this process owns Codex Native2/tunnel resources");
   buildBrowserHelper();
   startVite();
