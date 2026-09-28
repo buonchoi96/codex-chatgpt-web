@@ -1,0 +1,138 @@
+name: Test 986K Enhanced Cherry-picks Windows Pre-release
+
+on:
+  push:
+    branches:
+      - test/986k-enhanced-cherrypicks
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: test-986k-enhanced-cherrypicks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-build-prerelease:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+
+      - name: Verify source and regression tests
+        run: bun run verify
+
+      - name: Build Windows launcher
+        run: bun run --cwd launcher package:win
+
+      - name: Provide an E drive for installer smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\codex-e-drive" | Out-Null
+          subst E: "$env:RUNNER_TEMP\codex-e-drive"
+
+      - name: Smoke packaged launcher
+        run: bun run app:smoke
+
+      - name: Remove temporary E drive
+        if: always()
+        shell: pwsh
+        run: |
+          subst E: /D 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "E: subst was not active" }
+          exit 0
+
+      - name: Prepare pre-release assets
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version-986k-enhanced-cherrypicks-pre.${{ github.run_number }}"
+          $source = Get-ChildItem "launcher/artifacts/*.exe" | Select-Object -First 1
+          if (-not $source) { throw "Windows installer was not produced" }
+          $exe = "codex-web-gpt-$version-986k-enhanced-cherrypicks-pre-win-x64.exe"
+          Copy-Item $source.FullName $exe -Force
+          $digest = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $exe" | Set-Content "$exe.sha256" -Encoding ascii
+          "PRE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_SHA=$exe.sha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PRE_DIGEST=$digest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-986k-enhanced-cherrypicks-${{ github.sha }}
+          path: |
+            ${{ env.PRE_EXE }}
+            ${{ env.PRE_SHA }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Remove older enhanced-test releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tags = gh release list --repo "$env:GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName'
+          foreach ($tag in $tags) {
+            if ($tag -like "v*-986k-enhanced-cherrypicks-pre.*") {
+              Write-Host "Deleting older enhanced test release/tag: $tag"
+              gh release delete "$tag" --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
+              if ($LASTEXITCODE -ne 0) { throw "Failed to delete old enhanced release/tag $tag" }
+            }
+          }
+
+      - name: Publish GitHub pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @'
+          Experimental Windows pre-release for branch test/986k-enhanced-cherrypicks.
+
+          Validated commit: ${{ github.sha }}
+
+          Baseline retained from test/986k-context-archive:
+          - 986,000-token automatic compaction boundary within the 1,050,000 hard Web context.
+          - 60-second active compaction source settle grace.
+          - Direct Luna Medium Think-button activation and DOM-visible progress commentary.
+
+          Selectively ported from Evanlau1798/codex-chatgpt-web:
+          - Native subagent session graph/lifecycle with descendant retirement.
+          - Opt-in Automatic Web Account Safety state machine and rolling unique-session admission.
+          - Native2 output tunnel: commentary/reasoning-summary/final transport with DOM verification/fallback.
+          - Durable passive recovery checkpoints at complete tool-result boundaries, exact-prefix hashing, and one-shot recovery control.
+
+          Hidden chain-of-thought remains hidden. The Native2 reasoning channel carries only concise user-visible reasoning summaries.
+
+          SHA-256: __DIGEST__
+
+          Test pre-release only; it does not replace main or the 986K baseline branch.
+          '@
+          $notes = $notes.Replace('__DIGEST__', $env:PRE_DIGEST)
+          gh release create "$env:PRE_TAG" `
+            "$env:PRE_EXE" `
+            "$env:PRE_SHA" `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --target "${{ github.sha }}" `
+            --prerelease `
+            --title "Codex Web GPT $env:PRE_VERSION - 986K Enhanced Cherry-picks Test" `
+            --notes "$notes"
