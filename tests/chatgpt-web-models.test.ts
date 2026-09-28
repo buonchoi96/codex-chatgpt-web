@@ -182,8 +182,8 @@ describe("fixed ChatGPT Web model routes", () => {
     });
     for (const effort of ["medium", "high", "xhigh"] as const) {
       expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, effort, pro)).toEqual({
-        contextWindow: 1_050_000,
-        effectiveContextWindowPercent: 100,
+        contextWindow: 1_105_264,
+        effectiveContextWindowPercent: 95,
         autoCompactTokenLimit: 986_000,
       });
     }
