@@ -807,6 +807,14 @@ export function bridgeToResponsesSSE(
   const cancelStream = () => {
     // Client (Codex) disconnected. Stop emitting and let the caller abort the upstream fetch so a
     // cancelled turn does not leak the upstream stream or keep draining tokens (RC2).
+    const cancelledAt = now();
+    console.warn(
+      `[bridge] client_cancelled model=${modelId} response=${responseId}`
+      + ` emittedFrames=${emittedFrames} adapterEvents=${adapterEventCount}`
+      + ` lastEvent=${lastAdapterEventType} sinceLastEventMs=${cancelledAt - lastAdapterEventAt}`
+      + ` sinceStreamStartMs=${cancelledAt - streamStartedAt} terminated=${terminated}`
+      + ` upstreamDone=${upstreamDone}`,
+    );
     clientCancelled = true;
     closed = true;
     if (beat) clearInterval(beat);
@@ -824,6 +832,11 @@ export function bridgeToResponsesSSE(
         startStream();
         void pump().catch(error => {
           if (closed) return;
+          console.error(
+            `[bridge] stream_pump_failed model=${modelId} response=${responseId}`
+            + ` emittedFrames=${emittedFrames} adapterEvents=${adapterEventCount}`
+            + ` lastEvent=${lastAdapterEventType} error=${error instanceof Error ? error.message : String(error)}`,
+          );
           closed = true;
           if (beat) clearInterval(beat);
           onCancel?.();
