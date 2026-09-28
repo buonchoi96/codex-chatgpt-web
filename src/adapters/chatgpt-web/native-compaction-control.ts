@@ -2,7 +2,23 @@ import { COMPACT_PROMPT } from "../../responses/compaction";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 
 export const CODEX_COMPACTION_CONTROL_WIRE_NAME = "codex.control.compaction_handoff";
+export const CODEX_RECOVERY_CHECKPOINT_WIRE_NAME = "codex.control.recovery_checkpoint";
 export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_REQUEST";
+
+export function passiveRecoveryCheckpointInstruction(transaction: CompactionTransactionHandle): string {
+  return [
+    "<codex_recovery_checkpoint>",
+    "This is a private recovery checkpoint, not Codex context compaction and not a new user request.",
+    "Consume the canonical tool result above. Summarize the current objective, user instructions, verified work, decisions, exact validation probes/IDs/expected values, and pending steps so a fresh page can continue if this page fails.",
+    "Preserve exact literals, hashes, sentinel values, file paths, commit SHAs, numeric probes, and user-specified constraints verbatim whenever they are needed for later validation.",
+    "Before another work tool, call codex_tool_call exactly once with the one-shot control binding below:",
+    `turn_token ${transaction.token}`,
+    `wire_name ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}`,
+    `arguments ${JSON.stringify({ handoff_id: transaction.handoffId, summary: "<complete recovery checkpoint>" })}`,
+    "After submitted=true, continue the same Web response and task with the original work turn_token. Do not expose the checkpoint to the user.",
+    "</codex_recovery_checkpoint>",
+  ].join("\n");
+}
 
 function compactionControlBinding(transaction: CompactionTransactionHandle): string[] {
   return [
