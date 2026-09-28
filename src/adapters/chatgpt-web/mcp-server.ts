@@ -779,7 +779,11 @@ export async function runChatGptMcpServer(options: {
     "codex_exec",
     {
       title: "Run a native Codex command",
-      description: afterSafeStart(contract, "Invoke the command tool advertised by the current outer Codex harness. A long-running command returns its native session_id."),
+      description: afterSafeStart(contract, [
+        "Invoke the command tool advertised by the current outer Codex harness. A long-running command returns its native session_id.",
+        COMMAND_SAFETY_TRANSPORT_RULE,
+        "For codex_exec inspection/probing, send exactly one logical OS operation per call. In particular, do not combine Get-Content, git status, git rev-parse, hashing, parser probes, or similar reads with semicolon/&&/|| chains or Write-Output section separators; make separate codex_exec calls instead.",
+      ].join(" ")),
       inputSchema: {
         ...turnReferenceInput(contract),
         cmd: z.string().min(1).max(100_000),
@@ -1147,6 +1151,7 @@ export async function runChatGptMcpServer(options: {
       title: "Call any tool from the current Codex harness",
       description: afterSafeStart(contract, [
         "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
+        "When wire_name is exec_command or shell_command (including a namespaced variant), apply the command-safety compatibility rule from that inventory entry and keep inspection/probing to one logical OS operation per call.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           `A passive recovery checkpoint may similarly provide ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}; both controls accept only the issued one-shot token and {handoff_id, summary}.`,

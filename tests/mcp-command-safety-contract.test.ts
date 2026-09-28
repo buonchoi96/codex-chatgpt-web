@@ -18,4 +18,7 @@ test("Full Harness teaches command-safety-compatible single-purpose shell calls"
   expect(source).toContain('name.endsWith("__shell_command")');
   expect(source).toMatch(/browserToolDescription[\s\S]*COMMAND_SAFETY_TRANSPORT_RULE/);
   expect(source).toMatch(/gatewayToolDescription[\s\S]*COMMAND_SAFETY_TRANSPORT_RULE/);
+  expect(source).toMatch(/"codex_exec"[\s\S]*COMMAND_SAFETY_TRANSPORT_RULE[\s\S]*exactly one logical OS operation per call/);
+  expect(source).toContain("When wire_name is exec_command or shell_command");
+  expect(source).toContain("do not combine Get-Content, git status, git rev-parse");
 });
