@@ -28,6 +28,14 @@ export interface BrokerToolResult {
   _meta?: unknown;
 }
 
+export type BrokerTurnOutputKind = "commentary" | "reasoning" | "final";
+
+export interface BrokerTurnOutputEvent {
+  sequence: number;
+  kind: BrokerTurnOutputKind;
+  text: string;
+}
+
 export type NativeCompletionState = "complete" | "blocked";
 
 export interface NativeCompletionReceipt {
@@ -47,6 +55,14 @@ interface PendingInvocation {
 
 interface ToolWaiter {
   resolve: (requests: BrokerToolRequest[]) => void;
+  reject: (error: Error) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+interface OutputWaiter {
+  afterSequence: number;
+  resolve: (event: BrokerTurnOutputEvent) => void;
   reject: (error: Error) => void;
   signal?: AbortSignal;
   onAbort?: () => void;
@@ -98,6 +114,12 @@ interface TurnChannel {
   activityRevision: number;
   completionCommitted: boolean;
   completionRevision?: number;
+  outputEvents: BrokerTurnOutputEvent[];
+  outputChars: number;
+  outputFinalSequence?: number;
+  outputSealed: boolean;
+  outputResumeAfter: number;
+  outputWaiters: Set<OutputWaiter>;
   retirementWaiters: Set<SafeWaiter<void>>;
   batchTimer?: ReturnType<typeof setTimeout>;
 }
@@ -130,7 +152,11 @@ interface BrokerRequest {
     | "safe_complete"
     | "native_complete"
     | "activity_complete"
-    | "submit_compaction_handoff";
+    | "submit_compaction_handoff"
+    | "submit_output"
+    | "owner_next_output"
+    | "owner_reset_output"
+    | "owner_seal_output";
   token?: string;
   bindingId?: string;
   wireName?: string;
@@ -154,6 +180,11 @@ interface BrokerRequest {
   blockedRequirements?: string[];
   remainingActionableRequirements?: string[];
   blocker?: string;
+  outputKind?: BrokerTurnOutputKind;
+  outputText?: string;
+  afterSequence?: number;
+  outputSequence?: number;
+  expectedRevision?: number;
   contract?: "native" | "safe";
 }
 
@@ -254,6 +285,9 @@ export interface TurnBrokerOwner {
   commitCompletionFence(token: string, revision: number): boolean | Promise<boolean>;
   requireNativeCompletionReceipt(token: string): void | Promise<void>;
   nativeCompletionReceiptAccepted(token: string): boolean | Promise<boolean>;
+  nextOutput(token: string, afterSequence: number, signal?: AbortSignal): Promise<BrokerTurnOutputEvent>;
+  resetOutput(token: string, finalSequence: number): void | Promise<void>;
+  sealOutput(token: string, afterSequence: number, expectedRevision: number): boolean | Promise<boolean>;
   waitForRetirement(token: string, signal?: AbortSignal): Promise<void>;
   revoke(token: string, reason?: Error): void | Promise<void>;
 }
@@ -337,6 +371,11 @@ export class TurnBroker implements TurnBrokerOwner {
       completedActivities: new Set(),
       activityRevision: 0,
       completionCommitted: false,
+      outputEvents: [],
+      outputChars: 0,
+      outputSealed: false,
+      outputResumeAfter: 0,
+      outputWaiters: new Set(),
       retirementWaiters: new Set(),
     };
     this.channels.set(token, channel);
@@ -471,6 +510,115 @@ export class TurnBroker implements TurnBrokerOwner {
       `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
     );
     invocation.resolve(result);
+  }
+
+  submitOutput(
+    token: string,
+    kind: BrokerTurnOutputKind,
+    text: string,
+  ): { accepted: true; sequence: number; duplicate: boolean } {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    if (channel.safe) throw new Error("Zero Risk requests use the safe completion contract");
+    if (kind !== "commentary" && kind !== "reasoning" && kind !== "final") {
+      throw new Error("Codex Native output kind is invalid");
+    }
+    if (!text || (kind === "final" && !text.trim()) || text.length > 1_000_000) {
+      throw new Error("Codex Native output text is invalid");
+    }
+    if (channel.outputSealed) throw new Error("Codex Native output arrived after DOM fallback was sealed");
+    if (channel.outputFinalSequence !== undefined) {
+      const previous = channel.outputEvents[channel.outputFinalSequence - 1];
+      if (kind === "final" && previous?.text === text) {
+        return { accepted: true, sequence: previous.sequence, duplicate: true };
+      }
+      throw new Error(kind === "final"
+        ? "Codex Native output submitted conflicting final answers"
+        : "Codex Native output arrived after the final answer");
+    }
+    if (channel.completionCommitted) throw new Error("Codex Native output arrived after turn completion");
+    if (kind === "final" && (channel.activities.size > 0 || channel.invocations.size > 0)) {
+      throw new Error("Codex Native final output cannot be accepted while work tools are still active");
+    }
+    if (channel.outputEvents.length >= 10_000 || channel.outputChars + text.length > 5_000_000) {
+      throw new Error("Codex Native output exceeds the per-turn limit");
+    }
+    const event: BrokerTurnOutputEvent = {
+      sequence: channel.outputEvents.length + 1,
+      kind,
+      text,
+    };
+    channel.outputEvents.push(event);
+    channel.outputChars += text.length;
+    if (kind === "final") channel.outputFinalSequence = event.sequence;
+    channel.activityRevision += 1;
+    for (const waiter of [...channel.outputWaiters]) {
+      if (event.sequence <= waiter.afterSequence) continue;
+      channel.outputWaiters.delete(waiter);
+      if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+      waiter.resolve(event);
+    }
+    return { accepted: true, sequence: event.sequence, duplicate: false };
+  }
+
+  nextOutput(token: string, afterSequence: number, signal?: AbortSignal): Promise<BrokerTurnOutputEvent> {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) return Promise.reject(new Error("turn token is invalid or expired"));
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+      return Promise.reject(new Error("Codex Native output sequence is invalid"));
+    }
+    const effectiveAfter = Math.max(afterSequence, channel.outputResumeAfter);
+    const ready = channel.outputEvents.find(event => event.sequence > effectiveAfter);
+    if (ready) return Promise.resolve(ready);
+    if (signal?.aborted) return Promise.reject(new DOMException("turn output wait aborted", "AbortError"));
+    return new Promise((resolveOutput, rejectOutput) => {
+      const waiter: OutputWaiter = {
+        afterSequence: effectiveAfter,
+        resolve: resolveOutput,
+        reject: rejectOutput,
+        ...(signal ? { signal } : {}),
+      };
+      if (signal) {
+        waiter.onAbort = () => {
+          channel.outputWaiters.delete(waiter);
+          rejectOutput(new DOMException("turn output wait aborted", "AbortError"));
+        };
+        signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+      channel.outputWaiters.add(waiter);
+    });
+  }
+
+  resetOutput(token: string, finalSequence: number): void {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    if (!Number.isSafeInteger(finalSequence) || finalSequence < 1
+      || channel.outputFinalSequence !== finalSequence) {
+      throw new Error("Codex Native output reset does not match the pending final answer");
+    }
+    channel.outputFinalSequence = undefined;
+    channel.outputResumeAfter = finalSequence;
+    channel.activityRevision += 1;
+  }
+
+  sealOutput(token: string, afterSequence: number, expectedRevision: number): boolean {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0
+      || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error("Codex Native output seal arguments are invalid");
+    }
+    const latest = channel.outputEvents.at(-1)?.sequence ?? 0;
+    if (latest !== afterSequence) return false;
+    if (channel.activityRevision !== expectedRevision
+      || channel.activities.size > 0 || channel.invocations.size > 0) return false;
+    channel.outputSealed = true;
+    channel.activityRevision += 1;
+    return true;
   }
 
   requireNativeCompletionReceipt(token: string): void {
@@ -724,6 +872,11 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     this.retire(this.retiredTokens, token, channel.traceId);
     this.resolveSafeWaiters(channel.retirementWaiters, undefined);
+    for (const waiter of channel.outputWaiters) {
+      if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+      waiter.reject(reason);
+    }
+    channel.outputWaiters.clear();
     this.rejectChannel(channel, reason);
   }
 
@@ -991,7 +1144,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1050,6 +1203,14 @@ export class TurnBroker implements TurnBrokerOwner {
       this.compactionTransactions.submit(request.token, request.handoffId, request.summary);
       return { submitted: true };
     }
+    if (request.method === "submit_output") {
+      if (!request.token) throw new Error("Codex Native output turn_token is required");
+      if (request.outputKind !== "commentary" && request.outputKind !== "reasoning" && request.outputKind !== "final") {
+        throw new Error("Codex Native output kind is invalid");
+      }
+      if (typeof request.outputText !== "string") throw new Error("Codex Native output text is required");
+      return this.submitOutput(request.token, request.outputKind, request.outputText);
+    }
     if (request.method === "owner_status") {
       return { protocolVersion: 6, acceptingExternalOwners: this.acceptingExternalOwners };
     }
@@ -1096,6 +1257,29 @@ export class TurnBroker implements TurnBrokerOwner {
       }
       this.completeTool(request.token, request.callId, request.toolResult);
       return { completed: true };
+    }
+    if (request.method === "owner_next_output") {
+      if (!request.token) throw new Error("turn owner token is required");
+      if (!Number.isSafeInteger(request.afterSequence) || request.afterSequence! < 0) {
+        throw new Error("turn owner output sequence is invalid");
+      }
+      return this.nextOutput(request.token, request.afterSequence!, socketSignal).then(event => ({ event }));
+    }
+    if (request.method === "owner_reset_output") {
+      if (!request.token) throw new Error("turn owner token is required");
+      if (!Number.isSafeInteger(request.outputSequence) || request.outputSequence! < 1) {
+        throw new Error("turn owner final output sequence is invalid");
+      }
+      this.resetOutput(request.token, request.outputSequence!);
+      return { reset: true };
+    }
+    if (request.method === "owner_seal_output") {
+      if (!request.token) throw new Error("turn owner token is required");
+      if (!Number.isSafeInteger(request.afterSequence) || request.afterSequence! < 0
+        || !Number.isSafeInteger(request.expectedRevision) || request.expectedRevision! < 0) {
+        throw new Error("turn owner output seal arguments are invalid");
+      }
+      return { sealed: this.sealOutput(request.token, request.afterSequence!, request.expectedRevision!) };
     }
     if (request.method === "owner_completion_fence_begin") {
       if (!request.token) throw new Error("turn owner token is required");
@@ -1570,6 +1754,43 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
       callId,
       toolResult: result,
     }, null);
+  }
+
+  async nextOutput(token: string, afterSequence: number, signal?: AbortSignal): Promise<BrokerTurnOutputEvent> {
+    const response = await callTurnBroker<{ event?: unknown }>(
+      this.socketPath,
+      { method: "owner_next_output", token, afterSequence },
+      null,
+      signal,
+    );
+    const event = response.event;
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("DEV turn owner received an invalid Native output event");
+    }
+    const parsed = event as Partial<BrokerTurnOutputEvent>;
+    if (!Number.isSafeInteger(parsed.sequence) || (parsed.sequence as number) < 1
+      || (parsed.kind !== "commentary" && parsed.kind !== "reasoning" && parsed.kind !== "final")
+      || typeof parsed.text !== "string") {
+      throw new Error("DEV turn owner received an invalid Native output event");
+    }
+    return parsed as BrokerTurnOutputEvent;
+  }
+
+  async resetOutput(token: string, finalSequence: number): Promise<void> {
+    const response = await callTurnBroker<{ reset?: unknown }>(this.socketPath, {
+      method: "owner_reset_output", token, outputSequence: finalSequence,
+    });
+    if (response.reset !== true) throw new Error("DEV turn owner could not reset Native output");
+  }
+
+  async sealOutput(token: string, afterSequence: number, expectedRevision: number): Promise<boolean> {
+    const response = await callTurnBroker<{ sealed?: unknown }>(this.socketPath, {
+      method: "owner_seal_output", token, afterSequence, expectedRevision,
+    });
+    if (typeof response.sealed !== "boolean") {
+      throw new Error("DEV turn owner received an invalid Native output seal result");
+    }
+    return response.sealed;
   }
 
   async waitForSafeStart(token: string, signal?: AbortSignal): Promise<void> {
