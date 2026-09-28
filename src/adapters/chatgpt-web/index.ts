@@ -21,6 +21,11 @@ import { namespacedToolName, type AdapterEvent, type CodexContentPart, type Code
 import type { ProviderAdapter } from "../base";
 import { parseDataUrl } from "../image";
 import { ChatGptWebAdapterError } from "./adapter-error";
+import {
+  ChatGptAccountSafety,
+  DEFAULT_CHATGPT_AUTOMATIC_WEB_SESSION_LIMIT,
+  chatGptAccountSafety,
+} from "./account-safety";
 import { ChatGptBrowserWorker } from "./browser-worker";
 import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGptAbortedTurnIds } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
@@ -392,12 +397,29 @@ export function createChatGptWebAdapter(
   dependencies: {
     broker?: TurnBrokerOwner;
     zeroRiskManualControl?: ChatGptZeroRiskManualControl;
+    accountSafety?: ChatGptAccountSafety;
   } = {},
 ): ProviderAdapter {
   const worker = ChatGptBrowserWorker.forProvider(provider);
   const broker = dependencies.broker ?? TurnBroker.forSocket(brokerSocketPath(provider));
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
+  const accountSafety = dependencies.accountSafety
+    ?? chatGptAccountSafety(provider.chatgptWeb?.accountSafetyStatePath
+      ? resolve(expandUserPath(provider.chatgptWeb.accountSafetyStatePath))
+      : undefined);
+  const automaticWebSessionLimitMinutes = provider.chatgptWeb?.automaticWebSessionLimitMinutes;
+  const automaticWebSessionLimitCount = automaticWebSessionLimitMinutes === undefined
+    ? undefined
+    : provider.chatgptWeb?.automaticWebSessionLimitCount ?? DEFAULT_CHATGPT_AUTOMATIC_WEB_SESSION_LIMIT;
+  if (automaticWebSessionLimitCount !== undefined
+    && (!Number.isInteger(automaticWebSessionLimitCount) || automaticWebSessionLimitCount < 1 || automaticWebSessionLimitCount > 10_000)) {
+    throw new Error("ChatGPT Automatic Web session limit count must be an integer from 1 to 10000");
+  }
+  if (automaticWebSessionLimitMinutes !== undefined
+    && (!Number.isInteger(automaticWebSessionLimitMinutes) || automaticWebSessionLimitMinutes < 1 || automaticWebSessionLimitMinutes > 10_080)) {
+    throw new Error("ChatGPT Automatic Web session limit window must be an integer from 1 to 10080 minutes");
+  }
   const timeoutMs = provider.chatgptWeb?.turnTimeoutMs;
   const experimentalSkillAttachments = provider.chatgptWeb?.experimentalSkillAttachments;
   if (experimentalSkillAttachments !== undefined && typeof experimentalSkillAttachments !== "boolean") {
@@ -1253,6 +1275,32 @@ export function createChatGptWebAdapter(
           chatGptTurnSessions.retireAbortedOwnerTurns(ownerKey, abortedTurnIds, executionKey);
         }
         const traceId = chatGptWebTraceId(provider, parsed);
+        if (!manualRequest) {
+          const admission = accountSafety.admit(
+            traceId,
+            retainedConversationKey ?? nativeIdentity.threadId ?? traceId,
+            automaticWebSessionLimitCount,
+            automaticWebSessionLimitMinutes,
+            chatGptTurnSessions.activeTraceIds(),
+          );
+          if (!admission.allowed) {
+            const hardStop = admission.status.state === "HARD_STOP";
+            const rollingLimit = admission.status.reason === "duration_limit";
+            throw new ChatGptWebAdapterError(
+              hardStop
+                ? "Automatic ChatGPT Web is stopped because an account-safety condition requires acknowledgement."
+                : rollingLimit
+                  ? "Automatic ChatGPT Web reached the configured rolling session limit."
+                  : "Automatic ChatGPT Web is paused by the local account-safety guard.",
+              {
+                status: hardStop ? 403 : 429,
+                errorType: hardStop ? "authentication_error" : "rate_limit_error",
+                code: hardStop ? "chatgpt_account_safety_stop" : "chatgpt_account_safety_paused",
+                retryable: false,
+              },
+            );
+          }
+        }
         const session = await chatGptTurnSessions.getOrCreateAfterOwnerRetirement(
           executionKey,
           ownerKey,
@@ -1520,6 +1568,14 @@ export function createChatGptWebAdapter(
             throw error;
           }
           const turnError = submittedTurnFailure(session, error);
+          if (!manualRequest && turnError instanceof ChatGptWebAdapterError) {
+            const safetyReason = turnError.code === "rate_limit_exceeded"
+              ? "rate_limit"
+              : turnError.code === "chatgpt_account_safety_stop"
+                ? "account_security"
+                : undefined;
+            if (safetyReason) accountSafety.trigger(safetyReason, chatGptTurnSessions.activeTraceIds());
+          }
           const autoCompactTransportFailure = turnError instanceof ChatGptWebAdapterError
             && (turnError.code === "browser_prompt_too_long"
               || turnError.code === "message_length_exceeds_limit");
@@ -1573,6 +1629,13 @@ export function createChatGptWebAdapter(
         await runChatGptWebTurn();
       } finally {
         clearInterval(heartbeat);
+        if (!manualInteraction) {
+          accountSafety.tick(
+            automaticWebSessionLimitCount,
+            automaticWebSessionLimitMinutes,
+            chatGptTurnSessions.activeTraceIds(),
+          );
+        }
       }
     },
   };
