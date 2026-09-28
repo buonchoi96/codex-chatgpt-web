@@ -6,6 +6,7 @@ import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
+import { CODEX_OUTPUT_CONTROL_WIRE_NAME, submitNativeOutputControl } from "./native-output-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
 
@@ -1083,6 +1084,7 @@ export async function runChatGptMcpServer(options: {
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
+          `Enhanced tool-capable turns may also bind the reserved ${CODEX_OUTPUT_CONTROL_WIRE_NAME} operation. It is supplied by the prompt, not inventory, and accepts only {kind, text}.`,
         ] : []),
       ].join(" ")),
       inputSchema: {
@@ -1096,6 +1098,11 @@ export async function runChatGptMcpServer(options: {
     async (toolInput, extra) => {
       const { wire_name, arguments: args, input } = toolInput;
       const requestId = turnReference(contract, toolInput);
+      if (contract === "native" && wire_name === CODEX_OUTPUT_CONTROL_WIRE_NAME) {
+        return result(await submitNativeOutputControl(
+          options.brokerSocketPath, requestId, args, input, extra.signal,
+        ));
+      }
       if (contract === "native" && wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME) {
         if (input !== undefined) {
           throw new Error("Compaction control handoff does not accept freeform input");
