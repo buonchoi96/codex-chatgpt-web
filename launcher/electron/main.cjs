@@ -1264,14 +1264,15 @@ async function start() {
       packaged: app.isPackaged,
       runtimeVerified: true,
     })}\n`);
-    browserHost.destroy();
-    await browserControl.close();
-    mainWindow.destroy();
-    // Smoke uses an isolated scratch profile and has already synchronously committed the
-    // readiness marker plus runtime verification. Do not route this through the production
-    // before-quit/requestQuit lifecycle: that cleanup can wait on already-destroyed browser
-    // resources and make an otherwise successful package smoke flaky on Windows CI.
+    // The marker above is the packaged-smoke commit point: runtime installation and execution
+    // have already been verified synchronously. Cleanup must never sit on the critical path after
+    // that point because Electron/Chromium control shutdown can occasionally wait indefinitely on
+    // Windows after browser teardown. The process is an isolated smoke-only profile, so request
+    // browser-control cleanup best-effort and exit the Electron process immediately.
     exitCommitted = true;
+    try { browserHost.destroy(); } catch {}
+    try { mainWindow.destroy(); } catch {}
+    void browserControl.close().catch(() => {});
     app.exit(0);
     return;
   }

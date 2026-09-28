@@ -392,3 +392,16 @@ test("Windows packages embed the checksummed Bun baseline runtime for CPUs witho
   assert.match(baseline, /Get-FileHash[^\n]+SHA256/);
   assert.match(baseline, /CODEX_CHATGPT_WEB_EMBEDDED_BUN=/);
 });
+
+
+test("packaged smoke exits after its durable marker without awaiting browser cleanup", () => {
+  const electronMain = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
+  const smokeStart = electronMain.indexOf('if (launcherSmokeTest) {');
+  assert.ok(smokeStart >= 0);
+  const smokeEnd = electronMain.indexOf('if (IS_DEV_PROFILE)', smokeStart);
+  assert.ok(smokeEnd > smokeStart);
+  const smoke = electronMain.slice(smokeStart, smokeEnd);
+  assert.match(smoke, /fs\.writeFileSync\(markerPath/);
+  assert.match(smoke, /exitCommitted = true;[\s\S]*void browserControl\.close\(\)\.catch\(\(\) => \{\}\);[\s\S]*app\.exit\(0\);/);
+  assert.doesNotMatch(smoke, /await browserControl\.close\(\)/);
+});
