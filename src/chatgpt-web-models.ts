@@ -33,13 +33,15 @@ export const CHATGPT_WEB_MODEL_CONTEXT_WINDOW = 1_050_000;
  * actual model context.
  */
 /**
- * Automatic Web routes reserve the model's full advertised output budget before native compaction:
- * 1,050,000 context tokens - 128,000 max output tokens = 922,000 input tokens.
+ * Experimental archive routes delay native compaction until 986,000 input tokens, leaving 64,000
+ * tokens before the 1,050,000 hard model window. This deliberately tests a denser checkpoint than
+ * the previous 922K boundary; the hard context window remains authoritative if generation itself
+ * approaches that remaining headroom.
  *
  * Browser/composer pressure is handled independently by archive/file transport, so it must not
  * force semantic compaction at the old 32K/80K heuristics.
  */
-export const CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT = 922_000;
+export const CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT = 986_000;
 export const CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 /**
  * Zero Risk remains a manual-paste workflow, so preserve its existing manual three-turn budget
