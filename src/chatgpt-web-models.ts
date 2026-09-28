@@ -26,6 +26,15 @@ export type ChatGptWebModelFamily = "5.6" | "6";
  * (commonly a much smaller effective window); routed Web rows must not inherit that value.
  */
 export const CHATGPT_WEB_MODEL_CONTEXT_WINDOW = 1_050_000;
+/**
+ * Codex clamps auto_compact_token_limit to 90% of resolved_context_window. Automatic Web routes
+ * therefore advertise a calibrated raw window while keeping the effective usable window exactly
+ * equal to the real 1,050,000-token Web model window:
+ * floor(1,105,264 * 95 / 100) = 1,050,000, while floor(1,105,264 * 90 / 100)
+ * = 994,737, safely above the explicit 986,000 compaction threshold.
+ */
+export const CHATGPT_WEB_CODEX_CONTEXT_WINDOW = 1_105_264;
+export const CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 95;
 
 /**
  * These are Web-product compaction heuristics, not model context windows. They keep completed
@@ -113,13 +122,12 @@ export function isChatGptWebZeroRiskBackendModel(
 function contextLimits(
   contextWindow: number,
   autoCompactTokenLimit: number,
+  effectiveContextWindowPercent = 100,
 ): ChatGptWebContextLimits {
   return {
     contextWindow,
-    // This field is a hard-context multiplier inside Codex, not a compaction indicator. Routed
-    // Web models own the full advertised model window; auto-compaction remains an independent
-    // threshold for completed history and must not shrink the effective hard cap.
-    effectiveContextWindowPercent: 100,
+    // This field is a hard-context multiplier inside Codex, not a compaction indicator.
+    effectiveContextWindowPercent,
     autoCompactTokenLimit,
   };
 }
@@ -149,7 +157,11 @@ export function resolveChatGptWebContextLimits(
     // Luna carries continuity through a private checkpoint on every completed browser turn. Codex
     // internally clamps this field to 90% of the model window, but the reported active usage is the
     // bounded payload actually sent to ChatGPT and therefore stays far below that threshold.
-    return contextLimits(CHATGPT_WEB_LUNA_CONTEXT_WINDOW, CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT);
+    return contextLimits(
+      CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
+      CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT,
+      CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
+    );
   }
 
   let autoCompactTokenLimit: number;
@@ -163,11 +175,16 @@ export function resolveChatGptWebContextLimits(
     throw new Error(`ChatGPT Plus context limit is not defined for unavailable effort: ${effort}`);
   }
   if (!capabilities.experimentalBiggerContext) {
-    return contextLimits(CHATGPT_WEB_MODEL_CONTEXT_WINDOW, autoCompactTokenLimit);
+    return contextLimits(
+      CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
+      autoCompactTokenLimit,
+      CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
+    );
   }
   return contextLimits(
-    CHATGPT_WEB_MODEL_CONTEXT_WINDOW,
+    CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
     autoCompactTokenLimit * CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER,
+    CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
   );
 }
 
@@ -217,12 +234,14 @@ export function resolveChatGptWebMessageTokenBudget(
   capabilities: ChatGptWebAccountCapabilities,
   imageTokens = 0,
 ): number {
-  const { contextWindow } = resolveChatGptWebContextLimits(
+  // Browser transport is bounded by the real Web model window, not the larger Codex calibration
+  // window used solely to compensate for Codex's 90% auto-compaction clamp.
+  resolveChatGptWebContextLimits(
     backendModel, effort, { ...capabilities, experimentalBiggerContext: false },
   );
   const { browserMessageTokenLimit } = resolveChatGptWebTransportLimits(backendModel, effort, capabilities);
   return Math.max(0, Math.min(
-    contextWindow - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - imageTokens - 1,
+    CHATGPT_WEB_MODEL_CONTEXT_WINDOW - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - imageTokens - 1,
     browserMessageTokenLimit ?? Infinity,
   ));
 }
