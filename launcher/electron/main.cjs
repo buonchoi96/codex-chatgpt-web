@@ -1267,7 +1267,12 @@ async function start() {
     browserHost.destroy();
     await browserControl.close();
     mainWindow.destroy();
-    app.quit();
+    // Smoke uses an isolated scratch profile and has already synchronously committed the
+    // readiness marker plus runtime verification. Do not route this through the production
+    // before-quit/requestQuit lifecycle: that cleanup can wait on already-destroyed browser
+    // resources and make an otherwise successful package smoke flaky on Windows CI.
+    exitCommitted = true;
+    app.exit(0);
     return;
   }
   if (IS_DEV_PROFILE) {

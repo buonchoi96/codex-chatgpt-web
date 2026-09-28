@@ -108,6 +108,8 @@ test("release installers resolve checksummed native launcher assets", () => {
   const packageSmoke = fs.readFileSync(path.join(launcherRoot, "scripts", "smoke-package.cjs"), "utf8");
   assert.match(packageSmoke, /run\(installer, \["\/S", "\/currentuser"\]/);
   assert.match(packageSmoke, /reg\.exe[\s\S]*InstallLocation/);
+  const electronMain = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
+  assert.match(electronMain, /if \(launcherSmokeTest\)[\s\S]*exitCommitted = true;[\s\S]*app\.exit\(0\);/);
 });
 
 test("packaged launcher owns a detached checksummed updater for every release platform", () => {
