@@ -132,6 +132,10 @@ function contextLimits(
   };
 }
 
+export function resolvedChatGptWebContextWindow(limits: ChatGptWebContextLimits): number {
+  return Math.floor(limits.contextWindow * limits.effectiveContextWindowPercent / 100);
+}
+
 /** Resolve the product limit for the selected visible ChatGPT mode. */
 export function resolveChatGptWebContextLimits(
   backendModel: ChatGptWebBackendModel,
