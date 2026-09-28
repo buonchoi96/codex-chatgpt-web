@@ -286,6 +286,12 @@ export interface CodexProviderConfig {
     threadEnvironmentStatePath?: string;
     /** Persisted exact-parent rolling checkpoints used only by Free/Luna turns. */
     lunaCheckpointStatePath?: string;
+    /** Persisted local Automatic Web safety state. */
+    accountSafetyStatePath?: string;
+    /** Optional unique Automatic Web session budget inside the rolling window. */
+    automaticWebSessionLimitCount?: number;
+    /** Rolling window in minutes; omit to disable proactive admission limiting. */
+    automaticWebSessionLimitMinutes?: number;
     /** Optional explicit safety ceiling. Browser turns have no absolute deadline by default. */
     turnTimeoutMs?: number;
     /**
