@@ -244,8 +244,12 @@ function brokerContent(content: string | CodexContentPart[]): unknown[] {
   });
 }
 
-function brokerResult(message: CodexToolResultMessage): BrokerToolResult {
+function brokerResult(
+  message: CodexToolResultMessage,
+  trailingInstruction?: string,
+): BrokerToolResult {
   const content = brokerContent(message.content);
+  if (trailingInstruction) content.push({ type: "text", text: trailingInstruction });
   const text = typeof message.content === "string"
     ? message.content
     : message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
@@ -1454,11 +1458,50 @@ export function createChatGptWebAdapter(
                 if (results.length !== outstanding.length) {
                   throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
-                for (const message of results) {
-                  applyNativeAgentLifecycle(session, message, nativeIdentity.threadId);
-                  await broker.completeTool(turnToken, message.toolCallId, brokerResult(message));
-                  session.runtime.externalProgress.recordToolResult();
-                  session.markResultDelivered(message.toolCallId);
+                const recoveryCheckpoint = structuredBroker
+                  && !manualRequest
+                  && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
+                  && !parsed._compactionRequest
+                  && session.runtime.conversationKey
+                  && enhancedRecoveryCheckpointStore.shouldCheckpoint(
+                    parsed,
+                    ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
+                  )
+                    ? await structuredBroker.beginRecoveryCheckpoint(
+                        traceId,
+                        5 * 60_000,
+                        summary => enhancedRecoveryCheckpointStore.commit(parsed, summary),
+                      )
+                    : undefined;
+                try {
+                  for (const [resultIndex, message] of results.entries()) {
+                    applyNativeAgentLifecycle(session, message, nativeIdentity.threadId);
+                    const checkpointInstruction = recoveryCheckpoint && resultIndex === results.length - 1
+                      ? passiveRecoveryCheckpointInstruction(recoveryCheckpoint)
+                      : undefined;
+                    await broker.completeTool(
+                      turnToken,
+                      message.toolCallId,
+                      brokerResult(message, checkpointInstruction),
+                    );
+                    session.runtime.externalProgress.recordToolResult();
+                    session.markResultDelivered(message.toolCallId);
+                  }
+                  if (recoveryCheckpoint) {
+                    await withAbort(Promise.race([
+                      structuredBroker.waitForCompactionHandoff(recoveryCheckpoint.token, incoming.abortSignal),
+                      session.browserOutcome.then(outcome => {
+                        throw outcome.type === "error"
+                          ? outcome.error
+                          : new Error("Web response ended before submitting its recovery checkpoint");
+                      }),
+                    ]), incoming.abortSignal);
+                    console.info(
+                      `[chatgpt-web] passive recovery checkpoint durable trace=${traceId} intervalTokens=${ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS}`,
+                    );
+                  }
+                } finally {
+                  if (recoveryCheckpoint) structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
                 }
                 // Retry budgeting is for consecutive browser failures. A successfully journaled
                 // native tool result proves the task made forward progress, so earlier recovery
