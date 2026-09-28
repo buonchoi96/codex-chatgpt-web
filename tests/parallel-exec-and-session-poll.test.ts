@@ -29,11 +29,13 @@ test("parallel command bridge preserves single-purpose command safety", () => {
   expect(CHATGPT_NATIVE_MCP_INSTRUCTIONS).toContain(PARALLEL_COMMAND_RULE);
 
   const source = readFileSync("src/adapters/chatgpt-web/mcp-server.ts", "utf8");
-  const start = source.indexOf('server.registerTool(\n    "codex_parallel_exec"');
-  const end = source.indexOf('server.registerTool(\n    "codex_write_stdin"', start);
-  expect(start).toBeGreaterThan(0);
-  expect(end).toBeGreaterThan(start);
-  const parallelBlock = source.slice(start, end);
+  const startMatch = /server\.registerTool\(\r?\n\s*"codex_parallel_exec"/.exec(source);
+  expect(startMatch?.index ?? -1).toBeGreaterThan(0);
+  const start = startMatch!.index;
+  const remainder = source.slice(start);
+  const endMatch = /server\.registerTool\(\r?\n\s*"codex_write_stdin"/.exec(remainder);
+  expect(endMatch?.index ?? -1).toBeGreaterThan(0);
+  const parallelBlock = remainder.slice(0, endMatch!.index);
   expect(parallelBlock).toContain("z.array(z.object({");
   expect(parallelBlock).toContain("})).min(2).max(8)");
   expect(parallelBlock).toContain("Promise.all(input.commands.map");
