@@ -405,9 +405,14 @@ export function createChatGptWebAdapter(
   const broker = dependencies.broker ?? TurnBroker.forSocket(brokerSocketPath(provider));
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
+  const accountSafetyConfigured = provider.chatgptWeb?.accountSafetyEnabled === true
+    || provider.chatgptWeb?.automaticWebSessionLimitMinutes !== undefined
+    || dependencies.accountSafety !== undefined;
   const accountSafety = dependencies.accountSafety
-    ?? chatGptAccountSafety(provider.chatgptWeb?.accountSafetyStatePath
-      ? resolve(expandUserPath(provider.chatgptWeb.accountSafetyStatePath))
+    ?? (accountSafetyConfigured
+      ? chatGptAccountSafety(provider.chatgptWeb?.accountSafetyStatePath
+        ? resolve(expandUserPath(provider.chatgptWeb.accountSafetyStatePath))
+        : undefined)
       : undefined);
   const automaticWebSessionLimitMinutes = provider.chatgptWeb?.automaticWebSessionLimitMinutes;
   const automaticWebSessionLimitCount = automaticWebSessionLimitMinutes === undefined
@@ -1293,7 +1298,7 @@ export function createChatGptWebAdapter(
           chatGptTurnSessions.retireAbortedOwnerTurns(ownerKey, abortedTurnIds, executionKey);
         }
         const traceId = chatGptWebTraceId(provider, parsed);
-        if (!manualRequest) {
+        if (!manualRequest && accountSafety) {
           const admission = accountSafety.admit(
             traceId,
             nativeIdentity.threadId ?? traceId,
@@ -1634,7 +1639,7 @@ export function createChatGptWebAdapter(
               : turnError.code === "chatgpt_account_safety_stop"
                 ? "account_security"
                 : undefined;
-            if (safetyReason) accountSafety.trigger(safetyReason, chatGptTurnSessions.activeTraceIds());
+            if (safetyReason) accountSafety?.trigger(safetyReason, chatGptTurnSessions.activeTraceIds());
           }
           const autoCompactTransportFailure = turnError instanceof ChatGptWebAdapterError
             && (turnError.code === "browser_prompt_too_long"
@@ -1689,7 +1694,7 @@ export function createChatGptWebAdapter(
         await runChatGptWebTurn();
       } finally {
         clearInterval(heartbeat);
-        if (!manualInteraction) {
+        if (!manualInteraction && accountSafety) {
           accountSafety.tick(
             automaticWebSessionLimitCount,
             automaticWebSessionLimitMinutes,
