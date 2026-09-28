@@ -79,6 +79,7 @@ import {
   notifyLauncherTurn,
 } from "../../launcher-browser-host";
 import {
+  resolvedChatGptWebContextWindow,
   resolveChatGptWebContextLimits,
   resolveChatGptWebMessageTokenBudget,
   resolveChatGptWebTransportLimits,
@@ -975,7 +976,9 @@ export function assertChatGptWebInputWithinLimits(
   if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new Error(`ChatGPT web context limit is not defined for model: ${modelId}`);
   }
-  const { contextWindow } = resolveChatGptWebContextLimits(modelId, effort, capabilities);
+  const contextWindow = resolvedChatGptWebContextWindow(
+    resolveChatGptWebContextLimits(modelId, effort, capabilities),
+  );
   const { browserMessageTokenLimit, browserComposerCharLimit } = resolveChatGptWebTransportLimits(
     modelId,
     effort,
@@ -1033,11 +1036,11 @@ export function assertChatGptWebMultipartInputWithinLimits(
   if (modelId !== CHATGPT_WEB_MODEL_ID) {
     throw new Error(`ChatGPT Bigger Context limit is not defined for model: ${modelId}`);
   }
-  const { contextWindow: baseContextWindow } = resolveChatGptWebContextLimits(
+  const baseContextWindow = resolvedChatGptWebContextWindow(resolveChatGptWebContextLimits(
     modelId,
     effort,
     { ...capabilities, experimentalBiggerContext: false },
-  );
+  ));
   const assertMessageBoundary = (
     label: "stage" | "final part",
     messageTokens: number,
