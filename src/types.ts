@@ -286,6 +286,8 @@ export interface CodexProviderConfig {
     threadEnvironmentStatePath?: string;
     /** Persisted exact-parent rolling checkpoints used only by Free/Luna turns. */
     lunaCheckpointStatePath?: string;
+    /** Enable the ported local Account Safety admission/state machine. */
+    accountSafetyEnabled?: boolean;
     /** Persisted local Automatic Web safety state. */
     accountSafetyStatePath?: string;
     /** Optional unique Automatic Web session budget inside the rolling window. */
