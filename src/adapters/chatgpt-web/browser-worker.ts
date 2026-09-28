@@ -1862,14 +1862,21 @@ export class ChatGptRunningProgressTracker {
       return false;
     }
     // ChatGPT's own reconnect / stream-recovery UI can mutate status rows for many minutes
-    // without the model producing new output. Status-only churn is not semantic task progress:
-    // native tool activity is tracked separately, while real assistant commentary remains a
-    // liveness signal here.
+    // without the model producing new output. Status-only churn is not semantic task progress.
+    // Public Activity-renderer summaries are different: they record concrete model actions
+    // (inspect/list/read/etc.) and therefore reset this watchdog alongside assistant commentary
+    // and native-tool progress.
     const signature = JSON.stringify([
       state.visibleText,
       state.traceBlocks
-        .filter(block => block.kind === "commentary")
-        .map(block => [block.kind, block.key ?? null, block.text, block.complete ?? null]),
+        .filter(block => block.kind === "commentary" || block.activity === true)
+        .map(block => [
+          block.kind,
+          block.key ?? null,
+          block.text,
+          block.complete ?? null,
+          block.activity === true,
+        ]),
       state.externalLastProgressAt ?? null,
     ]);
     if (state.externalToolCallsInFlight || this.signature !== signature || this.lastProgressAt === undefined) {
@@ -1905,6 +1912,8 @@ export interface ChatGptVisibleTraceBlock {
   key?: string;
   complete?: boolean;
   uiControl?: boolean;
+  /** Public Activity-renderer summaries are semantic model progress, unlike status-control churn. */
+  activity?: boolean;
 }
 
 export interface ChatGptVisibleTraceEvent {
@@ -5062,6 +5071,10 @@ export class ChatGptBrowserWorker {
           // are scoped by ChatGPT's streaming-status container.
           uiControl: candidate.matches("button")
             && candidate.closest("[data-streaming-response-status]") === null,
+          // Activity summaries such as inspected/listed/read actions are observable semantic
+          // progress. Mark them separately so the running watchdog can reset without treating
+          // reconnect/status-control churn as model progress.
+          activity: activitySummaryRoots.has(candidate),
         }))
         .filter(block => block.text.length > 0)
         .forEach((block, index) => {
@@ -6134,7 +6147,7 @@ export class ChatGptBrowserWorker {
           await diagnostics.capture(page, "response-no-progress-5m").catch(() => {});
           await stop.press("Enter").catch(() => {});
           throw new ChatGptWebAdapterError(
-            `ChatGPT remained in a running state for ${(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS / 60_000).toFixed(1)} minutes without visible response, reasoning, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
+            `ChatGPT remained in a running state for ${(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS / 60_000).toFixed(1)} minutes without visible response, reasoning, ChatGPT activity, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
             {
               status: 504,
               errorType: "server_error",

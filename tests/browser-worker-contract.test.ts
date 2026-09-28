@@ -4685,6 +4685,33 @@ test("silent running turns become retryable stalls while real progress resets th
   expect(reconnect.update({ ...base, traceBlocks: [{ kind: "commentary", text: "Continuing analysis" }] }, 6_001)).toBeFalse();
   expect(reconnect.update({ ...base, traceBlocks: [{ kind: "commentary", text: "Continuing analysis" }] }, 11_001)).toBeTrue();
 
+  // The Activity renderer reports concrete model work as status-shaped rows. These must reset the
+  // watchdog without making arbitrary reconnect/status churn count as progress.
+  const activity = new ChatGptRunningProgressTracker(5_000);
+  expect(activity.update({
+    ...base,
+    traceBlocks: [{ kind: "status", text: "Inspected task context", activity: true }],
+  }, 1_000)).toBeFalse();
+  expect(activity.update({
+    ...base,
+    traceBlocks: [{ kind: "status", text: "Inspected task context", activity: true }],
+  }, 5_999)).toBeFalse();
+  expect(activity.update({
+    ...base,
+    traceBlocks: [{ kind: "status", text: "Listed conversation files", activity: true }],
+  }, 6_000)).toBeFalse();
+  expect(activity.update({
+    ...base,
+    traceBlocks: [{ kind: "status", text: "Listed conversation files", activity: true }],
+  }, 10_999)).toBeFalse();
+  expect(activity.update({
+    ...base,
+    traceBlocks: [{ kind: "status", text: "Listed conversation files", activity: true }],
+  }, 11_000)).toBeTrue();
+
+  const workerSource = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
+  expect(workerSource).toContain("activity: activitySummaryRoots.has(candidate)");
+
   expect(tracker.update({ ...base, running: false }, 20_000)).toBeFalse();
   expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(5 * 60_000);
   expect(CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS).toBe(15 * 60_000);
