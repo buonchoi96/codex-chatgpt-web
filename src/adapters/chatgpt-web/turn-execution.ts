@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AdapterEvent, CodexParsedRequest } from "../../types";
-import type { BrokerToolRequest } from "./turn-broker";
+import type { BrokerToolRequest, BrokerTurnOutputEvent } from "./turn-broker";
 import { ChatGptWebAdapterError, chatGptBrowserTabClosedError, chatGptTurnSupersededError } from "./adapter-error";
 import {
   chatGptTurnUserRevisionHistory,
@@ -279,6 +279,8 @@ export class ChatGptTurnSession {
   private finalReasoning: string[] = [];
   private outstandingPrelude: AdapterEvent[] = [];
   private finalPrelude: AdapterEvent[] = [];
+  private nativeOutputSequence = 0;
+  private nativeOutputFinal?: string;
   private settledBrowserOutcome?: ChatGptBrowserOutcome;
   private settledPhysical = false;
   private attachedConversationKey: string | undefined;
@@ -415,6 +417,27 @@ export class ChatGptTurnSession {
 
   eventsForFinalReplay(): AdapterEvent[] {
     return [...this.finalPrelude];
+  }
+
+  nativeOutputAfterSequence(): number {
+    return this.nativeOutputSequence;
+  }
+
+  acceptNativeOutput(event: BrokerTurnOutputEvent): void {
+    if (event.sequence !== this.nativeOutputSequence + 1) {
+      throw new Error(
+        `ChatGPT Native output sequence jumped from ${this.nativeOutputSequence} to ${event.sequence}`,
+      );
+    }
+    if (this.nativeOutputFinal !== undefined) {
+      throw new Error("ChatGPT Native output arrived after its final answer");
+    }
+    this.nativeOutputSequence = event.sequence;
+    if (event.kind === "final") this.nativeOutputFinal = event.text;
+  }
+
+  nativeFinalAnswer(): string | undefined {
+    return this.nativeOutputFinal;
   }
 
   roundEvents(key: string): AdapterEvent[] {
