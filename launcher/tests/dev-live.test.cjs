@@ -24,6 +24,6 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   assert.match(source, /next\.pid !== oldPid/);
   assert.match(source, /routeCommand\("connect"\)/);
   assert.match(source, /routeCommand\("disconnect"\)/);
-  assert.match(source, /launcher\/electron/);
+  assert.match(source, /path\.join\(launcherRoot, "electron"\)/);
   assert.match(source, /Vite HMR/);
 });
