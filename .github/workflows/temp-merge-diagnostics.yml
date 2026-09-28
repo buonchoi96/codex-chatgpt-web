@@ -82,11 +82,50 @@ jobs:
                   raise RuntimeError(f"unresolved conflict marker in {path}")
               return resolved
 
-          # Upstream fixed turn ownership while the enhanced branch independently extended the
-          # browser worker. Select only upstream's overlapping hunk; all non-conflicting enhanced
-          # code remains in the auto-merged file.
+          # Upstream tightened detached-turn ownership while enhanced independently split accepted
+          # assistant/user identities. Keep the enhanced data model, then transplant upstream's
+          # replacement validation onto that model.
           p = "src/adapters/chatgpt-web/browser-worker.ts"
-          Path(p).write_text(resolve_markers(p, "theirs"), encoding="utf-8")
+          text = resolve_markers(p, "ours")
+          return_marker = '''    if (!identity || identity === binding.identity) {
+          '''
+          validation = '''    const previouslyAcceptedTurns = new Set(binding.acceptedTurnIdentities);
+              const newUsers = state.userIdentities.filter(userIdentity => !previouslyAcceptedTurns.has(userIdentity));
+              if (newUsers.length > 0) {
+                // Activity can unmount the accepted user group while it renders a temporary
+                // assistant group. Its return must match the ID that acknowledged Send. If no
+                // user ID was observed then, require the entire submitted text instead. A
+                // surviving old group or any competing new turn remains foreign.
+                const user = newUsers[0]!;
+                const replacement = identity && newUsers.length === 1
+                  && binding.identity.startsWith("group:assistant:")
+                  && user.startsWith("group:user:")
+                  && identity === `group:assistant:${user.slice("group:user:".length)}`
+                  && !state.turnIdentities.includes(binding.identity)
+                  && state.turnIdentities.every(turn => previouslyAcceptedTurns.has(turn) || turn === user || turn === identity);
+                let matches = false;
+                if (replacement) {
+                  const locator = page.locator(chatGptAssistantTurnSelector(identity!));
+                  matches = baseline.acceptedUserIdentity
+                    ? user === baseline.acceptedUserIdentity
+                    : Boolean(baseline.submittedText) && await withChatGptBrowserObservationTimeout(withBrowserTurnAbort(locator.evaluate((group, submitted) => {
+                    const bubbles = group.querySelectorAll<HTMLElement>("[data-user-message-bubble]");
+                    const contents = bubbles.length === 1
+                      ? bubbles[0]!.querySelectorAll<HTMLElement>("[data-search-result-target]")
+                      : [];
+                    const normalize = (value: string) => value.replace(/\\r\\n?/g, "\\n");
+                    return contents.length === 1 && normalize(contents[0]!.innerText) === normalize(submitted);
+                  }, baseline.submittedText!), signal));
+                }
+                if (!matches) throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+              }
+
+          '''
+          if "previouslyAcceptedTurns" not in text:
+              if return_marker not in text:
+                  raise RuntimeError("browser-worker ownership insertion marker missing")
+              text = text.replace(return_marker, validation + return_marker, 1)
+          Path(p).write_text(text, encoding="utf-8")
 
           # Existing fork tests cover custom authentication lifecycle behavior. Keep those
           # overlapping tests while retaining upstream's automatically merged non-conflicting tests.
