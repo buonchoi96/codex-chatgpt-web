@@ -360,6 +360,32 @@ function replayEvents(events: AdapterEvent[], emit: (event: AdapterEvent) => voi
   for (const event of events) emit(event);
 }
 
+export function submittedTurnFailureCause(error: unknown): string {
+  const normalized = error instanceof Error ? error : new Error(String(error));
+  if (normalized instanceof DOMException && normalized.name === "AbortError") return "observer_abort";
+  const message = normalized.message;
+  if (message === "ChatGPT browser Markdown stream did not reproduce the completed answer") {
+    return "browser_markdown_mismatch";
+  }
+  if (message === "ChatGPT Native2 final output conflicts with the browser-verified final answer") {
+    return "native_output_conflict";
+  }
+  if (/^Codex returned \d+ of \d+ results for a parallel ChatGPT tool batch$/.test(message)) {
+    return "partial_parallel_tool_results";
+  }
+  if (message.startsWith("ChatGPT bridge tool result does not match an outstanding call:")) {
+    return "tool_result_not_outstanding";
+  }
+  if (message.startsWith("duplicate ChatGPT bridge tool call id:")) return "duplicate_tool_call";
+  if (message === "ChatGPT tool bridge returned an empty batch") return "empty_tool_batch";
+  if (message === "Read-only ChatGPT Web runtime received a broker tool batch") return "readonly_received_tools";
+  if (message === "Tool-capable ChatGPT web runtime lost its trusted environment") return "trusted_environment_lost";
+  if (message === "ChatGPT broker returned tools for a read-only browser turn") return "readonly_broker_tools";
+  return normalized instanceof ChatGptWebAdapterError
+    ? `adapter_${normalized.code || "error"}`
+    : "unclassified_internal_error";
+}
+
 function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
   if (normalized instanceof ChatGptWebAdapterError) return normalized;
@@ -1708,6 +1734,16 @@ export function createChatGptWebAdapter(
             // owned DOM observer can continue proving the same accepted ChatGPT submission.
             throw error;
           }
+          console.error(
+            `[chatgpt-web] observer_failure ${JSON.stringify({
+              traceId,
+              phase: session.runtime.submission?.phase ?? "unknown",
+              cause: submittedTurnFailureCause(error),
+              browser: session.settledOutcome()?.type ?? "pending",
+              outstandingTools: session.outstanding().length,
+              roundCompleted: session.roundCompleted(roundKey),
+            })}`,
+          );
           const turnError = submittedTurnFailure(session, error);
           if (!manualRequest && turnError instanceof ChatGptWebAdapterError) {
             const safetyReason = turnError.code === "rate_limit_exceeded"
