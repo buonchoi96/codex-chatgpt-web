@@ -686,11 +686,14 @@ export async function runChatGptMcpServer(options: {
         const toolName = wireName(tool);
         let abandoned: { cancelled: boolean; delivered: boolean; pending: boolean };
         try {
-          abandoned = await callTurnBroker(options.brokerSocketPath, {
-            method: "cancel_invoke",
+          abandoned = await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(
+            options.brokerSocketPath,
+            {
+              method: "cancel_invoke",
             bindingId,
-            callId,
-          });
+              callId,
+            },
+          );
         } catch (cancelError) {
           // If we cannot prove the call was never delivered, preserve the old fail-closed rule.
           try {
