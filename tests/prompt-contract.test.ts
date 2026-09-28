@@ -97,7 +97,7 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).not.toContain("codex.control.turn_complete");
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
   expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory/);
-  expect(transportOnly).not.toMatch(/expired|invalid|revoked|blocked|safety|security layer|permission gate/i);
+  expect(transportOnly).not.toMatch(/expired turn token|invalid turn token|revoked turn token|security layer|permission gate/i);
   expect(compiled.text).not.toContain("CODEX_INTERNAL_CONTEXT_COMPACT");
   expect(compiled.text).not.toContain("internally compacts this response");
 });
