@@ -153,6 +153,7 @@ interface BrokerRequest {
     | "native_complete"
     | "activity_complete"
     | "submit_compaction_handoff"
+    | "submit_recovery_checkpoint"
     | "submit_output"
     | "owner_next_output"
     | "owner_reset_output"
@@ -413,6 +414,15 @@ export class TurnBroker implements TurnBrokerOwner {
   ): Promise<CompactionTransactionHandle> {
     await this.start();
     return this.compactionTransactions.begin(traceId, ttlMs);
+  }
+
+  async beginRecoveryCheckpoint(
+    traceId: string,
+    ttlMs: number,
+    beforeAccept: (summary: string) => void,
+  ): Promise<CompactionTransactionHandle> {
+    await this.start();
+    return this.compactionTransactions.begin(traceId, ttlMs, beforeAccept);
   }
 
   waitForCompactionHandoff(token: string, signal?: AbortSignal): Promise<string> {
@@ -1144,7 +1154,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1190,7 +1200,7 @@ export class TurnBroker implements TurnBrokerOwner {
         ...(typeof request.blocker === "string" ? { blocker: request.blocker } : {}),
       });
     }
-    if (request.method === "submit_compaction_handoff") {
+    if (request.method === "submit_compaction_handoff" || request.method === "submit_recovery_checkpoint") {
       if (typeof request.token !== "string" || request.token.length === 0) {
         throw new Error("compaction control token is required");
       }
@@ -1200,7 +1210,12 @@ export class TurnBroker implements TurnBrokerOwner {
       if (typeof request.summary !== "string") {
         throw new Error("compaction handoff summary is required");
       }
-      this.compactionTransactions.submit(request.token, request.handoffId, request.summary);
+      this.compactionTransactions.submit(
+        request.token,
+        request.handoffId,
+        request.summary,
+        request.method === "submit_recovery_checkpoint" ? "recovery" : "compaction",
+      );
       return { submitted: true };
     }
     if (request.method === "submit_output") {
