@@ -101,6 +101,7 @@ const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
 // Match Codex's default wait interval while returning before the MCP invocation deadline.
 export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
+export const COMMAND_SAFETY_TRANSPORT_RULE = "Codex command-safety compatibility: keep shell and PowerShell calls single-purpose and minimal. Do not batch unrelated read-only probes into one command with semicolons, command chains, multiple interpreter invocations, Write-Output separators, large loops, or compound pipelines. Prefer one file read, hash, search, parser invocation, or other independent operation per command and make additional calls as needed. If a command is blocked before execution, do not retry the same compound form; split it into smaller read-only commands that preserve the requested work.";
 // The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
@@ -128,6 +129,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Do not treat ChatGPT's browser-only computer surface as evidence of native desktop access.",
   "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are deprecated ABI stubs. They intentionally fail fast and never route desktop work. Use official node_repl + @oai/sky for native Windows Computer Use.",
   "Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command. tool_search is a Codex Native discovery capability, not an operating-system executable.",
+  COMMAND_SAFETY_TRANSPORT_RULE,
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
@@ -248,12 +250,22 @@ function isGatewayAgentWaitTool(name: string): boolean {
   return GATEWAY_AGENT_WAIT_TOOL_NAMES.has(name);
 }
 
+function isCommandExecutionToolName(name: string): boolean {
+  return name === "exec"
+    || name === "exec_command"
+    || name === "shell_command"
+    || name.endsWith("__exec_command")
+    || name.endsWith("__shell_command");
+}
+
 function browserToolDescription(tool: CodexTool): string {
-  if (isAgentWaitTool(tool)) return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE}`;
   if (!tool.namespace && tool.name === "exec") {
-    return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE} This rule is enforced for wait_agent calls made inside exec; recursive raw exec is unavailable.`;
+    return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE} This rule is enforced for wait_agent calls made inside exec; recursive raw exec is unavailable.\n\n${COMMAND_SAFETY_TRANSPORT_RULE}`;
   }
-  return tool.description;
+  const rules: string[] = [];
+  if (isAgentWaitTool(tool)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
+  if (isCommandExecutionToolName(wireName(tool))) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
+  return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 
 function browserToolParameters(tool: CodexTool): Record<string, unknown> {
@@ -350,8 +362,10 @@ interface GatewayToolCatalogPage {
 }
 
 function gatewayToolDescription(tool: GatewayToolDescriptor): string {
-  if (!isGatewayAgentWaitTool(tool.name)) return tool.description;
-  return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE}`;
+  const rules: string[] = [];
+  if (isGatewayAgentWaitTool(tool.name)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
+  if (isCommandExecutionToolName(tool.name)) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
+  return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 
 function gatewayToolCatalogProgram(options: {
