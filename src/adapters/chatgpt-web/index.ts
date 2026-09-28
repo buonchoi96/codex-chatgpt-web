@@ -1487,7 +1487,7 @@ export function createChatGptWebAdapter(
                     session.runtime.externalProgress.recordToolResult();
                     session.markResultDelivered(message.toolCallId);
                   }
-                  if (recoveryCheckpoint) {
+                  if (recoveryCheckpoint && structuredBroker) {
                     await withAbort(Promise.race([
                       structuredBroker.waitForCompactionHandoff(recoveryCheckpoint.token, incoming.abortSignal),
                       session.browserOutcome.then(outcome => {
@@ -1501,7 +1501,9 @@ export function createChatGptWebAdapter(
                     );
                   }
                 } finally {
-                  if (recoveryCheckpoint) structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
+                  if (recoveryCheckpoint && structuredBroker) {
+                    structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
+                  }
                 }
                 // Retry budgeting is for consecutive browser failures. A successfully journaled
                 // native tool result proves the task made forward progress, so earlier recovery
