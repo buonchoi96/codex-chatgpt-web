@@ -5,7 +5,10 @@ import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
-import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
+import {
+  CODEX_COMPACTION_CONTROL_WIRE_NAME,
+  CODEX_RECOVERY_CHECKPOINT_WIRE_NAME,
+} from "./native-compaction-control";
 import { CODEX_OUTPUT_CONTROL_WIRE_NAME, submitNativeOutputControl } from "./native-output-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
@@ -1083,7 +1086,8 @@ export async function runChatGptMcpServer(options: {
         "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
-          "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
+          `A passive recovery checkpoint may similarly provide ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}; both controls accept only the issued one-shot token and {handoff_id, summary}.`,
+          "These controls store summaries for continuation/recovery; they do not execute commands, access files, or invoke other tools.",
           `Enhanced tool-capable turns may also bind the reserved ${CODEX_OUTPUT_CONTROL_WIRE_NAME} operation. It is supplied by the prompt, not inventory, and accepts only {kind, text}.`,
         ] : []),
       ].join(" ")),
@@ -1103,20 +1107,23 @@ export async function runChatGptMcpServer(options: {
           options.brokerSocketPath, requestId, args, input, extra.signal,
         ));
       }
-      if (contract === "native" && wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME) {
+      if (contract === "native" && (wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME
+        || wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME)) {
         if (input !== undefined) {
-          throw new Error("Compaction control handoff does not accept freeform input");
+          throw new Error("Checkpoint control handoff does not accept freeform input");
         }
         const handoffId = args?.handoff_id;
         const summary = args?.summary;
         if (typeof handoffId !== "string" || handoffId.length === 0) {
-          throw new Error("Compaction control handoff requires handoff_id");
+          throw new Error("Checkpoint control handoff requires handoff_id");
         }
         if (typeof summary !== "string") {
-          throw new Error("Compaction control handoff requires summary");
+          throw new Error("Checkpoint control handoff requires summary");
         }
         await callTurnBroker(options.brokerSocketPath, {
-          method: "submit_compaction_handoff",
+          method: wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME
+            ? "submit_recovery_checkpoint"
+            : "submit_compaction_handoff",
           token: requestId,
           handoffId,
           summary,
