@@ -32,6 +32,7 @@ import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebC
 import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
 import { shouldUseNativeOutputTunnel } from "./native-output-control";
 import { passiveRecoveryCheckpointInstruction } from "./native-compaction-control";
+import type { CompactionTransactionHandle } from "./compaction-transaction";
 import {
   EnhancedRecoveryCheckpointStore,
   ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
@@ -1462,6 +1463,7 @@ export function createChatGptWebAdapter(
             }
 
             let turnToken: string | undefined;
+            let recoveryCheckpoint: CompactionTransactionHandle | undefined;
             if (session.runtime.mode === "tools") {
               turnToken = await withAbort(session.runtime.token, incoming.abortSignal);
               if (!environment) throw new Error("Tool-capable ChatGPT web runtime lost its trusted environment");
@@ -1484,7 +1486,7 @@ export function createChatGptWebAdapter(
                 if (results.length !== outstanding.length) {
                   throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
-                const recoveryCheckpoint = structuredBroker
+                recoveryCheckpoint = structuredBroker
                   && !manualRequest
                   && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
                   && !parsed._compactionRequest
@@ -1513,23 +1515,12 @@ export function createChatGptWebAdapter(
                     session.runtime.externalProgress.recordToolResult();
                     session.markResultDelivered(message.toolCallId);
                   }
-                  if (recoveryCheckpoint && structuredBroker) {
-                    await withAbort(Promise.race([
-                      structuredBroker.waitForCompactionHandoff(recoveryCheckpoint.token, incoming.abortSignal),
-                      session.browserOutcome.then(outcome => {
-                        throw outcome.type === "error"
-                          ? outcome.error
-                          : new Error("Web response ended before submitting its recovery checkpoint");
-                      }),
-                    ]), incoming.abortSignal);
-                    console.info(
-                      `[chatgpt-web] passive recovery checkpoint durable trace=${traceId} intervalTokens=${ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS}`,
-                    );
-                  }
-                } finally {
+                } catch (error) {
                   if (recoveryCheckpoint && structuredBroker) {
                     structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
+                    recoveryCheckpoint = undefined;
                   }
+                  throw error;
                 }
                 // Retry budgeting is for consecutive browser failures. A successfully journaled
                 // native tool result proves the task made forward progress, so earlier recovery
@@ -1591,6 +1582,22 @@ export function createChatGptWebAdapter(
                   : Promise.reject(error))
                 : undefined;
               let nextTools = armNextTools();
+              const armRecoveryCheckpoint = () => recoveryCheckpoint && structuredBroker
+                ? structuredBroker.waitForCompactionHandoff(
+                    recoveryCheckpoint.token,
+                    toolWaitAbort.signal,
+                  ).then(() => ({
+                    type: "recovery-checkpoint" as const,
+                    durable: true as const,
+                  })).catch(error => toolWaitAbort.signal.aborted
+                    ? new Promise<never>(() => {})
+                    : Promise.resolve({
+                        type: "recovery-checkpoint" as const,
+                        durable: false as const,
+                        error: error instanceof Error ? error : new Error(String(error)),
+                      }))
+                : undefined;
+              let nextRecoveryCheckpoint = armRecoveryCheckpoint();
               const armNextOutput = () => observerNativeOutputTunnel && turnToken
                 ? broker.nextOutput(turnToken, session.nativeOutputAfterSequence(), toolWaitAbort.signal)
                   .then(event => ({ type: "native-output" as const, event }))
@@ -1659,6 +1666,7 @@ export function createChatGptWebAdapter(
                 const next = await withAbort(
                   Promise.race([
                     ...(nextTools ? [nextTools] : []),
+                    ...(nextRecoveryCheckpoint ? [nextRecoveryCheckpoint] : []),
                     ...(nextOutput ? [nextOutput] : []),
                     browserOutcome,
                     nextTrace,
@@ -1674,6 +1682,20 @@ export function createChatGptWebAdapter(
                 if (next.type === "text") {
                   emitNewText(session.runtime.text.drain());
                   nextText = waitForText();
+                  continue;
+                }
+                if (next.type === "recovery-checkpoint") {
+                  if (next.durable) {
+                    console.info(
+                      `[chatgpt-web] passive recovery checkpoint durable trace=${traceId} intervalTokens=${ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS}`,
+                    );
+                  } else {
+                    console.warn(
+                      `[chatgpt-web] passive recovery checkpoint skipped trace=${traceId} reason=${next.error.message}`,
+                    );
+                  }
+                  recoveryCheckpoint = undefined;
+                  nextRecoveryCheckpoint = undefined;
                   continue;
                 }
                 if (next.type === "native-output") {
@@ -1708,6 +1730,14 @@ export function createChatGptWebAdapter(
                   return;
                 }
                 validateBatchTools(parsed, next.requests);
+                if (recoveryCheckpoint && structuredBroker) {
+                  structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
+                  recoveryCheckpoint = undefined;
+                  nextRecoveryCheckpoint = undefined;
+                  console.info(
+                    `[chatgpt-web] passive recovery checkpoint superseded by active tool trace=${traceId}`,
+                  );
+                }
                 session.setOutstanding(next.requests, roundReasoning, session.roundEvents(roundKey));
                 emitRoundBatch(buffer => emitToolBatch(
                   next.requests,
@@ -1719,6 +1749,10 @@ export function createChatGptWebAdapter(
               }
             } finally {
               toolWaitAbort.abort();
+              if (recoveryCheckpoint && structuredBroker) {
+                structuredBroker.abortCompactionTransaction(recoveryCheckpoint.token);
+                recoveryCheckpoint = undefined;
+              }
             }
           });
         } catch (error) {

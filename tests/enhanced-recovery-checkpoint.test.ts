@@ -134,3 +134,17 @@ test("recovery and compaction one-shot control tokens cannot be cross-used", asy
   )).toThrow("does not match its token");
   transactions.abort(compaction.token);
 });
+
+
+test("passive recovery checkpoint never blocks the active tool observer", () => {
+  const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
+  const waitBlock = "await withAbort(Promise.race([\n                      structuredBroker.waitForCompactionHandoff";
+  expect(source).not.toContain(waitBlock);
+  expect(source).toContain("const armRecoveryCheckpoint = () => recoveryCheckpoint && structuredBroker");
+  expect(source).toContain("...(nextRecoveryCheckpoint ? [nextRecoveryCheckpoint] : [])");
+  expect(source).toContain("passive recovery checkpoint superseded by active tool");
+  const nextTools = source.indexOf("let nextTools = armNextTools()");
+  const checkpointRace = source.indexOf("let nextRecoveryCheckpoint = armRecoveryCheckpoint()");
+  expect(nextTools).toBeGreaterThan(0);
+  expect(checkpointRace).toBeGreaterThan(nextTools);
+});
