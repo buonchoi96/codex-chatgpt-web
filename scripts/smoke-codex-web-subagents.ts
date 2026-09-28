@@ -201,6 +201,11 @@ try {
       && (item.output.includes("completed") || item.output.includes("errored")));
     if (waits.length === 0) failures.push(`${label} never called targeted wait_agent`);
     if (waitOutputs.length === 0) failures.push(`${label} never received a terminal agent status`);
+    if (!waitOutputs.some(item => typeof item.output === "string"
+      && item.output.includes("CHILD_RESULT")
+      && item.output.includes(expectedVersion))) {
+      failures.push(`${label} wait_agent terminal output omitted the child final message`);
+    }
   }
 
   const rootCompletion = object(rootSession?.completion?.payload);

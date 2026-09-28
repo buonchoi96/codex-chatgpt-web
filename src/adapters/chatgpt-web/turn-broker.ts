@@ -226,6 +226,98 @@ function retiredTurnLabel(traceId: string): string {
   return traceId && traceId !== "unknown" ? `Codex turn ${traceId}` : "a Codex turn";
 }
 
+
+export interface BrokerToolResultDiagnostic {
+  wireName: string;
+  contentItems: number;
+  textChars: number;
+  structured: boolean;
+  isError: boolean;
+  waitPayloadParsed: boolean;
+  timedOut?: boolean;
+  statusEntries?: number;
+  completedEntries?: number;
+  completedWithMessage?: number;
+  completedMessageChars?: number;
+  erroredEntries?: number;
+  notFoundEntries?: number;
+  otherTerminalEntries?: number;
+}
+
+/**
+ * Produce content-free telemetry for terminal multi-agent results.
+ *
+ * The exact child answer is deliberately never logged. Character/count metadata is enough to prove
+ * whether Codex returned completed child payloads to the bridge while keeping subagent findings out
+ * of launcher diagnostics.
+ */
+export function brokerToolResultDiagnostic(
+  request: BrokerToolRequest,
+  result: BrokerToolResult,
+): BrokerToolResultDiagnostic | undefined {
+  if (!/(?:^|__)wait_agent$/.test(request.wireName)) return undefined;
+  const textBlocks = result.content
+    .map(item => item && typeof item === "object" && !Array.isArray(item)
+      ? item as Record<string, unknown>
+      : undefined)
+    .filter((item): item is Record<string, unknown> => item?.type === "text" && typeof item.text === "string")
+    .map(item => item.text as string);
+  const base: BrokerToolResultDiagnostic = {
+    wireName: request.wireName,
+    contentItems: result.content.length,
+    textChars: textBlocks.reduce((sum, text) => sum + text.length, 0),
+    structured: result.structuredContent !== undefined,
+    isError: result.isError === true,
+    waitPayloadParsed: false,
+  };
+
+  let payload: unknown = result.structuredContent;
+  if ((!payload || typeof payload !== "object" || Array.isArray(payload)) && textBlocks.length === 1) {
+    try { payload = JSON.parse(textBlocks[0]!); } catch { /* metadata-only diagnostics */ }
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return base;
+  const record = payload as Record<string, unknown>;
+  const status = record.status;
+  if (!status || typeof status !== "object" || Array.isArray(status)) return base;
+
+  let completedEntries = 0;
+  let completedWithMessage = 0;
+  let completedMessageChars = 0;
+  let erroredEntries = 0;
+  let notFoundEntries = 0;
+  let otherTerminalEntries = 0;
+  for (const value of Object.values(status as Record<string, unknown>)) {
+    if (typeof value === "string") {
+      if (value === "not_found") notFoundEntries += 1;
+      else if (value === "shutdown" || value === "interrupted") otherTerminalEntries += 1;
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const state = value as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(state, "completed")) {
+      completedEntries += 1;
+      if (typeof state.completed === "string") {
+        completedWithMessage += 1;
+        completedMessageChars += state.completed.length;
+      }
+    } else if (Object.prototype.hasOwnProperty.call(state, "errored")) {
+      erroredEntries += 1;
+    }
+  }
+  return {
+    ...base,
+    waitPayloadParsed: true,
+    ...(typeof record.timed_out === "boolean" ? { timedOut: record.timed_out } : {}),
+    statusEntries: Object.keys(status as Record<string, unknown>).length,
+    completedEntries,
+    completedWithMessage,
+    completedMessageChars,
+    erroredEntries,
+    notFoundEntries,
+    otherTerminalEntries,
+  };
+}
+
 function environmentIdentity(environment: ChatGptTurnEnvironment): string {
   return JSON.stringify({
     cwd: environment.cwd,
@@ -519,6 +611,12 @@ export class TurnBroker implements TurnBrokerOwner {
     console.info(
       `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
     );
+    const diagnostic = brokerToolResultDiagnostic(invocation.request, result);
+    if (diagnostic) {
+      console.info(
+        `[chatgpt-web] broker trace=${channel.traceId} wait_agent_result call=${callId.slice(0, 17)} metadata=${JSON.stringify(diagnostic)}`,
+      );
+    }
     invocation.resolve(result);
   }
 
