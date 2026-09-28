@@ -5141,3 +5141,18 @@ test("Luna Think attachment reacquires the composer and uses the visible Think t
   expect(thinkBlock).toContain("await control.click(actionOptions)");
   expect(thinkBlock).not.toContain('pressSequentially("/think"');
 });
+
+
+test("completion receipt recovery scopes connector trigger attempts per continuation", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();");
+  const end = workerSource.indexOf("// Connector selection can run a personalization proof", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const recoveryBlock = workerSource.slice(start, end);
+  expect(recoveryBlock).toContain(
+    "const recoveryConnectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };",
+  );
+  expect(recoveryBlock).toContain("recoveryConnectorAttemptBudget,");
+  expect(recoveryBlock).not.toContain("\n                  connectorAttemptBudget,\n");
+});

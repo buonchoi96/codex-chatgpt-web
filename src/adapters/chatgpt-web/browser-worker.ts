@@ -6217,6 +6217,11 @@ export class ChatGptBrowserWorker {
               bufferedFinalDeltas = [];
               completionTracker = new ChatGptCompletionTracker();
               const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();
+              // Connector trigger attempts are scoped to one attachment episode. A retained
+              // conversation can legitimately clear its selected connector after every recovery
+              // send, so reusing the initial prompt budget across recoveries makes the third
+              // continuation fail before it can even reopen an otherwise healthy connector menu.
+              const recoveryConnectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
               await this.runStage(
                 turn.traceId,
                 `completion_receipt_recovery_${completionReceiptRecoveries}_attachment`,
@@ -6232,7 +6237,7 @@ export class ChatGptBrowserWorker {
                   checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
                   turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
                   false,
-                  connectorAttemptBudget,
+                  recoveryConnectorAttemptBudget,
                   true,
                   mode.thinkEnabled,
                 ),
