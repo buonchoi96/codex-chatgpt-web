@@ -24,6 +24,7 @@ export type ChatGptMcpContract = "native" | "safe";
 const BRIDGE_TOOL_NAMES = new Set([
   "codex_turn_start",
   "codex_exec",
+  "codex_parallel_exec",
   "codex_write_stdin",
   "codex_apply_patch",
   "codex_view_image",
@@ -103,10 +104,13 @@ export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
 export const COMMAND_SAFETY_TRANSPORT_RULE = "Codex command-safety compatibility: keep shell and PowerShell calls single-purpose and minimal. Do not batch unrelated read-only probes into one command with semicolons, command chains, multiple interpreter invocations, Write-Output separators, large loops, or compound pipelines. Prefer one file read, hash, search, parser invocation, or other independent operation per command and make additional calls as needed. If a command is blocked before execution, do not retry the same compound form; split it into smaller read-only commands that preserve the requested work.";
 export const COMPUTER_USE_FAST_PATH_RULE = "Computer Use fast path: keep the persistent node_repl/@oai/sky session and reuse already-discovered module, app, window, and control state across calls. Prefer structured app/window/control state over a new screenshot whenever it is sufficient to choose the next action. Do not re-describe or re-analyze an unchanged screen. When a screenshot is necessary, focus on the relevant or changed UI region when the capability supports it, preserve enough detail for reliable coordinates/text, then choose the next action immediately. When no intermediate branch, confirmation, or safety-sensitive decision is required, execute a short deterministic sequence of low-risk UI actions before observing again. Re-observe after a meaningful UI state transition, when the target is ambiguous, or before a destructive/irreversible action. Avoid repeating list_apps, imports, discovery, or full-screen observation when the persistent session already has valid state.";
+export const PARALLEL_COMMAND_RULE = "Parallel command fast path: when two or more command operations are independent, do not depend on each other's output, and do not mutate the same file/process/session/state, prefer codex_parallel_exec so separate native command calls can run concurrently. Keep every command single-purpose; parallelism is across separate Codex tool calls, never by joining commands with semicolons, &&, ||, Write-Output separators, or shell pipelines. Do not parallelize commands whose ordering matters, commands that share a session_id, or commands requiring approval/escalation; run those serially with codex_exec.";
+export const WRITE_STDIN_TRANSPORT_RULE = "Long-running command transport: write_stdin is a poll/continuation tool, not a place to wait for several minutes in one MCP call. Keep each write_stdin yield_time at or below 60 seconds and poll the same session_id again if the process is still alive. This preserves the native session while staying below the bridge transport deadline.";
 // The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
+export const CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS = 60_000;
 export const CODEX_COMPLETION_CONTROL_WIRE_NAME = "codex.control.turn_complete";
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
@@ -132,6 +136,8 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are deprecated ABI stubs. They intentionally fail fast and never route desktop work. Use official node_repl + @oai/sky for native Windows Computer Use.",
   "Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command. tool_search is a Codex Native discovery capability, not an operating-system executable.",
   COMMAND_SAFETY_TRANSPORT_RULE,
+  PARALLEL_COMMAND_RULE,
+  WRITE_STDIN_TRANSPORT_RULE,
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
@@ -267,6 +273,25 @@ function isComputerUseFastPathToolName(name: string): boolean {
     || name.startsWith(WINDOWS_COMPUTER_USE_WIRE_PREFIX);
 }
 
+function isWriteStdinToolName(name: string): boolean {
+  return name === "write_stdin" || name.endsWith("__write_stdin");
+}
+
+export function chatGptWriteStdinYieldMs(value: number | undefined): number | undefined {
+  return value === undefined ? undefined : Math.min(value, CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS);
+}
+
+function normalizeStructuredToolArguments(
+  name: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isWriteStdinToolName(name) || typeof args.yield_time_ms !== "number") return args;
+  return {
+    ...args,
+    yield_time_ms: Math.min(args.yield_time_ms, CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS),
+  };
+}
+
 function browserToolDescription(tool: CodexTool): string {
   if (!tool.namespace && tool.name === "exec") {
     return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE} This rule is enforced for wait_agent calls made inside exec; recursive raw exec is unavailable.\n\n${COMMAND_SAFETY_TRANSPORT_RULE}`;
@@ -275,37 +300,57 @@ function browserToolDescription(tool: CodexTool): string {
   if (isAgentWaitTool(tool)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
   if (isCommandExecutionToolName(wireName(tool))) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
   if (isComputerUseFastPathToolName(wireName(tool))) rules.push(COMPUTER_USE_FAST_PATH_RULE);
+  if (isWriteStdinToolName(wireName(tool))) rules.push(WRITE_STDIN_TRANSPORT_RULE);
   return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 
 function browserToolParameters(tool: CodexTool): Record<string, unknown> {
-  if (!isAgentWaitTool(tool)) return tool.parameters;
+  const agentWait = isAgentWaitTool(tool);
+  const writeStdin = isWriteStdinToolName(wireName(tool));
+  if (!agentWait && !writeStdin) return tool.parameters;
   const parameters = structuredClone(tool.parameters);
   const properties = parameters.properties && typeof parameters.properties === "object" && !Array.isArray(parameters.properties)
     ? parameters.properties as Record<string, unknown>
     : {};
-  const timeout = properties.timeout_ms && typeof properties.timeout_ms === "object" && !Array.isArray(properties.timeout_ms)
-    ? properties.timeout_ms as Record<string, unknown>
+  if (agentWait) {
+    const timeout = properties.timeout_ms && typeof properties.timeout_ms === "object" && !Array.isArray(properties.timeout_ms)
+      ? properties.timeout_ms as Record<string, unknown>
+      : {};
+    delete timeout.default;
+    const required = Array.isArray(parameters.required)
+      ? parameters.required.filter((value): value is string => typeof value === "string")
+      : [];
+    return {
+      ...parameters,
+      properties: {
+        ...properties,
+        timeout_ms: {
+          ...timeout,
+          type: "number",
+          const: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
+          minimum: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
+          maximum: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
+          description: `Required transport-safe polling interval. Use exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS}; a timed-out wait does not mean the agents have finished.`,
+        },
+      },
+      required: [...new Set([...required, "timeout_ms"])],
+    };
+  }
+  const yieldTime = properties.yield_time_ms && typeof properties.yield_time_ms === "object" && !Array.isArray(properties.yield_time_ms)
+    ? properties.yield_time_ms as Record<string, unknown>
     : {};
-  // The cloned native schema must not advertise a default that contradicts our required interval.
-  delete timeout.default;
-  const required = Array.isArray(parameters.required)
-    ? parameters.required.filter((value): value is string => typeof value === "string")
-    : [];
   return {
     ...parameters,
     properties: {
       ...properties,
-      timeout_ms: {
-        ...timeout,
+      yield_time_ms: {
+        ...yieldTime,
         type: "number",
-        const: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
-        minimum: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
-        maximum: CHATGPT_WEB_AGENT_WAIT_POLL_MS,
-        description: `Required transport-safe polling interval. Use exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS}; a timed-out wait does not mean the agents have finished.`,
+        minimum: 250,
+        maximum: CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS,
+        description: `Transport-safe poll duration. Use at most ${CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS} ms and poll the same session again if it remains active.`,
       },
     },
-    required: [...new Set([...required, "timeout_ms"])],
   };
 }
 
@@ -376,6 +421,7 @@ function gatewayToolDescription(tool: GatewayToolDescriptor): string {
   if (isGatewayAgentWaitTool(tool.name)) rules.push(AGENT_WAIT_TRANSPORT_RULE);
   if (isCommandExecutionToolName(tool.name)) rules.push(COMMAND_SAFETY_TRANSPORT_RULE);
   if (isComputerUseFastPathToolName(tool.name)) rules.push(COMPUTER_USE_FAST_PATH_RULE);
+  if (isWriteStdinToolName(tool.name)) rules.push(WRITE_STDIN_TRANSPORT_RULE);
   return rules.length > 0 ? `${tool.description}\n\n${rules.join("\n\n")}` : tool.description;
 }
 
@@ -803,6 +849,7 @@ export async function runChatGptMcpServer(options: {
         "Invoke the command tool advertised by the current outer Codex harness. A long-running command returns its native session_id.",
         COMMAND_SAFETY_TRANSPORT_RULE,
         "For codex_exec inspection/probing, send exactly one logical OS operation per call. In particular, do not combine Get-Content, git status, git rev-parse, hashing, parser probes, or similar reads with semicolon/&&/|| chains or Write-Output section separators; make separate codex_exec calls instead.",
+        "When several such operations are independent, use codex_parallel_exec instead of serial codex_exec calls.",
       ].join(" ")),
       inputSchema: {
         ...turnReferenceInput(contract),
@@ -872,6 +919,100 @@ export async function runChatGptMcpServer(options: {
   );
 
   server.registerTool(
+    "codex_parallel_exec",
+    {
+      title: "Run independent native Codex commands concurrently",
+      description: afterSafeStart(contract, [
+        "Run 2 to 8 independent command operations concurrently as separate native Codex command tool calls.",
+        PARALLEL_COMMAND_RULE,
+        COMMAND_SAFETY_TRANSPORT_RULE,
+        "Parallel calls always use the default sandbox. If a command needs escalation/approval, ordering, shared mutable state, or another command's output, use serial codex_exec instead.",
+      ].join(" ")),
+      inputSchema: {
+        ...turnReferenceInput(contract),
+        commands: z.array(z.object({
+          cmd: z.string().min(1).max(100_000),
+          workdir: z.string().max(16_384).optional(),
+          yield_time_ms: z.number().int().min(250).max(30_000).optional(),
+          max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
+          tty: z.boolean().optional(),
+        })).min(2).max(8),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    },
+    async (input, extra) => withClaimedTurn(
+      "codex_parallel_exec",
+      turnReference(contract, input),
+      extra,
+      async claimed => {
+        const bound = claimed.environment;
+        const directTool = exactTool(bound, "exec_command") ?? exactTool(bound, "shell_command");
+        const gateway = directTool ? undefined : execGateway(bound);
+        if (!directTool && !gateway) {
+          throw new Error("This Codex turn did not advertise a native command tool or the native exec gateway");
+        }
+        const runOne = async (command: {
+          cmd: string;
+          workdir?: string;
+          yield_time_ms?: number;
+          max_output_tokens?: number;
+          tty?: boolean;
+        }, index: number) => {
+          const execCommandArguments = {
+            cmd: command.cmd,
+            ...(command.workdir ? { workdir: command.workdir } : {}),
+            ...(command.yield_time_ms !== undefined ? { yield_time_ms: command.yield_time_ms } : {}),
+            ...(command.max_output_tokens !== undefined ? { max_output_tokens: command.max_output_tokens } : {}),
+            ...(command.tty !== undefined ? { tty: command.tty } : {}),
+          };
+          const shellCommandArguments = {
+            command: command.cmd,
+            ...(command.workdir ? { workdir: command.workdir } : {}),
+            ...(command.yield_time_ms !== undefined ? { timeout_ms: command.yield_time_ms } : {}),
+          };
+          try {
+            const output = directTool
+              ? await invoke(
+                  claimed.bindingId,
+                  bound,
+                  directTool,
+                  { arguments: directTool.name === "exec_command" ? execCommandArguments : shellCommandArguments },
+                  extra.signal,
+                )
+              : await invoke(
+                  claimed.bindingId,
+                  bound,
+                  gateway!,
+                  { input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments) },
+                  extra.signal,
+                );
+            return {
+              index,
+              ok: output.isError !== true,
+              content: output.content,
+              ...(output.structuredContent !== undefined ? { structured_content: output.structuredContent } : {}),
+            };
+          } catch (error) {
+            return {
+              index,
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        };
+        const startedAt = Date.now();
+        const results = await Promise.all(input.commands.map((command, index) => runOne(command, index)));
+        return result({
+          parallel: true,
+          command_count: input.commands.length,
+          elapsed_ms: Date.now() - startedAt,
+          results,
+        }, results.some(item => item.ok === false));
+      },
+    ),
+  );
+
+  server.registerTool(
     "codex_write_stdin",
     {
       title: "Continue a native Codex command session",
@@ -880,7 +1021,7 @@ export async function runChatGptMcpServer(options: {
         ...turnReferenceInput(contract),
         session_id: z.number().int().nonnegative(),
         chars: z.string().max(1_000_000).optional(),
-        yield_time_ms: z.number().int().min(250).max(300_000).optional(),
+        yield_time_ms: z.number().int().min(250).max(CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS).optional(),
         max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -893,10 +1034,11 @@ export async function runChatGptMcpServer(options: {
         const { session_id, chars, yield_time_ms, max_output_tokens } = input;
         const bound = claimed.environment;
         const tool = exactTool(bound, "write_stdin");
+        const safeYieldTimeMs = chatGptWriteStdinYieldMs(yield_time_ms);
         const payload = { arguments: {
           session_id,
           ...(chars !== undefined ? { chars } : {}),
-          ...(yield_time_ms !== undefined ? { yield_time_ms } : {}),
+          ...(safeYieldTimeMs !== undefined ? { yield_time_ms: safeYieldTimeMs } : {}),
           ...(max_output_tokens !== undefined ? { max_output_tokens } : {}),
         } };
         return tool
@@ -1278,7 +1420,7 @@ export async function runChatGptMcpServer(options: {
           if (isGatewayAgentWaitTool(wire_name) && input !== undefined) {
             throw new Error(`ChatGPT Web wait_agent requires structured arguments and timeout_ms=${CHATGPT_WEB_AGENT_WAIT_POLL_MS}`);
           }
-          const invocationArguments = args ?? {};
+          const invocationArguments = normalizeStructuredToolArguments(wire_name, args ?? {});
           assertGatewayToolArguments(wire_name, invocationArguments);
           return invoke(claimed.bindingId, bound, gateway, {
             input: execGatewayProgram(wire_name, input !== undefined, {
@@ -1294,7 +1436,7 @@ export async function runChatGptMcpServer(options: {
           }, extra.signal);
         }
         if (input !== undefined) throw new Error(`Function Codex tool ${wire_name} does not accept freeform input`);
-        const invocationArguments = args ?? {};
+        const invocationArguments = normalizeStructuredToolArguments(wire_name, args ?? {});
         assertBrowserToolArguments(tool, invocationArguments);
         return invoke(claimed.bindingId, bound, tool, { arguments: invocationArguments }, extra.signal);
       });
