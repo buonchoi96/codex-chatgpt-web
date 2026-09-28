@@ -175,7 +175,6 @@ This source path requires Bun 1.4.0. The command installs locked dependencies an
 ```bash
 bun run app
 bun run dev:launcher
-bun run dev:live
 bun run src/cli.ts dev status
 bun run dev:chat compaction-lab "Reply with exactly: DEV READY"
 bun run verify
@@ -184,8 +183,6 @@ bun run app:package
 ```
 
 `dev:launcher` uses a separate profile and account under `~/.codex-chatgpt-web-dev`. `dev:chat` exercises the real browser and compaction paths with explicit simulated tool results, without changing your normal Codex route. See the [DEV chat harness](docs/dev-chat.md) for setup and commands.
-
-For production-like debugging through the real Codex route without rebuilding an installer on every edit, use `bun run dev:live`. It keeps a persistent `~/.codex-chatgpt-web-live` ChatGPT/MCP profile and reloads the source daemon when `src/**` changes. See [live source development](docs/dev-live.md).
 
 </details>
 
