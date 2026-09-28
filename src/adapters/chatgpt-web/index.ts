@@ -1447,12 +1447,14 @@ export function createChatGptWebAdapter(
             const toolWaitAbort = new AbortController();
             try {
               const roundReasoning = session.roundReasoning(roundKey);
+              const tunneledTraceTexts = new Set<string>();
               const emitNewTrace = (trace: ChatGptTraceEvent[]) => {
                 roundReasoning.push(...trace.map(event => event.text));
                 session.appendRoundReasoning(roundKey, trace.map(event => event.text));
-                if (!observerNativeOutputTunnel) {
-                  emitRoundBatch(buffer => emitTraceEvents(trace, buffer));
-                }
+                const visible = observerNativeOutputTunnel
+                  ? trace.filter(event => !tunneledTraceTexts.has(event.text))
+                  : trace;
+                if (visible.length > 0) emitRoundBatch(buffer => emitTraceEvents(visible, buffer));
               };
               const emitNewText = (deltas: string[]) => {
                 if (!observerNativeOutputTunnel && !bufferStructuredOutput) {
@@ -1581,10 +1583,14 @@ export function createChatGptWebAdapter(
                 if (next.type === "native-output") {
                   session.acceptNativeOutput(next.event);
                   if (next.event.kind === "commentary" || next.event.kind === "reasoning") {
-                    emitRoundBatch(buffer => emitTraceEvents([{
-                      kind: "commentary",
-                      text: next.event.text,
-                    }], buffer));
+                    const alreadyVisible = roundReasoning.includes(next.event.text);
+                    tunneledTraceTexts.add(next.event.text);
+                    if (!alreadyVisible) {
+                      emitRoundBatch(buffer => emitTraceEvents([{
+                        kind: "commentary",
+                        text: next.event.text,
+                      }], buffer));
+                    }
                   }
                   nextOutput = next.event.kind === "final" ? undefined : armNextOutput();
                   continue;
