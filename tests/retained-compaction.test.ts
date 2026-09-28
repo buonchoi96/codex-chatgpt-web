@@ -810,7 +810,7 @@ test("active compaction waits for an ordinary response with no available tool bo
 });
 
 test("active compaction fails over a source that does not settle after compaction starts", async () => {
-  expect(ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS).toBe(15_000);
+  expect(ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS).toBe(60_000);
   let rejectBrowser!: (reason: Error) => void;
   const browser = new Promise<string>((_resolve, reject) => { rejectBrowser = reject; });
   let cancellations = 0;
