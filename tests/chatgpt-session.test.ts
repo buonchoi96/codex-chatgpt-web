@@ -284,7 +284,7 @@ function reasoningPicker(options: { max?: string; locks?: Array<string | null>; 
         </span><span role="slider" aria-valuemin="0" aria-valuemax="${max()}" aria-valuenow="${value}"></span></span></div>`);
       return read(document.querySelector(`[${attribute}]`)!);
     },
-    isVisible: async () => true,
+    isVisible: async () => !options.missing,
     waitFor: async ({ state, timeout }: { state: string; timeout?: number }) => {
       if (options.sliderWaitTimeouts) options.sliderWaitTimeouts.push(timeout ?? -1);
       expect(state).toBe("visible");
