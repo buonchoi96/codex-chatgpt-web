@@ -15,6 +15,7 @@ const { windowsTrustEnvironment } = require("./windows-trust.cjs");
 
 const RESTART_WINDOW_MS = 60_000;
 const MAX_RESTARTS_PER_WINDOW = 5;
+const RECOVERY_COOLDOWN_MS = 30_000;
 const MAX_RUNTIME_LOG_LINE_CHARS = 64 * 1024;
 const MAX_CONTROL_OUTPUT_BYTES = 1024 * 1024;
 const DRAIN_IDLE_TIMEOUT_MS = 15_000;
@@ -1272,17 +1273,49 @@ class RuntimeSupervisor {
       message: tunnelOnly ? "Starting isolated DEV MCP runtime" : "Starting local runtime",
     });
     try {
-      await this.startTunnel(config, "runtime-start");
-      if (!tunnelOnly) await this.startDaemon(config);
+      if (tunnelOnly) {
+        await this.startTunnel(config, "runtime-start");
+        this.restartHistory.tunnel = [];
+        this.writeState("ready");
+        this.publishOperation?.({
+          name: "runtime-start",
+          status: "completed",
+          message: "Isolated DEV MCP runtime is ready",
+        });
+        return { status: "ready", daemonPid: null, tunnelPid: this.tunnel?.pid };
+      }
+
+      // The local Responses endpoint is Codex's network dependency. Bring it up first and keep it
+      // alive even when the remote MCP tunnel is temporarily unavailable.
+      await this.startDaemon(config);
       this.restartHistory.daemon = [];
+
+      if (config.mode === "full") {
+        const detail = "Local Responses runtime is ready; MCP tunnel is starting in the background";
+        this.writeState("degraded", detail);
+        this.publishOperation?.({
+          name: "runtime-start",
+          status: "completed",
+          message: detail,
+        });
+        this.startTunnelInBackground(config);
+        return {
+          status: "ready",
+          daemonPid: this.daemon?.pid,
+          tunnelPid: this.tunnel?.pid,
+          tunnelDegraded: true,
+          detail,
+        };
+      }
+
       this.restartHistory.tunnel = [];
       this.writeState("ready");
       this.publishOperation?.({
         name: "runtime-start",
         status: "completed",
-        message: tunnelOnly ? "Isolated DEV MCP runtime is ready" : "Local runtime is ready",
+        message: "Local runtime is ready",
       });
-      return { status: "ready", daemonPid: this.daemon?.pid, tunnelPid: this.tunnel?.pid };
+      return { status: "ready", daemonPid: this.daemon?.pid, tunnelPid: null };
     } catch (error) {
       this.stopping = true;
       let cleanupError;
@@ -1303,6 +1336,32 @@ class RuntimeSupervisor {
     }
   }
 
+  startTunnelInBackground(config) {
+    if (this.stopping || config.mode !== "full") return;
+    const recovery = this.startTunnel(config, "runtime-recovery").then(() => {
+      if (this.stopping) return;
+      this.restartHistory.tunnel = [];
+      this.lastChildFailure.tunnel = null;
+      if (this.tryWriteState("ready")) {
+        this.publishOperation?.({
+          name: "runtime-recovery",
+          status: "completed",
+          message: "MCP tunnel is ready",
+        });
+      }
+    }).catch((error) => {
+      if (this.stopping) return;
+      const message = errorMessage(error);
+      this.lastChildFailure.tunnel = message;
+      this.logger.error("runtime.tunnel_background_start_failed", { message });
+      if (this.tryWriteState(this.daemon ? "degraded" : "failed", message)) {
+        this.scheduleRecovery("tunnel");
+      }
+    });
+    this.recoveryTasks.add(recovery);
+    void recovery.finally(() => this.recoveryTasks.delete(recovery));
+  }
+
   recordRestart(name) {
     const cutoff = Date.now() - RESTART_WINDOW_MS;
     const recent = this.restartHistory[name].filter((at) => at >= cutoff);
@@ -1315,21 +1374,25 @@ class RuntimeSupervisor {
     if (this.stopping) return;
     if (this.restartTimers[name]) return;
     const attempts = this.recordRestart(name);
-    if (attempts > MAX_RESTARTS_PER_WINDOW) {
+    const crashLoop = attempts > MAX_RESTARTS_PER_WINDOW;
+    const delay = crashLoop
+      ? RECOVERY_COOLDOWN_MS
+      : Math.min(attempts * 1_000, 5_000);
+    if (crashLoop) {
       const cause = this.lastChildFailure[name];
-      const message = `${name} stopped more than ${MAX_RESTARTS_PER_WINDOW} times in 60 seconds; automatic restart is disabled`
+      const message = `${name} stopped more than ${MAX_RESTARTS_PER_WINDOW} times in 60 seconds; cooling down for ${RECOVERY_COOLDOWN_MS / 1_000} seconds before retrying automatically`
         + (cause ? `; last failure: ${cause}` : "");
-      this.tryWriteState("failed", message);
-      this.publishOperation?.({ name: "runtime-recovery", status: "failed", message });
-      return;
+      this.restartHistory[name] = [];
+      this.tryWriteState(name === "tunnel" && this.daemon ? "degraded" : "failed", message);
+      this.publishOperation?.({ name: "runtime-recovery", status: "running", message });
     }
-    const delay = Math.min(attempts * 1_000, 5_000);
     this.restartTimers[name] = setTimeout(() => {
       this.restartTimers[name] = null;
       const recovery = this.recover(name).catch((error) => {
         const message = errorMessage(error);
         this.logger.error(`runtime.${name}_recovery_failed`, { message });
-        if (this.tryWriteState("failed", message)) this.scheduleRecovery(name);
+        const state = name === "tunnel" && this.daemon ? "degraded" : "failed";
+        if (this.tryWriteState(state, message)) this.scheduleRecovery(name);
       });
       this.recoveryTasks.add(recovery);
       void recovery.finally(() => this.recoveryTasks.delete(recovery));
@@ -1348,14 +1411,17 @@ class RuntimeSupervisor {
     else if (tunnelOnly) throw new Error("DEV runtime cannot recover a Responses daemon");
     else await this.startDaemon(config);
     if (!tunnelOnly && !this.daemon) throw new Error("Responses proxy is unavailable after runtime recovery");
-    if (config.mode === "full" && !this.tunnel) {
-      throw new Error("Tunnel runtime is unavailable after runtime recovery");
-    }
     if (!tunnelOnly) await this.waitForProxy(config);
-    if (config.mode === "full") {
+    if (name === "tunnel" && config.mode === "full") {
+      if (!this.tunnel) throw new Error("Tunnel runtime is unavailable after runtime recovery");
       await this.waitForTunnel(config, TUNNEL_START_TIMEOUT_MS, "runtime-recovery");
     }
-    if (!this.tryWriteState("ready")) {
+    const degraded = !tunnelOnly && config.mode === "full" && !this.tunnel;
+    this.restartHistory[name] = [];
+    if (!this.tryWriteState(
+      degraded ? "degraded" : "ready",
+      degraded ? "Responses daemon recovered; MCP tunnel is still recovering in the background" : undefined,
+    )) {
       let cleanupError;
       try {
         await this.cleanupFailedStart(config);
@@ -1371,7 +1437,12 @@ class RuntimeSupervisor {
         : "Recovered runtime could not persist launcher ownership";
       throw new Error(message);
     }
-    this.publishOperation?.({ name: "runtime-recovery", status: "completed", message: `${name} recovered` });
+    this.publishOperation?.({
+      name: "runtime-recovery",
+      status: "completed",
+      message: degraded ? `${name} recovered; MCP tunnel is still recovering` : `${name} recovered`,
+    });
+    if (degraded) this.scheduleRecovery("tunnel");
   }
 
   async cleanupFailedStart(config) {
@@ -2109,6 +2180,7 @@ class RuntimeSupervisor {
 
 module.exports = {
   MAX_RESTARTS_PER_WINDOW,
+  RECOVERY_COOLDOWN_MS,
   RESTART_WINDOW_MS,
   TUNNEL_HEALTH_POLL_INTERVAL_MS,
   TUNNEL_MONITOR_FAILURE_THRESHOLD,

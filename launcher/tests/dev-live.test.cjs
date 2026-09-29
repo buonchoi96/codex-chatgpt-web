@@ -26,4 +26,8 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   assert.match(source, /routeCommand\("disconnect"\)/);
   assert.match(source, /path\.join\(launcherRoot, "electron"\)/);
   assert.match(source, /Vite HMR/);
+  assert.match(source, /freeLoopbackPort/);
+  assert.match(source, /--strictPort/);
+  assert.match(source, /restarting dev server without stopping the live runtime/);
+  assert.match(source, /restarting the source launcher to recover it now/);
 });

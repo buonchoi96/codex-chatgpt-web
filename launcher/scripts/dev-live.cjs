@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const os = require("node:os");
+const net = require("node:net");
 const path = require("node:path");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 
@@ -13,7 +14,9 @@ const liveHome = path.resolve(
   process.env.CODEX_WEB_GPT_LIVE_HOME || path.join(os.homedir(), ".codex-chatgpt-web-live"),
 );
 const liveUserData = path.join(liveHome, "launcher");
-const viteUrl = "http://127.0.0.1:4178";
+const preferredVitePort = Number(process.env.CODEX_WEB_GPT_LIVE_VITE_PORT || 4178);
+let vitePort = preferredVitePort;
+let viteUrl = `http://127.0.0.1:${vitePort}`;
 const reloadDelayMs = 250;
 const idleRestartTimeoutMs = Number(process.env.CODEX_WEB_GPT_LIVE_RESTART_TIMEOUT_MS || 60_000);
 
@@ -23,6 +26,7 @@ let stopped = false;
 let electronRestarting = false;
 let reloadTimer;
 let routeTimer;
+let viteRestartTimer;
 let reloadRunning = false;
 let reloadAgain = false;
 const watchers = [];
@@ -83,6 +87,32 @@ function buildBrowserHelper() {
   log(`browser helper rebuilt in ${Date.now() - started} ms`);
 }
 
+async function freeLoopbackPort(preferredPort) {
+  const canBind = port => new Promise(resolve => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(address && typeof address === "object" ? address.port : false));
+    });
+  });
+  if (Number.isInteger(preferredPort) && preferredPort > 0 && preferredPort <= 65_535) {
+    const preferred = await canBind(preferredPort);
+    if (preferred) return preferredPort;
+  }
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = address && typeof address === "object" ? address.port : 0;
+      server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
 async function waitForVite() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -96,16 +126,34 @@ async function waitForVite() {
 }
 
 function startVite() {
-  vite = spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", "4178"], {
+  const child = spawn(process.execPath, [
+    viteBin,
+    "--host", "127.0.0.1",
+    "--port", String(vitePort),
+    "--strictPort",
+  ], {
     cwd: launcherRoot,
     stdio: "inherit",
     env: process.env,
   });
-  vite.once("exit", code => {
-    if (!stopped && code !== 0) {
-      warn(`Vite exited with code ${code}`);
-      void stop(1);
-    }
+  vite = child;
+  const recover = reason => {
+    if (vite === child) vite = undefined;
+    if (stopped || viteRestartTimer) return;
+    warn(`Vite ${reason}; restarting dev server without stopping the live runtime`);
+    viteRestartTimer = setTimeout(() => {
+      viteRestartTimer = undefined;
+      if (stopped || vite) return;
+      startVite();
+      void waitForVite().then(async () => {
+        log(`Vite recovered on ${viteUrl}`);
+        if (!stopped && electron) await restartElectron();
+      }).catch(error => warn(`Vite recovery failed: ${error instanceof Error ? error.message : String(error)}`));
+    }, 500);
+  };
+  child.once("error", error => recover(`failed to start: ${error.message}`));
+  child.once("exit", code => {
+    if (!stopped) recover(`exited with code ${code ?? 0}`);
   });
 }
 
@@ -212,7 +260,8 @@ async function restartDaemonFromSource() {
   }
   const before = await health(config);
   if (!before || !Number.isInteger(before.pid)) {
-    log("runtime source changed; Responses daemon is not running yet; the next launcher start will load the new source");
+    warn("runtime source changed while Responses daemon is unavailable; restarting the source launcher to recover it now");
+    await restartElectron();
     return;
   }
 
@@ -364,6 +413,7 @@ async function stop(exitCode = 0) {
   stopped = true;
   clearTimeout(reloadTimer);
   if (routeTimer) clearInterval(routeTimer);
+  if (viteRestartTimer) clearTimeout(viteRestartTimer);
   for (const watcher of watchers.splice(0)) watcher.close();
   restorePreviousRoute();
   electronRestarting = true;
@@ -382,6 +432,11 @@ async function main() {
   log(`persistent live home: ${liveHome}`);
   log("the installed launcher must stay closed while this process owns Codex Native2/tunnel resources");
   buildBrowserHelper();
+  vitePort = await freeLoopbackPort(preferredVitePort);
+  viteUrl = `http://127.0.0.1:${vitePort}`;
+  if (vitePort !== preferredVitePort) {
+    warn(`Vite port ${preferredVitePort} is busy; using ${vitePort} for this live session`);
+  }
   startVite();
   await waitForVite();
   startElectron();

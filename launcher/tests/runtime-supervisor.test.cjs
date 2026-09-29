@@ -10,6 +10,7 @@ const { packagedRuntimePaths } = require("../electron/runtime-command.cjs");
 const { linuxDesktopEntry, requireAutostartState } = require("../electron/autostart.cjs");
 const {
   MAX_RESTARTS_PER_WINDOW,
+  RECOVERY_COOLDOWN_MS,
   RuntimeSupervisor,
   managedTunnelConnectArgs,
   validateConfig,
@@ -1321,7 +1322,7 @@ test("launcher shutdown reacquires a managed tunnel that was between monitor and
   }
 });
 
-test("crash-loop diagnostics include the last redacted child failure", () => {
+test("crash-loop recovery cools down and keeps retrying instead of disabling itself", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-crash-loop-diagnostic-"));
   const operations = [];
   const supervisor = new RuntimeSupervisor({
@@ -1332,6 +1333,7 @@ test("crash-loop diagnostics include the last redacted child failure", () => {
     browserDescriptorPath: path.join(root, "launcher.json"),
     publishOperation: operation => operations.push(operation),
   });
+  supervisor.daemon = { pid: process.pid, exitCode: null, signalCode: null };
   supervisor.restartHistory.tunnel = Array.from(
     { length: MAX_RESTARTS_PER_WINDOW },
     () => Date.now(),
@@ -1339,11 +1341,15 @@ test("crash-loop diagnostics include the last redacted child failure", () => {
   supervisor.lastChildFailure.tunnel = "tunnel exited (1): invalid profile for [tunnel-id]";
   try {
     supervisor.scheduleRecovery("tunnel");
-    const failure = operations.at(-1);
-    assert.equal(failure.status, "failed");
-    assert.match(failure.message, /automatic restart is disabled/);
-    assert.match(failure.message, /last failure: tunnel exited \(1\): invalid profile for \[tunnel-id\]/);
+    const recovery = operations.at(-1);
+    assert.equal(recovery.status, "running");
+    assert.match(recovery.message, /cooling down for 30 seconds before retrying automatically/);
+    assert.match(recovery.message, /last failure: tunnel exited \(1\): invalid profile for \[tunnel-id\]/);
+    assert.equal(RECOVERY_COOLDOWN_MS, 30_000);
+    assert.ok(supervisor.restartTimers.tunnel);
+    assert.deepEqual(supervisor.restartHistory.tunnel, []);
   } finally {
+    if (supervisor.restartTimers.tunnel) clearTimeout(supervisor.restartTimers.tunnel);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1474,6 +1480,85 @@ test("explicit launcher shutdown force-stops only its owned runtime when gracefu
     "graceful-stop",
     "forced-stop:daemon still reports one HTTP turn",
   ]);
+});
+
+test("production Full startup keeps the local Responses host ready while the tunnel recovers", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-degraded-start-"));
+  const operations = [];
+  const states = [];
+  const recoveries = [];
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+    publishOperation: operation => operations.push(operation),
+  });
+  supervisor.readConfig = () => ({ mode: "full", releaseVersion: "0.2.0" });
+  supervisor.readState = () => null;
+  supervisor.proxyHealth = async () => false;
+  supervisor.writeState = (status, detail) => {
+    states.push({ status, detail });
+    return { status, detail };
+  };
+  supervisor.startDaemon = async () => {
+    supervisor.daemon = { pid: 4242, exitCode: null, signalCode: null };
+  };
+  supervisor.startTunnel = async () => {
+    throw new Error("synthetic tunnel outage");
+  };
+  supervisor.scheduleRecovery = name => recoveries.push(name);
+
+  try {
+    const result = await supervisor.startConfigured();
+    assert.equal(result.status, "ready");
+    assert.equal(result.daemonPid, 4242);
+    assert.equal(result.tunnelDegraded, true);
+    assert.match(result.detail, /MCP tunnel is starting in the background/);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(recoveries, ["tunnel"]);
+    assert.equal(states.some(state => state.status === "degraded"), true);
+    assert.equal(
+      operations.some(operation => operation.status === "completed"
+        && /Local Responses runtime is ready/.test(operation.message)),
+      true,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("daemon recovery does not fail just because the Full-mode tunnel is still down", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-daemon-recovers-without-tunnel-"));
+  const states = [];
+  const recoveries = [];
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  supervisor.readConfig = () => ({ mode: "full" });
+  supervisor.startDaemon = async () => {
+    supervisor.daemon = { pid: 4343, exitCode: null, signalCode: null };
+  };
+  supervisor.waitForProxy = async () => {};
+  supervisor.tryWriteState = (status, detail) => {
+    states.push({ status, detail });
+    return true;
+  };
+  supervisor.scheduleRecovery = name => recoveries.push(name);
+
+  try {
+    await supervisor.recover("daemon");
+    assert.equal(supervisor.daemon.pid, 4343);
+    assert.equal(states.at(-1).status, "degraded");
+    assert.deepEqual(recoveries, ["tunnel"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("launcher resumes an owned drained daemon before reporting it ready", async () => {
