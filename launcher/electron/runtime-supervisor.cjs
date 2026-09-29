@@ -1282,7 +1282,7 @@ class RuntimeSupervisor {
           status: "completed",
           message: "Isolated DEV MCP runtime is ready",
         });
-        return { status: "ready", daemonPid: null, tunnelPid: this.tunnel?.pid };
+        return { status: "ready", daemonPid: this.daemon?.pid, tunnelPid: this.tunnel?.pid };
       }
 
       // The local Responses endpoint is Codex's network dependency. Bring it up first and keep it
