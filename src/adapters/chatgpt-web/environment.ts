@@ -171,9 +171,17 @@ export function unattributedChatGptEnvironmentMessages(
 }
 
 function contextualUserMessage(value: Record<string, unknown>): boolean {
+  const metadata = record(value.internal_chat_message_metadata_passthrough);
+  const kinds = Array.isArray(metadata?.content_item_kinds)
+    ? metadata.content_item_kinds.filter((kind): kind is string => typeof kind === "string")
+    : [];
+  // Native Codex annotates synthetic subagent result notifications explicitly. Prefer that
+  // provenance over the rendered wrapper text because the display serialization may change
+  // across Codex versions while the semantic content kind remains authoritative.
+  if (kinds.includes("multi_agent.subagent_notification")) return true;
   const text = rawMessageText(value).trim();
   return hasEnvironmentContextFragment(value)
-    || /^<subagent_notification>[\s\S]*<\/subagent_notification>$/.test(text)
+    || /^<subagent_notification>[\s\S]*<\/subagent_notification>$/i.test(text)
     || isReadableCompactionSummaryText(text)
     || text === OPAQUE_COMPACTION_NOTE;
 }
