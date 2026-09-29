@@ -36,6 +36,14 @@ test("launcher state persists onboarding, language, and autostart atomically", (
       sidebarWidth: 252,
       mcpGuideStep: 0,
       sessionRefreshReminderAt: null,
+      automationSecurity: {
+        version: 1,
+        paused: false,
+        revision: 0,
+        signal: null,
+        detectedAt: null,
+        resumedAt: null,
+      },
     });
     store.update({
       language: "zh-CN",
@@ -65,6 +73,14 @@ test("launcher state persists onboarding, language, and autostart atomically", (
       sidebarWidth: 252,
       mcpGuideStep: 0,
       sessionRefreshReminderAt: null,
+      automationSecurity: {
+        version: 1,
+        paused: false,
+        revision: 0,
+        signal: null,
+        detectedAt: null,
+        resumedAt: null,
+      },
     });
     if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o077, 0);
     assert.equal(fs.readdirSync(root).some(name => name.includes(".tmp-")), false);
@@ -145,6 +161,14 @@ test("persisted sidebar corruption is repaired without changing the rest of laun
       sidebarWidth: 252,
       mcpGuideStep: 0,
       sessionRefreshReminderAt: null,
+      automationSecurity: {
+        version: 1,
+        paused: false,
+        revision: 0,
+        signal: null,
+        detectedAt: null,
+        resumedAt: null,
+      },
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -190,4 +214,131 @@ test("session refresh reminders are deferred by exactly 48 hours", () => {
   assert.equal(SESSION_REFRESH_REMINDER_INTERVAL_MS, 48 * 60 * 60 * 1000);
   assert.equal(nextSessionRefreshReminderAt(now), "2026-08-07T12:00:00.000Z");
   assert.throws(() => nextSessionRefreshReminderAt(Number.NaN), /must be finite/);
+});
+
+test("legacy launcher state migrates to an unpaused automation-security record", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-legacy-security-state-"));
+  const file = path.join(root, "state.json");
+  try {
+    fs.writeFileSync(file, JSON.stringify({ version: 1, language: "zh-CN", onboardingComplete: true }));
+    const state = createStateStore(file).read();
+    assert.equal(state.language, "zh-CN");
+    assert.deepEqual(state.automationSecurity, {
+      version: 1,
+      paused: false,
+      revision: 0,
+      signal: null,
+      detectedAt: null,
+      resumedAt: null,
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("automation-security pause and explicit resume persist increasing revisions", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-security-transition-"));
+  const file = path.join(root, "state.json");
+  try {
+    const store = createStateStore(file);
+    const paused = store.pauseAutomationSecurity("cloudflare_challenge", "2026-09-29T06:00:00.000Z");
+    assert.deepEqual(paused.automationSecurity, {
+      version: 1,
+      paused: true,
+      revision: 1,
+      signal: "cloudflare_challenge",
+      detectedAt: "2026-09-29T06:00:00.000Z",
+      resumedAt: null,
+    });
+    assert.equal(createStateStore(file).read().automationSecurity.revision, 1);
+
+    const resumed = store.resumeAutomationSecurity("2026-09-29T06:05:00.000Z");
+    assert.deepEqual(resumed.automationSecurity, {
+      version: 1,
+      paused: false,
+      revision: 2,
+      signal: "cloudflare_challenge",
+      detectedAt: "2026-09-29T06:00:00.000Z",
+      resumedAt: "2026-09-29T06:05:00.000Z",
+    });
+    assert.deepEqual(createStateStore(file).read().automationSecurity, resumed.automationSecurity);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("automation-security transitions reject unknown signals and invalid timestamps", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-security-validation-"));
+  const file = path.join(root, "state.json");
+  try {
+    const store = createStateStore(file);
+    assert.throws(() => store.pauseAutomationSecurity("unknown", "2026-09-29T06:00:00.000Z"), /signal/i);
+    assert.throws(() => store.pauseAutomationSecurity("security_challenge", "yesterday"), /timestamp/i);
+    assert.throws(() => store.resumeAutomationSecurity("not-a-date"), /timestamp/i);
+    assert.equal(store.read().automationSecurity.revision, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed persisted automation-security state fails closed", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-security-corruption-"));
+  const file = path.join(root, "state.json");
+  try {
+    fs.writeFileSync(file, JSON.stringify({
+      version: 1,
+      automationSecurity: {
+        version: 1,
+        paused: false,
+        revision: -1,
+        signal: "unrecognized",
+        detectedAt: "not-a-date",
+        resumedAt: null,
+      },
+    }));
+    const state = createStateStore(file).read().automationSecurity;
+    assert.equal(state.version, 1);
+    assert.equal(state.paused, true);
+    assert.equal(state.revision, 1);
+    assert.equal(state.signal, "invalid_security_state");
+    assert.ok(Number.isFinite(Date.parse(state.detectedAt)));
+    assert.equal(state.resumedAt, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing state file defaults open but corrupt state-file bytes fail closed", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-corrupt-launcher-state-"));
+  const file = path.join(root, "state.json");
+  try {
+    assert.equal(createStateStore(file).read().automationSecurity.paused, false);
+    fs.writeFileSync(file, "{broken json");
+    const state = createStateStore(file).read();
+    assert.equal(state.automationSecurity.paused, true);
+    assert.equal(state.automationSecurity.signal, "invalid_security_state");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("generic launcher updates cannot clear the automation-security latch", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-security-update-"));
+  const file = path.join(root, "state.json");
+  try {
+    const store = createStateStore(file);
+    store.pauseAutomationSecurity("account_security_warning", "2026-09-29T06:00:00.000Z");
+    store.update({ automationSecurity: {
+      version: 1,
+      paused: false,
+      revision: 2,
+      signal: null,
+      detectedAt: null,
+      resumedAt: null,
+    } });
+    assert.equal(store.read().automationSecurity.paused, true);
+    assert.equal(store.read().automationSecurity.revision, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
