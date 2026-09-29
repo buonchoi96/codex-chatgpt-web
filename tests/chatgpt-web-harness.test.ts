@@ -3028,7 +3028,7 @@ describe("ChatGPT outer-native harness v4", () => {
         openWorldHint: false,
       });
       expect(listed.tools.find(tool => tool.name === "codex_turn_complete")?.annotations).toMatchObject({
-        readOnlyHint: false,
+        readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
