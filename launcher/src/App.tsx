@@ -1577,13 +1577,14 @@ function ActivitySurface({
           >
             {copy.exportSafeLog}
           </SecondaryButton>
-          <SecondaryButton
-            icon="external"
-            title={copy.exportFullDebugWarning}
-            onClick={() => void api!.exportFullDebug().catch((cause) => setError(messageOf(cause)))}
-          >
-            {copy.exportFullDebug}
-          </SecondaryButton>
+          <span title={copy.exportFullDebugWarning}>
+            <SecondaryButton
+              icon="external"
+              onClick={() => void api!.exportFullDebug().catch((cause) => setError(messageOf(cause)))}
+            >
+              {copy.exportFullDebug}
+            </SecondaryButton>
+          </span>
         </div>
       </div>
       <div className="activity-table">
