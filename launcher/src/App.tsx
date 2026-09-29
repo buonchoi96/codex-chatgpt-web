@@ -1570,12 +1570,21 @@ function ActivitySurface({
     <ContentSurface subtitle={copy.activitySubtitle} title={copy.activityTitle}>
       <div className="section-heading activity-heading">
         <span>{copy.recentActivity}</span>
-        <SecondaryButton
-          icon="external"
-          onClick={() => void api!.exportLogs().catch((cause) => setError(messageOf(cause)))}
-        >
-          {copy.exportSafeLog}
-        </SecondaryButton>
+        <div className="activity-actions">
+          <SecondaryButton
+            icon="external"
+            onClick={() => void api!.exportLogs().catch((cause) => setError(messageOf(cause)))}
+          >
+            {copy.exportSafeLog}
+          </SecondaryButton>
+          <SecondaryButton
+            icon="external"
+            title={copy.exportFullDebugWarning}
+            onClick={() => void api!.exportFullDebug().catch((cause) => setError(messageOf(cause)))}
+          >
+            {copy.exportFullDebug}
+          </SecondaryButton>
+        </div>
       </div>
       <div className="activity-table">
         {logs.length === 0 ? (

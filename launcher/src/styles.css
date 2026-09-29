@@ -1791,6 +1791,12 @@ code {
   min-height: 26px;
 }
 
+.activity-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .activity-table {
   border-top: 1px solid var(--color-border);
 }

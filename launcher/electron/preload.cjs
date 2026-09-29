@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   setSidebarState: (state) => ipcRenderer.invoke("launcher:sidebar-state", state),
   logs: (limit) => ipcRenderer.invoke("launcher:logs", limit),
   exportLogs: () => ipcRenderer.invoke("launcher:export-logs"),
+  exportFullDebug: () => ipcRenderer.invoke("launcher:export-full-debug"),
   installUpdate: () => ipcRenderer.invoke("launcher:update-install"),
   windowState: () => ipcRenderer.invoke("launcher:window-state"),
   windowControl: (action) => ipcRenderer.send("launcher:window-control", action),

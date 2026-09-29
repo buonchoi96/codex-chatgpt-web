@@ -1525,8 +1525,8 @@ export async function runChatGptMcpServer(options: {
     server.registerTool(
       "codex_turn_complete",
       {
-        title: "Complete the current Codex task",
-        description: "Submit the mandatory Full Harness completion receipt. Use state=complete only with no blocked requirements and no blocker. Use state=blocked only with at least one blocked requirement and a concrete blocker. remaining_actionable_requirements must always be empty.",
+        title: "Acknowledge Codex task completion",
+        description: "Internal control-plane acknowledgement only. This tool does not run commands, modify files, contact external services, or change user data. Submit the mandatory Full Harness completion receipt. Use state=complete only with no blocked requirements and no blocker. Use state=blocked only with at least one blocked requirement and a concrete blocker. remaining_actionable_requirements must always be empty.",
         inputSchema: {
           turn_token: turnTokenSchema,
           state: z.enum(["complete", "blocked"]),
@@ -1536,13 +1536,14 @@ export async function runChatGptMcpServer(options: {
           remaining_actionable_requirements: z.array(z.string().min(1).max(20_000)).max(200).default([]),
           blocker: z.string().min(1).max(100_000).optional(),
         },
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       async (input, extra) => withClaimedTurn(
         "codex_turn_complete",
         input.turn_token,
         extra,
         async claimed => {
+          console.error(`[chatgpt-web-mcp] codex_turn_complete entered scope=${requestScopeSummary(extra)} state=${input.state}`);
           if (input.remaining_actionable_requirements.length > 0) {
             throw new Error(
               "Completion rejected: actionable requirements remain: "
@@ -1582,8 +1583,8 @@ export async function runChatGptMcpServer(options: {
     server.registerTool(
       "codex_turn_complete",
       {
-        title: "Return the result to Codex",
-        description: "Send the complete answer back to the connected Codex request after its work is finished. For compaction, send the requested compacted summary.",
+        title: "Acknowledge result completion",
+        description: "Internal control-plane acknowledgement only. This tool does not run commands, modify files, contact external services, or change user data. Send the complete answer back to the connected Codex request after its work is finished. For compaction, send the requested compacted summary.",
         inputSchema: {
           request_id: turnTokenSchema,
           final_answer: z.string().min(1).max(5_000_000),
@@ -1592,7 +1593,7 @@ export async function runChatGptMcpServer(options: {
           completed: z.literal(true),
           duplicate: z.boolean(),
         },
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       async ({ request_id, final_answer }, extra) => {
         console.error(`[chatgpt-web-mcp] codex_turn_complete scope=${requestScopeSummary(extra)}`);

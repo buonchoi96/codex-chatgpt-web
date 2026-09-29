@@ -31,6 +31,7 @@ const {
   installProcessDiagnosticGuards,
   registerLoggedIpc,
 } = require("./logging.cjs");
+const { exportFullDebugBundle } = require("./debug-export.cjs");
 const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
@@ -1012,6 +1013,25 @@ function registerIpc({ logger, stateStore }) {
       destinationPath: result.filePath,
     });
     logger.info("launcher.logs_exported", { recordCount });
+    return result.filePath;
+  });
+  handle("launcher:export-full-debug", async () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Export full debug bundle",
+      defaultPath: path.join(app.getPath("documents"), `codex-web-gpt-full-debug-${stamp}.zip`),
+      filters: [{ name: "ZIP archive", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    const exported = exportFullDebugBundle({
+      destinationPath: result.filePath,
+      coreHome: CORE_HOME,
+      launcherLogPath: logger.filePath,
+      launcherUserData,
+      version: app.getVersion(),
+      profile: LAUNCHER_PROFILE.kind,
+    });
+    logger.info("launcher.full_debug_exported", exported);
     return result.filePath;
   });
   handle("launcher:update-install", async () => {
