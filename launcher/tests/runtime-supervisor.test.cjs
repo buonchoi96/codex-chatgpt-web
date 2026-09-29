@@ -1482,11 +1482,11 @@ test("explicit launcher shutdown force-stops only its owned runtime when gracefu
   ]);
 });
 
-test("production Full startup keeps the local Responses host ready while the tunnel recovers", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-degraded-start-"));
+test("production Full startup waits for the MCP tunnel before reporting ready", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-startup-gate-"));
   const operations = [];
   const states = [];
-  const recoveries = [];
+  const actions = [];
   const supervisor = new RuntimeSupervisor({
     app: { getVersion: () => "0.2.0", isPackaged: false },
     logger: { info() {}, warn() {}, error() {} },
@@ -1502,28 +1502,39 @@ test("production Full startup keeps the local Responses host ready while the tun
     states.push({ status, detail });
     return { status, detail };
   };
+
+  let releaseTunnel;
+  const tunnelGate = new Promise(resolve => {
+    releaseTunnel = resolve;
+  });
   supervisor.startDaemon = async () => {
+    actions.push("daemon-ready");
     supervisor.daemon = { pid: 4242, exitCode: null, signalCode: null };
   };
   supervisor.startTunnel = async () => {
-    throw new Error("synthetic tunnel outage");
+    actions.push("tunnel-start");
+    await tunnelGate;
+    supervisor.tunnel = { pid: 4343, exitCode: null, signalCode: null, managed: true };
+    actions.push("tunnel-ready");
   };
-  supervisor.scheduleRecovery = name => recoveries.push(name);
 
   try {
-    const result = await supervisor.startConfigured();
+    const startup = supervisor.startConfigured();
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(actions, ["daemon-ready", "tunnel-start"]);
+    assert.equal(states.some(state => state.status === "ready"), false);
+    assert.equal(operations.some(operation => operation.status === "completed"), false);
+
+    releaseTunnel();
+    const result = await startup;
     assert.equal(result.status, "ready");
     assert.equal(result.daemonPid, 4242);
-    assert.equal(result.tunnelDegraded, true);
-    assert.match(result.detail, /MCP tunnel is starting in the background/);
-    await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(recoveries, ["tunnel"]);
-    assert.equal(states.some(state => state.status === "degraded"), true);
-    assert.equal(
-      operations.some(operation => operation.status === "completed"
-        && /Local Responses runtime is ready/.test(operation.message)),
-      true,
-    );
+    assert.equal(result.tunnelPid, 4343);
+    assert.deepEqual(actions, ["daemon-ready", "tunnel-start", "tunnel-ready"]);
+    assert.equal(states.at(-1).status, "ready");
+    assert.equal(operations.at(-1).status, "completed");
+    assert.match(operations.at(-1).message, /Local runtime is ready/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

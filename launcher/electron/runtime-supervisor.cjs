@@ -1285,37 +1285,29 @@ class RuntimeSupervisor {
         return { status: "ready", daemonPid: this.daemon?.pid, tunnelPid: this.tunnel?.pid };
       }
 
-      // The local Responses endpoint is Codex's network dependency. Bring it up first and keep it
-      // alive even when the remote MCP tunnel is temporarily unavailable.
+      // Initial production startup is a strict gate: do not expose the local Responses route to
+      // Codex until the Native2/MCP tunnel has completed its readiness checks. After the initial
+      // startup succeeds, the monitor/recovery path may keep the daemon hosted through later
+      // tunnel outages without poisoning Codex with a half-ready route.
       await this.startDaemon(config);
       this.restartHistory.daemon = [];
 
       if (config.mode === "full") {
-        const detail = "Local Responses runtime is ready; MCP tunnel is starting in the background";
-        this.writeState("degraded", detail);
-        this.publishOperation?.({
-          name: "runtime-start",
-          status: "completed",
-          message: detail,
-        });
-        this.startTunnelInBackground(config);
-        return {
-          status: "ready",
-          daemonPid: this.daemon?.pid,
-          tunnelPid: this.tunnel?.pid,
-          tunnelDegraded: true,
-          detail,
-        };
+        await this.startTunnel(config, "runtime-start");
+        this.restartHistory.tunnel = [];
       }
 
-      this.restartHistory.tunnel = [];
       this.writeState("ready");
       this.publishOperation?.({
         name: "runtime-start",
         status: "completed",
         message: "Local runtime is ready",
       });
-      return { status: "ready", daemonPid: this.daemon?.pid, tunnelPid: null };
+      return {
+        status: "ready",
+        daemonPid: this.daemon?.pid,
+        tunnelPid: config.mode === "full" ? this.tunnel?.pid : null,
+      };
     } catch (error) {
       this.stopping = true;
       let cleanupError;
@@ -1334,32 +1326,6 @@ class RuntimeSupervisor {
       this.publishOperation?.({ name: "runtime-start", status: "failed", message });
       throw new Error(message);
     }
-  }
-
-  startTunnelInBackground(config) {
-    if (this.stopping || config.mode !== "full") return;
-    const recovery = this.startTunnel(config, "runtime-recovery").then(() => {
-      if (this.stopping) return;
-      this.restartHistory.tunnel = [];
-      this.lastChildFailure.tunnel = null;
-      if (this.tryWriteState("ready")) {
-        this.publishOperation?.({
-          name: "runtime-recovery",
-          status: "completed",
-          message: "MCP tunnel is ready",
-        });
-      }
-    }).catch((error) => {
-      if (this.stopping) return;
-      const message = errorMessage(error);
-      this.lastChildFailure.tunnel = message;
-      this.logger.error("runtime.tunnel_background_start_failed", { message });
-      if (this.tryWriteState(this.daemon ? "degraded" : "failed", message)) {
-        this.scheduleRecovery("tunnel");
-      }
-    });
-    this.recoveryTasks.add(recovery);
-    void recovery.finally(() => this.recoveryTasks.delete(recovery));
   }
 
   recordRestart(name) {
