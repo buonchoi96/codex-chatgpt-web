@@ -300,7 +300,7 @@ test("turn broker revokes only channels owned by the closed browser trace", asyn
 });
 
 test("turn broker account-safety cancellation aborts the matching DEV response and revokes only its trace", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cgw-broker-safety-cancel-"));
+  const root = mkdtempSync(join(tmpdir(), "cgw-bs-"));
   const socketPath = defaultBrokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   const environment = {
@@ -486,7 +486,7 @@ test("turn broker names the finished turn that owns a replayed handle", async ()
 });
 
 test("dispatch guard rejects an MCP call before it is queued or delivered", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cgw-broker-dispatch-guard-"));
+  const root = mkdtempSync(join(tmpdir(), "cgw-bg-"));
   const socketPath = defaultBrokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   const guardedTraceIds: string[] = [];
