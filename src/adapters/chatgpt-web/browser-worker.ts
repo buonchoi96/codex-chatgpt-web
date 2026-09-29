@@ -2943,17 +2943,40 @@ export class ChatGptBrowserWorker {
     await captureDiagnostic?.("effort-menu-open-requested");
     const effortSlider = activation.slider;
     const sliderContainer = activation.sliderContainer;
-    const waitAbort = new AbortController();
     const effortSliderReadyDeadline = Date.now() + CHATGPT_EFFORT_SLIDER_READY_TIMEOUT_MS;
     const effortSliderReadyTimeout = () => Math.max(1, effortSliderReadyDeadline - Date.now());
-    try {
-      const ready = await Promise.race([
-        sliderContainer.waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal })
-          .then(() => effortSlider.waitFor({ state: "attached", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }))
-          .then(() => "slider" as const),
-        chatGptRateLimitDialog(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "rate-limit" as const),
-        chatGptExpiredSessionAlert(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "session-expired" as const),
+    // Concurrent Codex subagents can open several ChatGPT tabs in the same signed-in browser
+    // context. A model-picker React update from another tab can happen between activation and
+    // waitFor() registration. Activation has already proven a visible owned surface, so accept a
+    // structurally complete semantic slider immediately instead of turning that race into a
+    // false 15-second "model controls unavailable" failure.
+    const visibleStructuralSliderReady = async (): Promise<boolean> => {
+      if (!await sliderContainer.isVisible().catch(() => false)) return false;
+      const [rawMin, rawMax, rawValue] = await Promise.all([
+        effortSlider.getAttribute("aria-valuemin").catch(() => null),
+        effortSlider.getAttribute("aria-valuemax").catch(() => null),
+        effortSlider.getAttribute("aria-valuenow").catch(() => null),
       ]);
+      return rawMin !== null && rawMax !== null && rawValue !== null;
+    };
+    try {
+      let ready: "slider" | "rate-limit" | "session-expired";
+      if (await visibleStructuralSliderReady()) {
+        ready = "slider";
+      } else {
+        const waitAbort = new AbortController();
+        try {
+          ready = await Promise.race([
+            sliderContainer.waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal })
+              .then(() => effortSlider.waitFor({ state: "attached", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }))
+              .then(() => "slider" as const),
+            chatGptRateLimitDialog(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "rate-limit" as const),
+            chatGptExpiredSessionAlert(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "session-expired" as const),
+          ]);
+        } finally {
+          waitAbort.abort();
+        }
+      }
       if (ready === "rate-limit") await throwIfChatGptRateLimitDialog(page);
       if (ready === "session-expired") await throwIfChatGptSessionFailureAlert(page);
       await captureDiagnostic?.("effort-slider-visible");
@@ -2964,8 +2987,6 @@ export class ChatGptBrowserWorker {
       throw chatGptModelControlUnavailableAdapterError(
         `ChatGPT effort slider did not become ready for item index ${uiEffortIndex}`,
       );
-    } finally {
-      waitAbort.abort();
     }
     const selectionUrl = page.url();
     const readAvailableEffort = async (container: Locator, menu: Locator) => {

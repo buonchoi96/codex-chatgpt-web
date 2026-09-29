@@ -248,7 +248,7 @@ test("a transient effort control does not turn a Luna-only account into Sol", as
   expect(visibilityReads).toBe(2);
 });
 
-function reasoningPicker(options: { max?: string; locks?: Array<string | null>; delay?: number; missing?: boolean; loseSelectionOnClose?: boolean; power?: boolean; disabled?: string; staleAttributeMax?: string; maxAfterClose?: string; locksAfterClose?: Array<string | null>; sliderWaitTimeouts?: number[] } = {}) {
+function reasoningPicker(options: { max?: string; locks?: Array<string | null>; delay?: number; missing?: boolean; loseSelectionOnClose?: boolean; power?: boolean; disabled?: string; staleAttributeMax?: string; maxAfterClose?: string; locksAfterClose?: Array<string | null>; sliderWaitTimeouts?: number[]; visibleWaitFails?: boolean } = {}) {
   let value = 0;
   let opened = true;
   let closedOnce = false;
@@ -288,6 +288,7 @@ function reasoningPicker(options: { max?: string; locks?: Array<string | null>; 
     waitFor: async ({ state, timeout }: { state: string; timeout?: number }) => {
       if (options.sliderWaitTimeouts) options.sliderWaitTimeouts.push(timeout ?? -1);
       expect(state).toBe("visible");
+      if (options.visibleWaitFails) throw new Error("visible effort slider should bypass locator wait");
       if (options.missing) throw new Error("effort container never hydrated");
       if (options.delay) await new Promise(resolve => setTimeout(resolve, options.delay));
     },
@@ -332,6 +333,19 @@ test("effort picker hydration failure stays inside a short interaction budget", 
   })).rejects.toMatchObject({ code: "upstream_server_error", retryable: false });
   expect(sliderWaitTimeouts[0]).toBeGreaterThan(0);
   expect(sliderWaitTimeouts[0]).toBeLessThanOrEqual(15_000);
+});
+
+test("an already visible structural slider bypasses a stalled waiter during concurrent turn setup", async () => {
+  const fixture = reasoningPicker({ visibleWaitFails: true });
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    activeComposer: async () => fixture.composer,
+  }) as { selectModelAndEffort(...args: unknown[]): Promise<{ selection: { label: string } }> };
+
+  const result = await worker.selectModelAndEffort(fixture.page, "gpt-5.6-sol", "high", {
+    localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true,
+  });
+  expect(result.selection.label).toBe("High");
+  expect(fixture.keys).toEqual(["ArrowRight", "ArrowRight"]);
 });
 
 test("a late model control within the inspection budget is not recorded as Luna-only", async () => {
