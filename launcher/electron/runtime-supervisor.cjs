@@ -1,9 +1,11 @@
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
+const { isLiveTunnelLeaseActive } = require("./live-tunnel-lease.cjs");
 const { redactText } = require("./logging.cjs");
 const {
   DETACH_OWNED_CHILD,
@@ -113,6 +115,21 @@ function runtimeOwnershipMayBeLive(state) {
   if (!state || runtimeOwnershipPredatesCurrentBoot(state)) return false;
   if (processRunning(state.daemonPid) || processRunning(state.tunnelPid)) return true;
   return ["starting", "ready", "degraded", "stopping"].includes(state.status);
+}
+
+function tunnelIdentity(config) {
+  if (config?.mode !== "full" || !config.tunnel) return null;
+  return {
+    alias: config.tunnel.alias,
+    tunnelIdHash: crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+  };
+}
+
+function tunnelHealthFingerprint(value) {
+  const baseUrl = loopbackHealthBaseURL(value);
+  return baseUrl
+    ? crypto.createHash("sha256").update(baseUrl).digest("hex")
+    : null;
 }
 
 function conciseTunnelLog(value) {
@@ -355,6 +372,8 @@ class RuntimeSupervisor {
     this.statePath = path.join(coreHome, "runtime", "launcher-supervisor.json");
     this.daemon = null;
     this.tunnel = null;
+    this.tunnelIdentity = null;
+    this.liveSessionTunnelPid = null;
     this.stopping = false;
     this.startPromise = null;
     this.stopPromise = null;
@@ -374,15 +393,30 @@ class RuntimeSupervisor {
   }
 
   readConfig() {
-    if (!fs.existsSync(this.configPath)) return null;
+    if (!fs.existsSync(this.configPath)) {
+      this.tunnelIdentity = null;
+      return null;
+    }
     const config = validateConfig(
       readJson(this.configPath),
       this.browserDescriptorPath,
       this.platform,
       this.launcherProfile,
     );
+    this.tunnelIdentity = tunnelIdentity(config);
     this.onConfigRead?.(config);
     return config;
+  }
+
+  liveTunnelHandoffActive() {
+    const configuredLeasePath = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    const leasePath = typeof configuredLeasePath === "string" && configuredLeasePath.length > 0
+      ? configuredLeasePath
+      : process.env.CODEX_WEB_GPT_LIVE_MODE === "1" && typeof this.coreHome === "string"
+        ? path.join(this.coreHome, "runtime", "live-tunnel-handoff.json")
+        : undefined;
+    return typeof leasePath === "string" && leasePath.length > 0
+      && isLiveTunnelLeaseActive(leasePath);
   }
 
   readSetupConfig() {
@@ -421,6 +455,24 @@ class RuntimeSupervisor {
         || Number.isNaN(Date.parse(state.updatedAt))) {
         throw new Error("state shape is invalid");
       }
+      if (state.tunnelIdentity !== undefined
+        && (!state.tunnelIdentity
+          || typeof state.tunnelIdentity !== "object"
+          || Array.isArray(state.tunnelIdentity)
+          || Object.keys(state.tunnelIdentity).sort().join(",") !== "alias,tunnelIdHash"
+          || typeof state.tunnelIdentity.alias !== "string"
+          || !state.tunnelIdentity.alias.trim()
+          || state.tunnelIdentity.alias.length > 128
+          || /[\r\n]/.test(state.tunnelIdentity.alias)
+          || typeof state.tunnelIdentity.tunnelIdHash !== "string"
+          || !/^[a-f0-9]{64}$/.test(state.tunnelIdentity.tunnelIdHash))) {
+        throw new Error("state tunnel identity is invalid");
+      }
+      if (state.tunnelHealthFingerprint !== undefined
+        && (typeof state.tunnelHealthFingerprint !== "string"
+          || !/^[a-f0-9]{64}$/.test(state.tunnelHealthFingerprint))) {
+        throw new Error("state tunnel health fingerprint is invalid");
+      }
       return state;
     } catch (error) {
       throw new Error(`Launcher runtime ownership state is invalid at ${this.statePath}: ${errorMessage(error)}`);
@@ -434,6 +486,10 @@ class RuntimeSupervisor {
       daemonPid: this.daemon?.pid ?? null,
       tunnelPid: this.tunnel?.pid ?? null,
       status,
+      ...(this.tunnelIdentity ? { tunnelIdentity: this.tunnelIdentity } : {}),
+      ...(this.tunnel?.managed && tunnelHealthFingerprint(this.tunnelHealthBaseUrl)
+        ? { tunnelHealthFingerprint: tunnelHealthFingerprint(this.tunnelHealthBaseUrl) }
+        : {}),
       ...(detail ? { detail } : {}),
       updatedAt: new Date().toISOString(),
     };
@@ -642,8 +698,8 @@ class RuntimeSupervisor {
     try {
       const parsed = JSON.parse(result.output);
       if (!Array.isArray(parsed.entries)) throw new Error("local inventory has no entries array");
-      const entry = parsed.entries.find(candidate => candidate?.alias === tunnel.alias);
-      if (!entry) {
+      const matchingEntries = parsed.entries.filter(candidate => candidate?.alias === tunnel.alias);
+      if (matchingEntries.length === 0) {
         return {
           ready: false,
           pid: null,
@@ -654,6 +710,15 @@ class RuntimeSupervisor {
           statusKnown: true,
           detail: `alias=${tunnel.alias}; local_inventory=absent`,
         };
+      }
+      if (matchingEntries.length !== 1) {
+        throw new Error(`local inventory has ${matchingEntries.length} entries for the configured alias`);
+      }
+      const [entry] = matchingEntries;
+      const tunnelIdMatches = typeof entry.tunnel_id === "string"
+        && entry.tunnel_id === tunnel.tunnelId;
+      if (entry.tunnel_id !== undefined && !tunnelIdMatches) {
+        throw new Error("local inventory tunnel ID does not match the configured tunnel ID");
       }
       const runtimeState = entry.runtime_state;
       if (!["stopped", "starting", "healthy", "ready"].includes(runtimeState)) {
@@ -680,6 +745,7 @@ class RuntimeSupervisor {
         ["classification", entry.classification],
         ["live_admin", liveRuntime.found === true],
         ["pid", pid ?? "missing"],
+        ["tunnel_id_matches", tunnelIdMatches],
       ]
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => `${key}=${String(value)}`)
@@ -692,6 +758,7 @@ class RuntimeSupervisor {
         healthy,
         absent: false,
         statusKnown: true,
+        tunnelIdMatches,
         detail: redactText(detail).slice(0, 2_000),
       };
     } catch (error) {
@@ -703,6 +770,7 @@ class RuntimeSupervisor {
         healthy: undefined,
         absent: false,
         statusKnown: false,
+        tunnelIdMatches: false,
         detail: `local inventory returned invalid JSON: ${errorMessage(error)};`
           + ` ${redactText(result.output || "[empty]").slice(0, 500)}`,
       };
@@ -988,11 +1056,24 @@ class RuntimeSupervisor {
 
   async startTunnel(config, operationName = "runtime-start", { forceRestart = false } = {}) {
     if (config.mode !== "full") return;
+    const preservedPidAtStart = !forceRestart && this.liveTunnelHandoffActive()
+      ? this.liveSessionTunnelPid
+      : null;
+    const preserveVerifiedHandoffHealth = !forceRestart
+      && this.liveTunnelHandoffActive()
+      && this.tunnel?.managed === true
+      && Boolean(tunnelHealthFingerprint(this.tunnelHealthBaseUrl));
     this.assertTunnelClientReady(config);
-    // Every acquisition binds diagnostics to this runtime, including adoption of an existing alias.
-    this.tunnelHealthBaseUrl = null;
+    // Keep the verified endpoint when stale-owner recovery already adopted a live PID-less tunnel.
+    if (!preserveVerifiedHandoffHealth) this.tunnelHealthBaseUrl = null;
     try {
       const existing = await this.waitForKnownTunnelStatus(config);
+      if (preservedPidAtStart
+        && this.tunnel?.pid === preservedPidAtStart
+        && !existing.ready
+        && !tunnelRuntimeStopped(existing)) {
+        throw new Error(`Live-session tunnel became unhealthy during Electron handoff; retaining PID ${preservedPidAtStart}`);
+      }
       if (existing.ready && !forceRestart) {
         this.tunnel = {
           pid: existing.pid,
@@ -1002,6 +1083,9 @@ class RuntimeSupervisor {
         };
         await this.waitForTunnelMcpTransport(config);
         this.startTunnelMonitor(config);
+        if (this.liveTunnelHandoffActive() && Number.isSafeInteger(existing.pid) && existing.pid > 0) {
+          this.liveSessionTunnelPid = existing.pid;
+        }
         this.logger.info("runtime.tunnel_adopted", { pid: existing.pid });
         return;
       }
@@ -1025,7 +1109,19 @@ class RuntimeSupervisor {
       if (!this.tunnel) throw new Error("Tunnel runtime became ready without a managed process identity");
       await this.waitForTunnelMcpTransport(config);
       this.startTunnelMonitor(config);
+      if (this.liveTunnelHandoffActive() && Number.isSafeInteger(this.tunnel?.pid) && this.tunnel.pid > 0) {
+        this.liveSessionTunnelPid = this.tunnel.pid;
+      }
     } catch (error) {
+      if (preservedPidAtStart
+        && this.liveTunnelHandoffActive()
+        && this.tunnel?.pid === preservedPidAtStart) {
+        this.logger.warn("runtime.tunnel_handoff_health_lost", {
+          pid: preservedPidAtStart,
+          message: errorMessage(error),
+        });
+        throw error;
+      }
       let cleanupError;
       try {
         this.stopTunnelMonitor();
@@ -1434,7 +1530,10 @@ class RuntimeSupervisor {
         await this.stopChild("daemon");
       }
     }
-    if (this.tunnel) {
+    const preserveLiveSessionTunnel = this.liveTunnelHandoffActive()
+      && Number.isSafeInteger(this.liveSessionTunnelPid)
+      && this.tunnel?.pid === this.liveSessionTunnelPid;
+    if (this.tunnel && !preserveLiveSessionTunnel) {
       await this.stopTunnelGracefully(config);
     }
   }
@@ -1604,6 +1703,7 @@ class RuntimeSupervisor {
       throw error;
     }
     this.tunnel = null;
+    this.liveSessionTunnelPid = null;
   }
 
   async adoptConfiguredTunnelForStop(config) {
@@ -1627,6 +1727,98 @@ class RuntimeSupervisor {
       pid: health.pid,
       state: health.state,
     });
+  }
+
+  async verifyTunnelHandoff(
+    config,
+    expectedPid,
+    expectedHealthFingerprint,
+  ) {
+    if (expectedPid === null
+      && (typeof expectedHealthFingerprint !== "string"
+        || !/^[a-f0-9]{64}$/.test(expectedHealthFingerprint))) {
+      throw new Error("PID-less tunnel handoff has no valid saved health fingerprint");
+    }
+    const previousTunnel = this.tunnel;
+    const previousHealthBaseUrl = this.tunnelHealthBaseUrl;
+    const health = await this.waitForKnownTunnelStatus(config);
+    const pidMatches = expectedPid === null
+      ? health.pid === null
+      : Number.isSafeInteger(health.pid) && health.pid > 0
+        && health.pid === expectedPid && processRunning(health.pid);
+    if (health.ready !== true
+      || health.healthy !== true
+      || health.processRunning !== true
+      || health.tunnelIdMatches !== true
+      || !pidMatches) {
+      throw new Error(`Tunnel handoff health, tunnel ID, or process identity could not be verified: ${health.detail}`);
+    }
+    this.tunnel = {
+      pid: health.pid,
+      exitCode: null,
+      signalCode: null,
+      managed: true,
+    };
+    try {
+      await this.discoverTunnelHealthBaseUrl(config);
+      const actualHealthFingerprint = tunnelHealthFingerprint(this.tunnelHealthBaseUrl);
+      if (!actualHealthFingerprint
+        || (expectedHealthFingerprint && actualHealthFingerprint !== expectedHealthFingerprint)) {
+        throw new Error("Tunnel handoff loopback health endpoint fingerprint changed");
+      }
+      const localHealth = await this.readLocalTunnelHealth();
+      if (localHealth.ready !== true || localHealth.pid !== expectedPid) {
+        throw new Error(`Local tunnel or MCP health check failed: ${localHealth.detail}`);
+      }
+      await this.waitForTunnelMcpTransport(config);
+      return { ...health, tunnelHealthFingerprint: actualHealthFingerprint };
+    } catch (error) {
+      this.tunnel = previousTunnel;
+      this.tunnelHealthBaseUrl = previousHealthBaseUrl;
+      throw error;
+    }
+  }
+
+  async adoptLiveTunnelHandoff(config, state) {
+    if (!this.liveTunnelHandoffActive()) {
+      throw new Error("Live dev-session tunnel lease is missing or inactive");
+    }
+    if (!state || state.ownerPid === process.pid || processRunning(state.ownerPid)) {
+      throw new Error("Previous Electron tunnel owner has not exited");
+    }
+    const pidIsValid = Number.isSafeInteger(state.tunnelPid) && state.tunnelPid > 0;
+    const pidlessHasFingerprint = state.tunnelPid === null
+      && typeof state.tunnelHealthFingerprint === "string"
+      && /^[a-f0-9]{64}$/.test(state.tunnelHealthFingerprint);
+    if (config.mode !== "full" || !config.tunnel
+      || (!pidIsValid && !pidlessHasFingerprint)) {
+      throw new Error("Previous runtime state has no adoptable configured tunnel identity");
+    }
+    const expectedIdentity = tunnelIdentity(config);
+    if (state.tunnelIdentity
+      && (state.tunnelIdentity.alias !== expectedIdentity.alias
+        || state.tunnelIdentity.tunnelIdHash !== expectedIdentity.tunnelIdHash)) {
+      throw new Error("Previous runtime tunnel identity does not match the current configuration");
+    }
+    if (!state.tunnelIdentity) {
+      throw new Error("Previous runtime tunnel identity is missing");
+    }
+    this.tunnelIdentity = expectedIdentity;
+    const verification = await this.verifyTunnelHandoff(
+      config,
+      state.tunnelPid,
+      state.tunnelHealthFingerprint,
+    );
+    this.liveSessionTunnelPid = state.tunnelPid;
+    this.startTunnelMonitor(config);
+    this.logger.info("runtime.tunnel_handoff_adopted", {
+      pid: state.tunnelPid,
+      alias: expectedIdentity.alias,
+    });
+    return {
+      pid: state.tunnelPid,
+      tunnelHealthFingerprint: verification.tunnelHealthFingerprint,
+    };
   }
 
   async runTunnelStopCommand(config) {
@@ -1764,6 +1956,11 @@ class RuntimeSupervisor {
       return false;
     }
     const tunnelOnly = this.launcherProfile === "development";
+    const liveHandoffSession = !tunnelOnly
+      && config.mode === "full"
+      && this.liveTunnelHandoffActive()
+      && state.ownerPid !== process.pid
+      && !processRunning(state.ownerPid);
     if (tunnelOnly && processRunning(state.daemonPid)) {
       throw new Error("DEV launcher ownership unexpectedly contains a Responses daemon");
     }
@@ -1780,6 +1977,7 @@ class RuntimeSupervisor {
       );
     }
     let managedTunnelRunning = false;
+    let handedOffTunnel = false;
     if (config.mode === "full") {
       const tunnelHealth = await this.waitForKnownTunnelStatus(config);
       managedTunnelRunning = !tunnelRuntimeStopped(tunnelHealth);
@@ -1788,6 +1986,10 @@ class RuntimeSupervisor {
         && tunnelHealth.pid === null
         && typeof tunnelHealth.state !== "string") {
         throw new Error(`The stale tunnel runtime state is ambiguous: ${tunnelHealth.detail}`);
+      }
+      if (liveHandoffSession && managedTunnelRunning) {
+        await this.adoptLiveTunnelHandoff(config, state);
+        handedOffTunnel = true;
       }
       if (!managedTunnelRunning && processRunning(state.tunnelPid)) {
         throw new Error(
@@ -1833,14 +2035,15 @@ class RuntimeSupervisor {
         throw error;
       }
     }
-    if (managedTunnelRunning) {
+    if (managedTunnelRunning && !handedOffTunnel) {
       const stopped = await this.runTunnelStopCommand(config);
       if (stopped.code !== 0) {
         throw new Error(`stale tunnel refused graceful shutdown: ${tunnelControlDiagnostic(stopped)}`);
       }
       await this.waitForTunnelStopped(config, 10_000);
     }
-    this.clearState();
+    if (handedOffTunnel) this.writeState("handoff");
+    else this.clearState();
     this.logger.info("runtime.stale_owner_recovered");
     return true;
   }
@@ -1966,9 +2169,9 @@ class RuntimeSupervisor {
     this[name] = null;
   }
 
-  async stopForSetup() {
+  async stopForSetup({ preserveTunnel = false } = {}) {
     if (this.stopPromise) return this.stopPromise;
-    this.stopPromise = this.performStopForSetup();
+    this.stopPromise = this.performStopForSetup({ preserveTunnel });
     try {
       return await this.stopPromise;
     } finally {
@@ -1976,7 +2179,7 @@ class RuntimeSupervisor {
     }
   }
 
-  async performStopForSetup() {
+  async performStopForSetup({ preserveTunnel = false } = {}) {
     if (this.startPromise) {
       try {
         await this.startPromise;
@@ -1985,6 +2188,9 @@ class RuntimeSupervisor {
       }
     }
     const config = this.readConfig();
+    preserveTunnel = preserveTunnel
+      && this.liveTunnelHandoffActive()
+      && config?.mode === "full";
     this.stopping = true;
     this.stopTunnelMonitor();
     for (const name of ["daemon", "tunnel"]) {
@@ -2034,10 +2240,22 @@ class RuntimeSupervisor {
         }
         drained = await this.acquireDrain(config);
       }
+      if (this.tunnel && preserveTunnel) {
+        if (this.tunnel.pid === null && !this.tunnelHealthBaseUrl) {
+          await this.discoverTunnelHealthBaseUrl(config);
+        }
+        await this.verifyTunnelHandoff(
+          config,
+          this.tunnel.pid,
+          tunnelHealthFingerprint(this.tunnelHealthBaseUrl),
+        );
+      }
       if (this.tunnel) {
         if (!config) throw new Error("launcher-owned tunnel cannot be stopped without a valid configuration");
-        await this.stopTunnelGracefully(config);
-        tunnelStopped = true;
+        if (!preserveTunnel) {
+          await this.stopTunnelGracefully(config);
+          tunnelStopped = true;
+        }
       }
       if (this.daemon) {
         if (!config || !drained) {
@@ -2045,7 +2263,8 @@ class RuntimeSupervisor {
         }
         await this.shutdownDaemon(config);
       }
-      this.clearState();
+      if (preserveTunnel && this.tunnel) this.writeState("handoff");
+      else this.clearState();
       return { status: "stopped" };
     } catch (error) {
       const compensationErrors = [];
@@ -2087,7 +2306,7 @@ class RuntimeSupervisor {
     return this.startIfConfigured();
   }
 
-  async forceStopOwnedRuntime(reason) {
+  async forceStopOwnedRuntime(reason, { preserveTunnel = false } = {}) {
     this.logger.warn("runtime.forced_shutdown_started", { message: errorMessage(reason) });
     this.stopping = true;
     this.stopTunnelMonitor();
@@ -2100,7 +2319,23 @@ class RuntimeSupervisor {
     try {
       if (this.recoveryTasks.size > 0) await Promise.allSettled([...this.recoveryTasks]);
       const failures = [];
-      if (this.tunnel) {
+      if (preserveTunnel && this.tunnel) {
+        try {
+          const config = this.readConfig();
+          if (!config || config.mode !== "full") throw new Error("runtime configuration is unavailable");
+          if (this.tunnel.pid === null && !this.tunnelHealthBaseUrl) {
+            await this.discoverTunnelHealthBaseUrl(config);
+          }
+          await this.verifyTunnelHandoff(
+            config,
+            this.tunnel.pid,
+            tunnelHealthFingerprint(this.tunnelHealthBaseUrl),
+          );
+        } catch (error) {
+          failures.push(`tunnel handoff verification failed: ${errorMessage(error)}`);
+        }
+      }
+      if (this.tunnel && !preserveTunnel) {
         try {
           const config = this.readConfig();
           if (!config) throw new Error("runtime configuration is unavailable");
@@ -2108,6 +2343,7 @@ class RuntimeSupervisor {
           if (stopped.code !== 0) throw new Error(tunnelControlDiagnostic(stopped));
           await this.waitForTunnelStopped(config, 5_000);
           this.tunnel = null;
+          this.liveSessionTunnelPid = null;
         } catch (error) {
           failures.push(`tunnel: ${errorMessage(error)}`);
         }
@@ -2117,7 +2353,8 @@ class RuntimeSupervisor {
       } catch (error) {
         failures.push(`daemon: ${errorMessage(error)}`);
       }
-      if (failures.length === 0) this.clearState();
+      if (failures.length === 0 && preserveTunnel && this.tunnel) this.tryWriteState("handoff");
+      else if (failures.length === 0) this.clearState();
       else this.tryWriteState("failed", failures.join("; "));
       this.logger.warn("runtime.forced_shutdown_completed", {
         message: errorMessage(reason),
@@ -2133,13 +2370,16 @@ class RuntimeSupervisor {
     }
   }
 
-  async shutdown({ cancelActiveTurns = false, force = false } = {}) {
+  async shutdown({ cancelActiveTurns = false, force = false, preserveTunnel = false } = {}) {
+    const preserveActiveTunnel = preserveTunnel && this.liveTunnelHandoffActive();
     try {
       if (cancelActiveTurns) await this.cancelActiveTurns();
-      return await this.stopForSetup();
+      return await this.stopForSetup({ preserveTunnel: preserveActiveTunnel });
     } catch (error) {
       if (!force) throw error;
-      return this.forceStopOwnedRuntime(error);
+      return this.forceStopOwnedRuntime(error, {
+        preserveTunnel: preserveActiveTunnel && this.liveTunnelHandoffActive(),
+      });
     }
   }
 }

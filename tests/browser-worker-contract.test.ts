@@ -181,10 +181,15 @@ test("missing native completion receipt gets a progress-aware bounded same-turn 
   expect(prompt).toContain("Resume from the next unfinished action");
   expect(prompt).toContain("continue every remaining independently actionable requirement");
   expect(prompt).toContain("dedicated codex_turn_complete tool");
+  expect(prompt).toContain("If the current connector reports codex_turn_complete is not callable or missing");
+  expect(prompt).toContain("codex_tool_call with wire_name codex.control.turn_complete");
+  expect(prompt).toContain("Do not search the outer Codex tool inventory for codex_turn_complete");
+  expect(prompt).toContain("keep turn_token at the top level and put the receipt fields inside arguments");
+  expect(prompt).toContain("Do not try that unavailable direct tool again");
   expect(prompt).toContain("state=complete");
   expect(prompt).toContain("state=blocked");
   expect(prompt).toContain("safety-blocked required tool");
-  expect(prompt).not.toContain("wire_name codex.control.turn_complete");
+  expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("recovery 1/64");
   expect(prompt).toContain(JSON.stringify({ turn_token: turnToken }));
@@ -2315,6 +2320,7 @@ test("successful connector verification clears the proven selection before relea
   const diagnosticsRoot = mkdtempSync(join(tmpdir(), "cgw-connector-verification-success-"));
   const calls: string[] = [];
   const page = {
+    screenshot: async () => Buffer.from("diagnostic screenshot fixture"),
     evaluate: async () => ({
       location: { origin: "https://chatgpt.com", pathSegments: 0, temporaryChat: true },
       surfaceBound: true,

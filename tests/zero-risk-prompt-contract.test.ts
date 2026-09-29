@@ -34,6 +34,7 @@ test("Zero Risk prompt carries only a neutral request id while MCP metadata owns
   expect(compiled.text).toContain("<codex_zero_risk_request_json>");
   expect(compiled.text).toContain(`\"request_id\":\"${requestId}\"`);
   expect(compiled.text).not.toContain("turn_token");
+  expect(compiled.text).not.toContain("codex.control.parallel_exec");
   expect(compiled.text).not.toContain("surface_nonce");
   expect(compiled.text).not.toContain("Before reasoning");
   expect(compiled.text).not.toContain("ordinary assistant text");

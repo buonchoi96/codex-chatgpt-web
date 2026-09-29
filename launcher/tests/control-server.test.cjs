@@ -3,6 +3,69 @@ const assert = require("node:assert/strict");
 const { BrowserHost } = require("../electron/browser-host.cjs");
 const { BrowserControlServer } = require("../electron/control-server.cjs");
 
+test("browser control exposes persisted automation-security status only to its bearer-token owner", async () => {
+  const record = {
+    version: 1,
+    paused: true,
+    revision: 2,
+    signal: "security_challenge",
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: null,
+  };
+  const server = await new BrowserControlServer({
+    logger: { info() {}, warn() {}, error() {} },
+    getBrowserHost: () => ({ automationSecurityStatus: () => record }),
+    getPreferences: () => { throw new Error("status read must not need preferences"); },
+  }).start();
+  const { endpoint, token } = server.descriptor();
+  try {
+    assert.equal((await fetch(`${endpoint}/v1/automation-security/status`)).status, 401);
+    const response = await fetch(`${endpoint}/v1/automation-security/status`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { automationSecurity: record });
+  } finally {
+    await server.close();
+  }
+});
+
+test("browser control returns a typed 409 with the finite record when a turn is safety-paused", async () => {
+  const record = {
+    version: 1,
+    paused: true,
+    revision: 5,
+    signal: "account_security_warning",
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: null,
+  };
+  const stop = Object.assign(new Error("ChatGPT Web automation is paused by account safety"), {
+    code: "chatgpt_account_safety_stop",
+    signal: record.signal,
+    automationSecurity: record,
+  });
+  const server = await new BrowserControlServer({
+    logger: { info() {}, warn() {}, error() {} },
+    getBrowserHost: () => ({ browserInteractionMode: () => "automatic", beginTurn() { throw stop; } }),
+    getPreferences: () => ({}),
+  }).start();
+  const { endpoint, token } = server.descriptor();
+  try {
+    const response = await fetch(`${endpoint}/v1/turn/start`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ traceId: "safety-stop", helperPid: process.pid }),
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: stop.message,
+      code: "chatgpt_account_safety_stop",
+      signal: record.signal,
+      automationSecurity: record,
+    });
+  } finally { await server.close(); }
+});
+
 test("disconnect cancels pending browser initialization and destroys only its owned document", async () => {
   const { EventEmitter } = require("node:events");
   for (const stalledAt of ["load", "mark"]) {

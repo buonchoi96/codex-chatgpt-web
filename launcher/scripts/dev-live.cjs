@@ -2,7 +2,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const net = require("node:net");
 const path = require("node:path");
+const { createHash, randomUUID } = require("node:crypto");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
+const { createLiveTunnelLease, removeLiveTunnelLease } = require("../electron/live-tunnel-lease.cjs");
 
 const launcherRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(launcherRoot, "..");
@@ -10,10 +12,19 @@ const vitePackage = require.resolve("vite/package.json", { paths: [launcherRoot]
 const viteBin = path.join(path.dirname(vitePackage), "bin", "vite.js");
 const electronBin = require("electron");
 const bun = process.env.CODEX_WEB_GPT_BUN || process.execPath;
+const {
+  drainRuntimeForElectronRestart,
+  recoverableTunnelHandoff,
+  waitForElectronShutdown,
+  waitForReplacementRuntime,
+} = require("./dev-live-lifecycle.cjs");
 const liveHome = path.resolve(
   process.env.CODEX_WEB_GPT_LIVE_HOME || path.join(os.homedir(), ".codex-chatgpt-web-live"),
 );
 const liveUserData = path.join(liveHome, "launcher");
+const liveTunnelLeasePath = path.join(liveHome, "runtime", "live-tunnel-handoff.json");
+const runtimeStatePath = path.join(liveHome, "runtime", "launcher-supervisor.json");
+const liveTunnelSessionId = randomUUID().replaceAll("-", "");
 const preferredVitePort = Number(process.env.CODEX_WEB_GPT_LIVE_VITE_PORT || 4178);
 let vitePort = preferredVitePort;
 let viteUrl = `http://127.0.0.1:${vitePort}`;
@@ -24,7 +35,9 @@ let vite;
 let electron;
 let stopped = false;
 let electronRestarting = false;
+let electronReloadInFlight = false;
 let reloadTimer;
+let electronRetryTimer;
 let routeTimer;
 let viteRestartTimer;
 let reloadRunning = false;
@@ -41,6 +54,7 @@ function liveEnvironment(extra = {}) {
     CODEX_CHATGPT_WEB_HOME: liveHome,
     CODEX_WEB_GPT_LAUNCHER_DATA_DIR: liveUserData,
     CODEX_WEB_GPT_LIVE_MODE: "1",
+    CODEX_WEB_GPT_LIVE_TUNNEL_LEASE: liveTunnelLeasePath,
     CODEX_WEB_GPT_BUN: bun,
     CODEX_CHATGPT_WEB_BUN: bun,
     ...extra,
@@ -164,6 +178,7 @@ function startElectron() {
     stdio: "inherit",
     env: liveEnvironment({ VITE_DEV_SERVER_URL: viteUrl }),
   });
+  const child = electron;
   electron.once("error", error => {
     warn(`Electron failed to start: ${error.message}`);
     if (!stopped) void stop(1);
@@ -173,43 +188,208 @@ function startElectron() {
     if (stopped || electronRestarting) return;
     warn(`Electron exited unexpectedly (${code ?? 0}); restarting source launcher`);
     setTimeout(() => {
-      if (!stopped && !electron) startElectron();
+      if (!stopped && !electron) {
+        if (electronRetryTimer) clearTimeout(electronRetryTimer);
+        electronRetryTimer = undefined;
+        void restartElectron();
+      }
     }, 500);
   });
   log(`source launcher started with persistent state at ${liveHome}`);
+  return child;
 }
 
-async function waitForElectronExit(child, timeoutMs = 10_000) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise(resolve => {
+async function waitForElectronExit(child, timeoutMs = 10_000, { forceKill = true } = {}) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return true;
+  const exited = await new Promise(resolve => {
     let settled = false;
-    const done = () => {
+    const done = didExit => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve();
+      child.off("exit", onExit);
+      child.off("close", onExit);
+      resolve(didExit);
     };
-    const timer = setTimeout(done, timeoutMs);
-    child.once("exit", done);
-    try { child.kill("SIGTERM"); } catch { done(); }
+    const onExit = () => done(true);
+    const timer = setTimeout(() => done(false), timeoutMs);
+    child.once("exit", onExit);
+    child.once("close", onExit);
+    if (child.exitCode !== null || child.signalCode !== null) done(true);
+    else {
+      try { child.kill("SIGTERM"); } catch { done(false); }
+    }
   });
-  if (child.exitCode === null && child.signalCode === null) {
+  if (!exited && forceKill && child.exitCode === null && child.signalCode === null) {
     if (process.platform === "win32" && Number.isInteger(child.pid)) {
       spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     } else {
       try { child.kill("SIGKILL"); } catch {}
     }
+    return true;
+  }
+  return exited || child.exitCode !== null || child.signalCode !== null;
+}
+
+function readRuntimeState() {
+  try {
+    const stat = fs.lstatSync(runtimeStatePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024) return undefined;
+    const state = JSON.parse(fs.readFileSync(runtimeStatePath, "utf8"));
+    if (!state || typeof state !== "object" || Array.isArray(state)
+      || !Number.isSafeInteger(state.ownerPid) || state.ownerPid < 1
+      || !(state.daemonPid === null || (Number.isSafeInteger(state.daemonPid) && state.daemonPid > 0))
+      || !(state.tunnelPid === null || (Number.isSafeInteger(state.tunnelPid) && state.tunnelPid > 0))
+      || (state.tunnelHealthFingerprint !== undefined
+        && (typeof state.tunnelHealthFingerprint !== "string"
+          || !/^[a-f0-9]{64}$/.test(state.tunnelHealthFingerprint)))
+      || typeof state.status !== "string") return undefined;
+    return state;
+  } catch {
+    return undefined;
   }
 }
 
+function pidRunning(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function configuredTunnelIdentity(config) {
+  if (config?.mode !== "full" || !config.tunnel
+    || typeof config.tunnel.alias !== "string"
+    || typeof config.tunnel.tunnelId !== "string") return undefined;
+  return {
+    alias: config.tunnel.alias,
+    tunnelIdHash: createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+  };
+}
+
+function sameTunnelIdentity(actual, expected) {
+  return Boolean(actual && expected
+    && actual.alias === expected.alias
+    && actual.tunnelIdHash === expected.tunnelIdHash);
+}
+
+function scheduleElectronRestartRetry() {
+  if (stopped || electronRetryTimer) return;
+  electronRetryTimer = setTimeout(() => {
+    electronRetryTimer = undefined;
+    if (!stopped) void restartElectron();
+  }, 5_000);
+}
+
 async function restartElectron() {
-  if (stopped) return;
-  log("Electron-side source changed; restarting source launcher while preserving the live profile");
-  electronRestarting = true;
-  const child = electron;
-  electron = undefined;
-  await waitForElectronExit(child);
-  if (!stopped) startElectron();
+  if (stopped || electronReloadInFlight) return false;
+  electronReloadInFlight = true;
+  try {
+    const configPresent = fs.existsSync(path.join(liveHome, "config.json"));
+    const config = liveConfig();
+    if (configPresent && !config) {
+      warn("Electron reload deferred because the live runtime configuration could not be read safely");
+      scheduleElectronRestartRetry();
+      return false;
+    }
+    const previousState = config ? readRuntimeState() : undefined;
+    const expectedTunnelIdentity = configuredTunnelIdentity(config);
+    const runtimeReady = previousState?.status === "ready"
+      && Number.isSafeInteger(previousState.daemonPid)
+      && previousState.daemonPid > 0;
+    const handoffRecovery = config?.mode === "full"
+      && recoverableTunnelHandoff(previousState, pidRunning);
+    if (config && !runtimeReady && !handoffRecovery) {
+      warn("Electron reload deferred because the live runtime ownership state is not ready");
+      scheduleElectronRestartRetry();
+      return false;
+    }
+    if (config?.mode === "full"
+      && !sameTunnelIdentity(previousState?.tunnelIdentity, expectedTunnelIdentity)) {
+      warn("Electron reload deferred because the live tunnel identity does not match the configured alias and tunnel ID");
+      scheduleElectronRestartRetry();
+      return false;
+    }
+    const expectedTunnelPid = config?.mode === "full" ? previousState?.tunnelPid : null;
+    const expectedTunnelHealthFingerprint = config?.mode === "full"
+      ? previousState?.tunnelHealthFingerprint
+      : undefined;
+    const tunnelHandoffIdentityReady = config?.mode !== "full"
+      || (Number.isSafeInteger(expectedTunnelPid) && expectedTunnelPid > 0)
+      || (expectedTunnelPid === null
+        && typeof expectedTunnelHealthFingerprint === "string"
+        && /^[a-f0-9]{64}$/.test(expectedTunnelHealthFingerprint));
+    if (!tunnelHandoffIdentityReady) {
+      warn("Electron reload deferred because the live tunnel has neither a verified PID nor a saved health fingerprint");
+      scheduleElectronRestartRetry();
+      return false;
+    }
+    if (config && runtimeReady) {
+      const drained = await drainRuntimeForElectronRestart({
+        config,
+        expectedDaemonPid: previousState.daemonPid,
+        health,
+        control,
+        timeoutMs: Math.max(1_000, idleRestartTimeoutMs),
+      });
+      if (!drained.allowed) {
+        warn(`Electron reload deferred; daemon admission ${drained.resumed ? "was resumed" : "could not be confirmed resumed"}: ${drained.reason}`);
+        scheduleElectronRestartRetry();
+        return false;
+      }
+    }
+
+    log("Electron-side source changed; draining turns and restarting while retaining the live tunnel");
+    electronRestarting = true;
+    const child = electron;
+    const oldOwnerPid = previousState?.ownerPid;
+    electron = undefined;
+    const oldExited = await waitForElectronExit(child, 10_000, { forceKill: false });
+    if (!oldExited) {
+      electron = child;
+      electronRestarting = false;
+      if (config) {
+        const resumed = await control(config, "resume").then(value => value?.accepting_turns === true).catch(() => false);
+        warn(`Electron reload deferred because the current launcher did not exit cleanly; daemon admission ${resumed ? "was resumed" : "could not be confirmed resumed"}`);
+      } else {
+        warn("Electron reload deferred because the current launcher did not exit cleanly");
+      }
+      scheduleElectronRestartRetry();
+      return false;
+    }
+    if (stopped) return false;
+    if (electronRetryTimer) clearTimeout(electronRetryTimer);
+    electronRetryTimer = undefined;
+    const replacement = startElectron();
+    if (!config) return true;
+    const readiness = await waitForReplacementRuntime({
+      config,
+      expectedTunnelPid,
+      expectedTunnelHealthFingerprint,
+      expectedTunnelIdentity,
+      previousOwnerPid: oldOwnerPid,
+      health,
+      readState: async () => readRuntimeState(),
+      isElectronAlive: () => replacement
+        && replacement.exitCode === null
+        && replacement.signalCode === null,
+      ownerAlive: pidRunning,
+      timeoutMs: 30_000,
+    });
+    if (!readiness.ready) {
+      warn(`Replacement launcher readiness was not confirmed: ${readiness.reason}`);
+      return false;
+    }
+    log(readiness.tunnelPid === null
+      ? "replacement launcher is ready; verified the existing PID-less tunnel health fingerprint"
+      : `replacement launcher is ready; verified tunnel PID ${readiness.tunnelPid ?? "none"}`);
+    return true;
+  } finally {
+    electronReloadInFlight = false;
+  }
 }
 
 function liveConfig() {
@@ -218,8 +398,12 @@ function liveConfig() {
   try {
     const value = JSON.parse(fs.readFileSync(configPath, "utf8"));
     if (!value || typeof value !== "object") return undefined;
-    if (typeof value.host !== "string" || !Number.isInteger(value.port) || typeof value.controlToken !== "string") return undefined;
-    return value;
+    if (typeof value.host !== "string"
+      || !Number.isInteger(value.port)
+      || typeof value.controlToken !== "string"
+      || typeof value.releaseVersion !== "string"
+      || !["full", "browser-only", "pro-only"].includes(value.mode)) return undefined;
+    return { ...value, mode: value.mode === "pro-only" ? "browser-only" : value.mode };
   } catch {
     return undefined;
   }
@@ -239,17 +423,24 @@ async function health(config, timeoutMs = 1_500) {
   }
 }
 
-async function control(config, action) {
-  const response = await fetch(`http://${config.host}:${config.port}/admin/${action}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${config.controlToken}` },
-  });
-  let body;
-  try { body = await response.json(); } catch { body = undefined; }
-  if (!response.ok) {
-    throw new Error(`${action} returned HTTP ${response.status}${body ? `: ${JSON.stringify(body)}` : ""}`);
+async function control(config, action, { timeoutMs = 2_000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`http://${config.host}:${config.port}/admin/${action}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.controlToken}` },
+      signal: controller.signal,
+    });
+    let body;
+    try { body = await response.json(); } catch { body = undefined; }
+    if (!response.ok) {
+      throw new Error(`${action} returned HTTP ${response.status}${body ? `: ${JSON.stringify(body)}` : ""}`);
+    }
+    return body;
+  } finally {
+    clearTimeout(timeout);
   }
-  return body;
 }
 
 async function restartDaemonFromSource() {
@@ -412,12 +603,14 @@ async function stop(exitCode = 0) {
   if (stopped) return;
   stopped = true;
   clearTimeout(reloadTimer);
+  if (electronRetryTimer) clearTimeout(electronRetryTimer);
   if (routeTimer) clearInterval(routeTimer);
   if (viteRestartTimer) clearTimeout(viteRestartTimer);
   for (const watcher of watchers.splice(0)) watcher.close();
   restorePreviousRoute();
+  removeLiveTunnelLease(liveTunnelLeasePath);
   electronRestarting = true;
-  await waitForElectronExit(electron, 5_000);
+  await waitForElectronShutdown(electron, waitForElectronExit, message => warn(message));
   electron = undefined;
   if (vite && vite.exitCode === null && vite.signalCode === null) {
     try { vite.kill("SIGTERM"); } catch {}
@@ -429,6 +622,7 @@ async function main() {
   assertProductionLauncherStopped();
   fs.mkdirSync(liveHome, { recursive: true });
   fs.mkdirSync(liveUserData, { recursive: true });
+  createLiveTunnelLease(liveTunnelLeasePath, process.pid, liveTunnelSessionId);
   log(`persistent live home: ${liveHome}`);
   log("the installed launcher must stay closed while this process owns Codex Native2/tunnel resources");
   buildBrowserHelper();

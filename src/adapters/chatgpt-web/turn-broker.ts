@@ -38,6 +38,8 @@ export interface BrokerTurnOutputEvent {
 
 export type NativeCompletionState = "complete" | "blocked";
 
+export type TurnBrokerDispatchGuard = (traceId: string) => void | Promise<void>;
+
 export interface NativeCompletionReceipt {
   state: NativeCompletionState;
   summary: string;
@@ -130,6 +132,7 @@ interface BrokerRequest {
   id: string;
   method:
     | "claim"
+    | "cancel_trace"
     | "resolve"
     | "release"
     | "invoke"
@@ -179,6 +182,7 @@ interface BrokerRequest {
   surfaceNonce?: string;
   finalAnswer?: string;
   completionState?: NativeCompletionState;
+  reason?: string;
   completionSummary?: string;
   completedRequirements?: string[];
   blockedRequirements?: string[];
@@ -420,12 +424,18 @@ export class TurnBroker implements TurnBrokerOwner {
   // previous turn's handle" from "this handle never existed".
   private readonly retiredBindings = new Map<string, string>();
   private readonly retiredTokens = new Map<string, string>();
+  private readonly traceAbortControllers = new Map<string, Set<AbortController>>();
   private acceptingExternalOwners = true;
+  private dispatchGuard?: TurnBrokerDispatchGuard;
   private server?: Server;
   private startPromise?: Promise<void>;
   private socketIdentity?: { dev: number; ino: number };
 
   private constructor(readonly socketPath: string) {}
+
+  setDispatchGuard(guard: TurnBrokerDispatchGuard | undefined): void {
+    this.dispatchGuard = guard;
+  }
 
   /**
    * A ChatGPT turn outlives the request that started it, and its Codex Native calls arrive from a
@@ -1025,6 +1035,34 @@ export class TurnBroker implements TurnBrokerOwner {
     return tokens.length;
   }
 
+  registerTraceAbortController(traceId: string, controller: AbortController): () => void {
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(traceId)) throw new Error("turn cancellation trace id is invalid");
+    if (controller.signal.aborted) return () => {};
+    let controllers = this.traceAbortControllers.get(traceId);
+    if (!controllers) {
+      controllers = new Set();
+      this.traceAbortControllers.set(traceId, controllers);
+    }
+    controllers.add(controller);
+    const unregister = (): void => {
+      controller.signal.removeEventListener("abort", unregister);
+      controllers!.delete(controller);
+      if (controllers!.size === 0) this.traceAbortControllers.delete(traceId);
+    };
+    controller.signal.addEventListener("abort", unregister, { once: true });
+    return unregister;
+  }
+
+  cancelTrace(traceId: string, reason = new Error("ChatGPT account-safety automation stop")):
+    { cancelledResponses: number; revokedTurns: number } {
+    const controllers = [...(this.traceAbortControllers.get(traceId) ?? [])];
+    for (const controller of controllers) {
+      if (!controller.signal.aborted) controller.abort(reason);
+    }
+    const revokedTurns = this.revokeTrace(traceId, reason);
+    return { cancelledResponses: controllers.length, revokedTurns };
+  }
+
   setExternalOwnersAccepted(accepted: boolean): void {
     this.acceptingExternalOwners = accepted;
   }
@@ -1102,6 +1140,12 @@ export class TurnBroker implements TurnBrokerOwner {
 
   async close(): Promise<void> {
     this.compactionTransactions.close();
+    for (const [traceId, controllers] of this.traceAbortControllers) {
+      for (const controller of controllers) {
+        if (!controller.signal.aborted) controller.abort(new Error("ChatGPT web turn broker closed"));
+      }
+      this.traceAbortControllers.delete(traceId);
+    }
     for (const token of [...this.channels.keys()]) this.revoke(token);
     const server = this.server;
     this.server = undefined;
@@ -1268,13 +1312,27 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "cancel_invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
+    if (!["claim", "cancel_trace", "resolve", "release", "invoke", "cancel_invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
 
   private async dispatch(request: BrokerRequest, socketSignal?: AbortSignal): Promise<unknown> {
     this.prune();
+    if (request.method === "cancel_trace") {
+      const traceId = request.traceId;
+      if (typeof traceId !== "string" || !/^[A-Za-z0-9_-]{6,128}$/.test(traceId)) {
+        throw new Error("turn cancellation trace id is invalid");
+      }
+      if (request.reason !== "account_security") {
+        throw new Error("turn cancellation reason is invalid");
+      }
+      const cancelled = this.cancelTrace(traceId, new Error("ChatGPT account-safety automation stop"));
+      return {
+        cancelled_responses: cancelled.cancelledResponses,
+        revoked_turns: cancelled.revokedTurns,
+      };
+    }
     if (request.method === "safe_start") {
       if (!request.token) throw new Error("Zero Risk request_id is required");
       return this.startSafeTurn(request.token);
@@ -1623,6 +1681,8 @@ export class TurnBroker implements TurnBrokerOwner {
     if (binding.channel.invocations.has(callId) || binding.channel.deliveredCallIds.has(callId)) {
       throw new Error("turn broker invocation call id is already active");
     }
+    await this.dispatchGuard?.(binding.channel.traceId);
+    if (socketSignal?.aborted) throw new Error("turn broker invocation was cancelled before dispatch");
     const toolRequest: BrokerToolRequest = {
       callId,
       wireName,

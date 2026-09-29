@@ -48,6 +48,9 @@ const TURN_TAB_BOOTSTRAP_TIMEOUT_MS = 120_000;
 const RETAINED_TURN_TAB_TTL_MS = 30 * 60 * 1000;
 const BROWSER_NAVIGATION_TIMEOUT_MS = 60_000;
 const CHATGPT_AUTH_SESSION_TIMEOUT_MS = 5_000;
+const AUTOMATION_SECURITY_PAGE_TEXT_LIMIT = 64_000;
+const AUTHENTICATION_REDIRECT_WINDOW_MS = 60_000;
+const AUTHENTICATION_REDIRECT_LIMIT = 3;
 const WINDOW_VISIBILITY_EVENTS = ["show", "hide", "minimize", "restore"];
 const CHATGPT_BACKEND_REQUEST_FILTER = { urls: [`${CHATGPT_ORIGIN}/backend-api/*`] };
 const ZOOM_FACTORS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
@@ -63,8 +66,13 @@ const AUTH_PROVIDER_HOSTS = new Set([
   "appleid.apple.com",
   "idmsa.apple.com",
 ]);
-const CLOUDFLARE_CHALLENGE_RECOVERY_DELAY_MS = 500;
-const CLOUDFLARE_CHALLENGE_RECOVERY_SETTLE_MS = 1_000;
+const AUTOMATION_SECURITY_SIGNALS = new Set([
+  "cloudflare_challenge",
+  "security_challenge",
+  "account_security_warning",
+  "reauthentication_loop",
+  "invalid_security_state",
+]);
 const COMPOSER_SELECTOR = [
   '[data-testid="prompt-textarea"]',
   "#prompt-textarea",
@@ -208,6 +216,93 @@ function isChatGptCloudflareChallengeResponse(details) {
     && responseHeaderIncludes(details.responseHeaders, "cf-mitigated", "challenge");
 }
 
+function validAutomationSecurityRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || value.version !== 1
+    || typeof value.paused !== "boolean"
+    || !Number.isSafeInteger(value.revision) || value.revision < 0
+    || (value.signal !== null && !AUTOMATION_SECURITY_SIGNALS.has(value.signal))) return false;
+  const validTimestamp = timestamp => typeof timestamp === "string"
+    && Number.isFinite(Date.parse(timestamp))
+    && new Date(timestamp).toISOString() === timestamp;
+  if (value.signal === null) {
+    return !value.paused && value.revision === 0
+      && value.detectedAt === null && value.resumedAt === null;
+  }
+  return value.revision > 0
+    && validTimestamp(value.detectedAt)
+    && (value.paused ? value.resumedAt === null : validTimestamp(value.resumedAt));
+}
+
+function invalidAutomationSecurityRecord(now = new Date()) {
+  return {
+    version: 1,
+    paused: true,
+    revision: 1,
+    signal: "invalid_security_state",
+    detectedAt: now.toISOString(),
+    resumedAt: null,
+  };
+}
+
+function automationSecurityStatusFor(host) {
+  if (host?.automationSecurityPersistenceFailed) return invalidAutomationSecurityRecord();
+  if (typeof host?.getAutomationSecurity !== "function") {
+    return { version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null };
+  }
+  try {
+    const stored = host.getAutomationSecurity();
+    const record = stored?.automationSecurity ?? stored;
+    if (validAutomationSecurityRecord(record)) return { ...record };
+  } catch {}
+  return invalidAutomationSecurityRecord();
+}
+
+function requireAutomationSecurityClear(host, operation) {
+  const automationSecurity = automationSecurityStatusFor(host);
+  if (!automationSecurity.paused) return automationSecurity;
+  const error = new Error(`ChatGPT Web automation is paused by account safety (${automationSecurity.signal})`);
+  error.code = "chatgpt_account_safety_stop";
+  error.retryable = false;
+  error.automationSecurity = automationSecurity;
+  error.operation = operation;
+  throw error;
+}
+
+function automationSecuritySignalForPage({ url, text } = {}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  const trustedOrigin = parsed.protocol === "https:"
+    && (parsed.origin === CHATGPT_ORIGIN || AUTH_PROVIDER_HOSTS.has(parsed.hostname));
+  if (!trustedOrigin || typeof text !== "string") return null;
+  const boundedText = text.slice(0, AUTOMATION_SECURITY_PAGE_TEXT_LIMIT).toLowerCase();
+  if (/(?:we\s+have\s+detected|we\s+detected|detected)\s+(?:suspicious|unusual)\s+activity|unusual\s+activity\s+has\s+been\s+detected/.test(boundedText)) {
+    return "account_security_warning";
+  }
+  if (/\/cdn-cgi\/challenge-platform(?:\/|$)/i.test(parsed.pathname)
+    || /\b(?:cf-turnstile|cf-chl-)/i.test(boundedText)
+    || /\b(?:verify|prove)\s+(?:that\s+)?you(?:'re|\s+are)\s+human\b/.test(boundedText)
+    || /\b(?:captcha|turnstile)\b.{0,80}\b(?:challenge|verify|complete|solve|select)\b/.test(boundedText)
+    || /\b(?:challenge|verify|complete|solve|select)\b.{0,80}\b(?:captcha|turnstile)\b/.test(boundedText)
+    || /\bcomplete\s+(?:the\s+)?(?:security\s+)?(?:check|challenge)\b/.test(boundedText)
+    || /\bare\s+you\s+a\s+robot(?:\?|\b)/.test(boundedText)) {
+    return "security_challenge";
+  }
+  return null;
+}
+
+function isSameOriginAuthenticationRedirect(fromUrl, toUrl) {
+  let from;
+  let to;
+  try {
+    from = new URL(fromUrl);
+    to = new URL(toUrl);
+  } catch {
+    return false;
+  }
+  return from.origin === to.origin && allowedAuthUrl(fromUrl) && allowedAuthUrl(toUrl);
+}
+
 function manualPromptDigest(prompt) {
   return createHash("sha256").update(prompt, "utf8").digest("hex");
 }
@@ -221,6 +316,7 @@ function browserInteractionModeFor(host) {
 }
 
 function requireAutomaticBrowserInspection(host, operation) {
+  requireAutomationSecurityClear(host, operation);
   if (browserInteractionModeFor(host) === "manual") {
     const error = new Error(`${operation} is disabled in Zero Risk mode`);
     error.code = "manual_browser_inspection_disabled";
@@ -319,6 +415,10 @@ class BrowserHost {
     clipboardApi = clipboard,
     getBrowserInteractionMode = () => "automatic",
     getUseSavedChats = () => false,
+    getAutomationSecurity = () => ({
+      version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null,
+    }),
+    pauseAutomationSecurity = () => { throw new Error("Automation security state store is unavailable"); },
   }) {
     if (typeof getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
@@ -349,6 +449,11 @@ class BrowserHost {
     this.clipboard = clipboardApi;
     this.getBrowserInteractionMode = getBrowserInteractionMode;
     this.getUseSavedChats = getUseSavedChats;
+    this.getAutomationSecurity = getAutomationSecurity;
+    this.pauseAutomationSecurity = pauseAutomationSecurity;
+    this.automationSecurityPersistenceFailed = false;
+    this.automationSecurityCancellation = Promise.resolve();
+    this.authenticationRedirectsByContents = new Map();
     this.runBrowserHelperOperation = runBrowserHelperOperation;
     this.verifyConnectorWithBrowserHelper = verifyConnectorWithBrowserHelper;
     this.surfaceId = randomBytes(24).toString("base64url");
@@ -366,10 +471,6 @@ class BrowserHost {
     this.sessionRefreshOperation = null;
     this.authenticationRevision = 0;
     this.reauthenticationRequired = false;
-    this.cloudflareChallengeRecovery = null;
-    this.cloudflareChallengeRecoveryArmed = true;
-    this.cloudflareChallengeRecoveryDelayMs = CLOUDFLARE_CHALLENGE_RECOVERY_DELAY_MS;
-    this.cloudflareChallengeRecoverySettleMs = CLOUDFLARE_CHALLENGE_RECOVERY_SETTLE_MS;
     this.viewportCssKey = null;
     this.primaryRendererReady = false;
     this.primaryDeviceEmulationViewport = null;
@@ -442,7 +543,8 @@ class BrowserHost {
     this.view.setVisible(true);
     try {
       await loadCommittedBrowserSurface(this.view.webContents, IDLE_BROWSER_URL);
-      if (browserInteractionModeFor(this) === "automatic") await this.markOwnedSurface();
+      if (browserInteractionModeFor(this) === "automatic"
+        && !automationSecurityStatusFor(this).paused) await this.markOwnedSurface();
     } finally {
       this.syncViewVisibility();
     }
@@ -454,6 +556,112 @@ class BrowserHost {
     return this.manualOperation || (this.loginOperation ? "ChatGPT login" : null);
   }
 
+  automationSecurityStatus() {
+    return automationSecurityStatusFor(this);
+  }
+
+  requireAutomationSecurityClear(operation) {
+    return requireAutomationSecurityClear(this, operation);
+  }
+
+  triggerAutomationSecurity(signal, context = {}) {
+    if (!AUTOMATION_SECURITY_SIGNALS.has(signal) || signal === "invalid_security_state") return false;
+    let automationSecurity;
+    try {
+      const stored = this.pauseAutomationSecurity(signal);
+      automationSecurity = stored?.automationSecurity ?? stored;
+      if (!validAutomationSecurityRecord(automationSecurity) || !automationSecurity.paused) {
+        throw new Error("Automation security store returned an invalid pause record");
+      }
+    } catch {
+      this.automationSecurityPersistenceFailed = true;
+      automationSecurity = invalidAutomationSecurityRecord();
+    }
+
+    this.authenticationRedirectsByContents.clear();
+    const traceIds = new Set(
+      [...this.turnTabs.values()]
+        .filter(tab => tab.status === "running" && typeof tab.traceId === "string")
+        .map(tab => tab.traceId),
+    );
+    if (typeof context.traceId === "string" && context.traceId.length > 0) traceIds.add(context.traceId);
+    const safeContext = {
+      signal,
+      revision: automationSecurity.revision,
+      ...(Number.isInteger(context.statusCode) ? { statusCode: context.statusCode } : {}),
+      ...(typeof context.traceId === "string" ? { traceId: context.traceId.slice(0, 128) } : {}),
+      cancelledTraceCount: traceIds.size,
+    };
+    this.logger.warn("browser.automation_security_paused", safeContext);
+    this.setState({
+      automationSecurity,
+      status: "error",
+      message: `ChatGPT Web automation paused for account safety (${automationSecurity.signal})`,
+      loading: false,
+    });
+
+    const cancellations = [...traceIds].map(async traceId => {
+      if (typeof this.cancelTurn !== "function") {
+        this.logger.warn("browser.automation_security_cancel_unavailable", { traceId: traceId.slice(0, 128) });
+        return;
+      }
+      try {
+        await this.cancelTurn(traceId, "account_security");
+      } catch {
+        this.logger.error("browser.automation_security_cancel_failed", { traceId: traceId.slice(0, 128) });
+      }
+    });
+    this.automationSecurityCancellation = Promise.allSettled(cancellations);
+    return true;
+  }
+
+  recordAuthenticationRedirect(webContentsId, fromUrl, toUrl, traceId, now = Date.now()) {
+    if (!Number.isSafeInteger(webContentsId) || !Number.isFinite(now)) return false;
+    if (!isSameOriginAuthenticationRedirect(fromUrl, toUrl)) {
+      this.authenticationRedirectsByContents.delete(webContentsId);
+      return false;
+    }
+    const origin = new URL(toUrl).origin;
+    const previous = this.authenticationRedirectsByContents.get(webContentsId);
+    if (previous?.origin !== origin || previous.triggered === true) {
+      this.authenticationRedirectsByContents.set(webContentsId, { origin, events: [], triggered: false });
+    }
+    const current = this.authenticationRedirectsByContents.get(webContentsId);
+    current.events = current.events.filter(item => now - item.at >= 0
+      && now - item.at <= AUTHENTICATION_REDIRECT_WINDOW_MS);
+    current.events.push({ at: now, traceId: typeof traceId === "string" ? traceId : null });
+    if (current.events.length < AUTHENTICATION_REDIRECT_LIMIT) return false;
+    current.triggered = true;
+    void this.triggerAutomationSecurity("reauthentication_loop", {
+      ...(typeof traceId === "string" ? { traceId } : {}),
+    });
+    return true;
+  }
+
+  async observeAutomationSecurityPage(contents, traceId = null) {
+    if (browserInteractionModeFor(this) !== "automatic") return false;
+    if (automationSecurityStatusFor(this).paused) return true;
+    if (!contents || contents.isDestroyed()) return false;
+    const url = contents.getURL();
+    let parsed;
+    try { parsed = new URL(url); } catch { return false; }
+    if (parsed.protocol !== "https:"
+      || (parsed.origin !== CHATGPT_ORIGIN && !AUTH_PROVIDER_HOSTS.has(parsed.hostname))) return false;
+    let text;
+    try {
+      text = await contents.executeJavaScript(
+        `String(document.body?.innerText || "").slice(0, ${AUTOMATION_SECURITY_PAGE_TEXT_LIMIT})`,
+      );
+    } catch {
+      return false;
+    }
+    if (contents.isDestroyed() || contents.getURL() !== url) return false;
+    const signal = automationSecuritySignalForPage({ url, text });
+    if (!signal) return false;
+    this.triggerAutomationSecurity(signal, typeof traceId === "string" ? { traceId } : {});
+    return true;
+  }
+
   assertTurnTabsCanResetForInteractionModeChange() {
     if ([...this.turnTabs.values()].some(tab => tab.status === "running")) {
       throw new Error("Finish or cancel active ChatGPT turns before changing browser interaction mode");
@@ -461,6 +669,7 @@ class BrowserHost {
   }
 
   async withInteractionModeChange(mode, action) {
+    requireAutomationSecurityClear(this, "browser interaction mode change");
     if (mode !== "automatic" && mode !== "manual") {
       throw new Error("Browser interaction mode must be automatic or manual");
     }
@@ -812,6 +1021,12 @@ class BrowserHost {
       event.preventDefault();
       this.markTurnAuthenticationRequired(tab);
     };
+    contents.on("will-redirect", (_event, url, _inPlace, mainFrame) => {
+      if (mainFrame === false) return;
+      if (this.recordAuthenticationRedirect(contents.id, contents.getURL?.() ?? "", url, tab.traceId)) {
+        _event?.preventDefault?.();
+      }
+    });
     contents.on("will-navigate", blockAuthenticationNavigation);
     contents.on("will-redirect", blockAuthenticationNavigation);
     contents.on("did-start-navigation", (_event, url, inPlace, mainFrame) => {
@@ -851,11 +1066,11 @@ class BrowserHost {
         this.publishState?.(this.snapshot());
         return;
       }
-      if (tab.initializingSurface) {
-        this.publishState?.(this.snapshot());
-        return;
-      }
-      void this.markTurnTabSurface(tab).then(
+      void this.observeAutomationSecurityPage(contents, tab.traceId).then((detected) => {
+        if (detected || automationSecurityStatusFor(this).paused) return undefined;
+        if (tab.initializingSurface) return undefined;
+        return this.markTurnTabSurface(tab);
+      }).then(
         () => this.publishState?.(this.snapshot()),
         (error) => {
           tab.status = "error";
@@ -917,6 +1132,7 @@ class BrowserHost {
   }
 
   async markTurnTabSurface(tab) {
+    requireAutomationSecurityClear(this, "ChatGPT turn surface ownership marking");
     requireAutomaticBrowserInspection(this, "ChatGPT turn surface ownership marking");
     const contents = tab?.view?.webContents;
     if (!contents || contents.isDestroyed()) {
@@ -984,6 +1200,12 @@ class BrowserHost {
       tab.url = url;
       tab.loading = true;
       this.publishState?.(this.snapshot());
+    });
+    contents.on("will-redirect", (_event, url, _inPlace, mainFrame) => {
+      if (mainFrame === false) return;
+      if (this.recordAuthenticationRedirect(contents.id, contents.getURL?.() ?? "", url, tab.traceId)) {
+        _event?.preventDefault?.();
+      }
     });
     contents.on("did-start-loading", () => {
       tab.loading = true;
@@ -1076,6 +1298,12 @@ class BrowserHost {
         ? { url, loading: true }
         : { status: "loading", message: "Opening ChatGPT", url, loading: true });
     });
+    contents.on("will-redirect", (event, url, _inPlace, mainFrame) => {
+      if (mainFrame === false) return;
+      if (this.recordAuthenticationRedirect(contents.id, contents.getURL?.() ?? "", url, this.activeTraceId)) {
+        event?.preventDefault?.();
+      }
+    });
     contents.on("did-finish-load", () => {
       this.clearHomeNavigationTimeout();
       this.primaryRendererReady = true;
@@ -1092,9 +1320,12 @@ class BrowserHost {
         return;
       }
       this.setState({ url, loading: false });
-      void this.applyViewportCss();
-      void this.markOwnedSurface()
-        .then(() => this.probeAuthentication())
+      void this.observeAutomationSecurityPage(contents).then(async detected => {
+        if (detected || automationSecurityStatusFor(this).paused) return;
+        await this.applyViewportCss();
+        await this.markOwnedSurface();
+        if (!automationSecurityStatusFor(this).paused) await this.probeAuthentication();
+      })
         .catch((error) => {
           this.logger.error("browser.surface_mark_failed", {
             message: error instanceof Error ? error.message : String(error),
@@ -1259,6 +1490,7 @@ class BrowserHost {
   }
 
   refreshAuthenticationFromSession() {
+    if (automationSecurityStatusFor(this).paused) return Promise.resolve(this.snapshot());
     if (this.destroyed || this.reauthenticationRequired || browserInteractionModeFor(this) !== "automatic") return Promise.resolve();
     this.authenticationRevision = (this.authenticationRevision ?? 0) + 1;
     if (this.authenticationRefresh) return this.authenticationRefresh;
@@ -1309,76 +1541,23 @@ class BrowserHost {
   bindChatGptBackendRecovery() {
     this.view.webContents.session.webRequest.onCompleted(
       CHATGPT_BACKEND_REQUEST_FILTER,
-      details => browserInteractionModeFor(this) === "automatic"
-        ? this.handleChatGptBackendResponse(details)
-        : undefined,
+      details => this.handleChatGptBackendResponse(details),
     );
   }
 
   handleChatGptBackendResponse(details) {
-    const contents = this.view?.webContents;
-    if (!contents || contents.isDestroyed() || details?.webContentsId !== contents.id) return false;
     if (!isChatGptBackendUrl(details.url)) return false;
-
-    if (details.statusCode >= 200 && details.statusCode < 400) {
-      this.cloudflareChallengeRecoveryArmed = true;
-      return false;
-    }
     if (!isChatGptCloudflareChallengeResponse(details)) return false;
-    if (this.cloudflareChallengeRecovery) {
-      this.cloudflareChallengeRecoveryArmed = false;
-      return true;
-    }
-    if (this.activeTraceId || this.manualOperation) {
-      this.logger.warn("browser.cloudflare_challenge_not_reloaded", {
-        reason: this.activeTraceId ? "turn-active" : "manual-operation-active",
-        url: details.url,
-      });
-      return true;
-    }
-    if (!this.cloudflareChallengeRecoveryArmed) {
-      this.logger.warn("browser.cloudflare_challenge_persisted", { url: details.url });
-      return true;
-    }
-    this.cloudflareChallengeRecoveryArmed = false;
-    this.logger.warn("browser.cloudflare_challenge_detected", { url: details.url });
-    const recovery = this.reloadHomeAfterCloudflareChallenge();
-    const tracked = recovery
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error("browser.cloudflare_challenge_recovery_failed", { message });
-        this.setState({ status: "error", message, loading: false });
-      })
-      .finally(() => {
-        if (this.cloudflareChallengeRecovery === tracked) this.cloudflareChallengeRecovery = null;
-      });
-    this.cloudflareChallengeRecovery = tracked;
-    return true;
-  }
-
-  async reloadHomeAfterCloudflareChallenge() {
-    const contents = this.view.webContents;
-    this.setState({
-      status: "loading",
-      message: "Refreshing ChatGPT security check",
-      loading: true,
+    const homeContents = this.view?.webContents;
+    const turnTab = [...this.turnTabs.values()].find(tab =>
+      tab.view?.webContents?.id === details.webContentsId && tab.status === "running");
+    const ownedHome = homeContents && !homeContents.isDestroyed() && homeContents.id === details.webContentsId;
+    if (!ownedHome && !turnTab) return false;
+    this.triggerAutomationSecurity("cloudflare_challenge", {
+      statusCode: details.statusCode,
+      ...(turnTab?.traceId ? { traceId: turnTab.traceId } : {}),
     });
-    await sleep(this.cloudflareChallengeRecoveryDelayMs);
-    if (contents.isDestroyed()) throw new Error("ChatGPT browser closed during security-check recovery");
-    const url = contents.getURL();
-    if (!url.startsWith(CHATGPT_ORIGIN)) {
-      throw new Error("ChatGPT security-check recovery lost its owned browser page");
-    }
-
-    // Only responses from this new document may prove that the challenge cleared.
-    this.cloudflareChallengeRecoveryArmed = false;
-    await contents.loadURL(url);
-    await sleep(this.cloudflareChallengeRecoverySettleMs);
-    if (!this.cloudflareChallengeRecoveryArmed) {
-      throw new Error("ChatGPT security check is still blocking backend requests. Reload ChatGPT and retry.");
-    }
-    await this.probeAuthentication();
-    this.logger.info("browser.cloudflare_challenge_recovered", { url });
+    return true;
   }
 
   snapshot() {
@@ -1409,6 +1588,7 @@ class BrowserHost {
     return {
       ...readBrowserNavigationState(contents, {
         ...state,
+        automationSecurity: automationSecurityStatusFor(this),
         visible: this.visible,
         surfaceActive: this.surfaceActive,
       }, {
@@ -1963,6 +2143,7 @@ class BrowserHost {
   }
 
   async markOwnedSurface() {
+    requireAutomationSecurityClear(this, "ChatGPT DOM surface ownership marking");
     requireAutomaticBrowserInspection(this, "ChatGPT DOM surface ownership marking");
     const surfaceId = JSON.stringify(this.surfaceId);
     await this.view.webContents.executeJavaScript(`(() => {
@@ -2118,6 +2299,7 @@ class BrowserHost {
   }
 
   beginManualTurn(traceId, helperPid, prompt, conversationKey, resumePrompt, compaction = false) {
+    requireAutomationSecurityClear(this, "manual ChatGPT turn");
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
     }
@@ -2432,6 +2614,7 @@ class BrowserHost {
     requireRetainedConversation = false,
     signal,
   ) {
+    requireAutomationSecurityClear(this, "ChatGPT turn");
     signal?.throwIfAborted();
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
@@ -2821,6 +3004,7 @@ class BrowserHost {
   }
 
   async probeAuthentication() {
+    if (automationSecurityStatusFor(this).paused) return this.snapshot();
     requireAutomaticBrowserInspection(this, "ChatGPT authentication probe");
     if (this.reauthenticationRequired
       && !["ChatGPT login", "ChatGPT passkey login", "ChatGPT logout"].includes(this.manualOperation)) return this.snapshot();
@@ -3085,6 +3269,7 @@ class BrowserHost {
   }
 
   async withManualOperation(name, action) {
+    requireAutomationSecurityClear(this, name);
     await this.ready();
     if (this.activeTraceId) {
       throw new Error(`ChatGPT browser is running Codex turn ${this.activeTraceId}`);
@@ -3196,7 +3381,9 @@ module.exports = {
   BrowserTurnCancelledError,
   CHATGPT_VIEWPORT_CSS,
   IDLE_BROWSER_URL,
+  automationSecuritySignalForPage,
   isChatGptCloudflareChallengeResponse,
+  isSameOriginAuthenticationRedirect,
   isTemporaryChatUrl,
   loadCommittedBrowserSurface,
   MANUAL_SUBMIT_TIMEOUT_MS,

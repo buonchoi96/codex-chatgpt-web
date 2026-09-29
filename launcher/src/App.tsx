@@ -17,6 +17,8 @@ import { LimitsSurface } from "./LimitsSurface";
 import { limitsCopyFor } from "./limits-copy";
 import { useLimits } from "./useLimits";
 import type {
+  AutomationSecurityRecord,
+  AutomationSecuritySignal,
   BrowserInteractionMode,
   BrowserState,
   DoctorReport,
@@ -140,6 +142,9 @@ export function App() {
             setError={setError}
             snapshot={snapshot}
             updateState={updateState}
+            updateBrowserSecurity={automationSecurity => setBrowser(current => current
+              ? { ...current, automationSecurity }
+              : current)}
           />
         )}
       </AnimatePresence>
@@ -329,6 +334,7 @@ function LauncherShell({
   setError,
   snapshot,
   updateState,
+  updateBrowserSecurity,
 }: {
   browser: BrowserState | null;
   copy: Copy;
@@ -338,6 +344,7 @@ function LauncherShell({
   setError: (error: string | null) => void;
   snapshot: LauncherSnapshot;
   updateState: (state: LauncherState) => void;
+  updateBrowserSecurity: (record: AutomationSecurityRecord) => void;
 }) {
   const interactionSetupComplete = snapshot.state.coreSetupComplete === true
     && (snapshot.state.browserInteractionMode === "manual"
@@ -353,6 +360,7 @@ function LauncherShell({
   const [compactSidebar, setCompactSidebar] = useState(compactAtMount);
   const [browserSlot, setBrowserSlot] = useState<HTMLDivElement | null>(null);
   const [sessionReminderBusy, setSessionReminderBusy] = useState(false);
+  const [securityResumeBusy, setSecurityResumeBusy] = useState(false);
   const [sessionReminderDue, setSessionReminderDue] = useState(false);
   const [mcpTargetMode, setMcpTargetMode] = useState<BrowserInteractionMode | null>(null);
   const [biggerContextRecommendationOpen, setBiggerContextRecommendationOpen] = useState(
@@ -515,6 +523,20 @@ function LauncherShell({
     }
   };
 
+  const resumeAutomationSecurity = async () => {
+    if (!browser?.automationSecurity.paused || securityResumeBusy) return;
+    if (!window.confirm(copy.automationSecurityResumeConfirm)) return;
+    setSecurityResumeBusy(true);
+    setError(null);
+    try {
+      updateBrowserSecurity(await api!.resumeAutomationSecurity());
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setSecurityResumeBusy(false);
+    }
+  };
+
   const setRecommendedBiggerContext = async (enabled: boolean) => {
     if (biggerContextRecommendationBusy) return;
     setBiggerContextRecommendationBusy(true);
@@ -651,6 +673,32 @@ function LauncherShell({
       </motion.aside>
 
       <section className="workspace">
+        {browser?.automationSecurity.paused ? (
+          <aside aria-labelledby="automation-security-title" className="automation-security-warning" role="alert">
+            <div className="automation-security-warning__content">
+              <h2 id="automation-security-title">{copy.automationSecurityTitle}</h2>
+              <p>{copy.automationSecurityBody}</p>
+              <p>
+                <strong>{copy.automationSecuritySignal}:</strong>{" "}
+                {automationSecuritySignalLabel(browser.automationSecurity.signal, copy)}
+              </p>
+              <p>
+                <strong>{copy.automationSecurityDetected}:</strong>{" "}
+                {browser.automationSecurity.detectedAt
+                  ? new Date(browser.automationSecurity.detectedAt).toLocaleString(language)
+                  : copy.automationSecurityUnknownSignal}
+              </p>
+            </div>
+            <button
+              className="button-secondary"
+              disabled={securityResumeBusy}
+              onClick={() => void resumeAutomationSecurity()}
+              type="button"
+            >
+              {securityResumeBusy ? copy.automationSecurityResumeBusy : copy.automationSecurityResume}
+            </button>
+          </aside>
+        ) : null}
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             animate={{ opacity: 1 }}
@@ -2671,6 +2719,18 @@ function browserTabTitleFromTitle(value: string | undefined, copy: Copy): string
   const title = value?.trim();
   if (!title || title === "about:blank" || title.includes("codex-web-gpt-browser-host")) return copy.temporaryChat;
   return title.replace(/\s*[|–-]\s*ChatGPT\s*$/i, "") || copy.temporaryChat;
+}
+
+function automationSecuritySignalLabel(signal: AutomationSecuritySignal | null, copy: Copy): string {
+  if (!signal) return copy.automationSecurityUnknownSignal;
+  const labels: Record<AutomationSecuritySignal, keyof Copy> = {
+    cloudflare_challenge: "signalCloudflareChallenge",
+    security_challenge: "signalSecurityChallenge",
+    account_security_warning: "signalAccountSecurityWarning",
+    reauthentication_loop: "signalReauthenticationLoop",
+    invalid_security_state: "signalInvalidSecurityState",
+  };
+  return copy[labels[signal]];
 }
 
 function browserTabTone(status: BrowserState["tabs"][number]["status"]): "idle" | "ready" | "busy" | "error" {

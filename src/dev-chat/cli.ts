@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { existsSync } from "node:fs";
 import { stdin, stdout } from "node:process";
 import { DEV_CHATGPT_CONNECTOR_NAME, loadConfig } from "../config";
+import { TurnBroker } from "../adapters/chatgpt-web/turn-broker";
 import {
   inspectLauncherBrowserHost,
   inspectLauncherBrowserHostLiveness,
@@ -415,17 +416,24 @@ export async function runDevCommand(args: string[]): Promise<void> {
   const transport = config.mode === "full"
     ? await startDevChatTransport(config, paths.runtimePath)
     : undefined;
+  const cancellationBroker = transport?.broker ?? TurnBroker.forSocket(config.brokerSocketPath);
   let driver: DevChatDriver | undefined;
   try {
+    if (!transport) await cancellationBroker.listen();
     const runtimeConfig = transport?.config ?? config;
     const runtime = createLauncherDevAdapter(
       runtimeConfig,
       runtimeStateRoot,
-      {
-        ...(transport ? { broker: transport.broker } : {}),
-      },
+      { broker: cancellationBroker },
     );
-    driver = new DevChatDriver(runtimeConfig, store, runtime.adapterFactory, process.cwd(), features);
+    driver = new DevChatDriver(
+      runtimeConfig,
+      store,
+      runtime.adapterFactory,
+      process.cwd(),
+      features,
+      cancellationBroker,
+    );
     const opened = driver.open(name, requestedModel);
     if (requestedModel && opened.state.model !== requestedModel) {
       driver.setModel(opened.state, requestedModel);
@@ -436,7 +444,7 @@ export async function runDevCommand(args: string[]): Promise<void> {
   } finally {
     const results = await Promise.allSettled([
       driver?.close() ?? Promise.resolve(),
-      transport?.close() ?? Promise.resolve(),
+      transport?.close() ?? cancellationBroker.close(),
     ]);
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failures.length > 0) {

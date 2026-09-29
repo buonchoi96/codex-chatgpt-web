@@ -5,6 +5,21 @@ export type Language = keyof typeof languages;
 export type LauncherProfile = "production" | "development";
 export type BrowserInteractionMode = "automatic" | "manual";
 export type Surface = "browser" | "setup" | "mcp" | "activity" | "limits" | "settings";
+export type AutomationSecuritySignal =
+  | "cloudflare_challenge"
+  | "security_challenge"
+  | "account_security_warning"
+  | "reauthentication_loop"
+  | "invalid_security_state";
+
+export interface AutomationSecurityRecord {
+  version: 1;
+  paused: boolean;
+  revision: number;
+  signal: AutomationSecuritySignal | null;
+  detectedAt: string | null;
+  resumedAt: string | null;
+}
 
 export interface LauncherState {
   version: 1;
@@ -35,6 +50,7 @@ export interface LauncherState {
 }
 
 export interface BrowserState {
+  automationSecurity: AutomationSecurityRecord;
   status: "idle" | "loading" | "signed-out" | "ready" | "testing" | "running" | "error";
   message: string;
   url: string;
@@ -147,6 +163,7 @@ export interface LauncherApi {
   openPasskeyLogin(): Promise<BrowserState>;
   continuePasskeyLogin(): Promise<boolean>;
   logoutChatGpt(): Promise<{ browser: BrowserState; state: LauncherState }>;
+  resumeAutomationSecurity(): Promise<AutomationSecurityRecord>;
   dismissSessionReminder(): Promise<LauncherState>;
   smokeTest(): Promise<{ ok: boolean; effort: string; response: string }>;
   verifyMcp(): Promise<DoctorReport>;

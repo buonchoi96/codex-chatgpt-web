@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
@@ -7,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { packagedRuntimePaths } = require("../electron/runtime-command.cjs");
+const { createLiveTunnelLease } = require("../electron/live-tunnel-lease.cjs");
 const { linuxDesktopEntry, requireAutostartState } = require("../electron/autostart.cjs");
 const {
   MAX_RESTARTS_PER_WINDOW,
@@ -166,6 +168,629 @@ test("launcher runtime ownership cannot cross production and DEV profiles", () =
   for (const invalid of ["true", 1, null]) {
     assert.throws(() => validateConfig({ ...production,
       experimentalFreshConversationPerTurn: invalid }, descriptorPath), /invalid experimentalFreshConversationPerTurn/);
+  }
+});
+
+test("live dev session lease enables tunnel handoff only while its owner is alive", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-live-handoff-lease-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  const leasePath = path.join(root, "live-tunnel-handoff.json");
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  try {
+    delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    assert.equal(supervisor.liveTunnelHandoffActive(), false);
+    process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+    assert.equal(supervisor.liveTunnelHandoffActive(), false);
+    createLiveTunnelLease(leasePath, process.pid, "a".repeat(32));
+    assert.equal(supervisor.liveTunnelHandoffActive(), true);
+    fs.writeFileSync(leasePath, "malformed\n");
+    assert.equal(supervisor.liveTunnelHandoffActive(), false);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("live mode resolves the default tunnel lease path for a legacy parent without lease env", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-live-handoff-legacy-parent-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const previousMode = process.env.CODEX_WEB_GPT_LIVE_MODE;
+  const previousLease = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  try {
+    delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    process.env.CODEX_WEB_GPT_LIVE_MODE = "1";
+    createLiveTunnelLease(leasePath, process.pid, "c".repeat(32));
+    assert.equal(supervisor.liveTunnelHandoffActive(), true);
+
+    process.env.CODEX_WEB_GPT_LIVE_MODE = "0";
+    assert.equal(supervisor.liveTunnelHandoffActive(), false);
+  } finally {
+    if (previousMode === undefined) delete process.env.CODEX_WEB_GPT_LIVE_MODE;
+    else process.env.CODEX_WEB_GPT_LIVE_MODE = previousMode;
+    if (previousLease === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previousLease;
+  }
+});
+
+test("graceful live Electron shutdown stops the daemon and preserves the healthy tunnel PID", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-shutdown-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+  fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+  const config = launcherConfig(descriptorPath, {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"a".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+      profileDir: path.join(root, "tunnel", "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  });
+  fs.writeFileSync(path.join(root, "config.json"), `${JSON.stringify(config)}\n`);
+  const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "b".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: descriptorPath,
+  });
+  const tunnel = { pid: process.pid, exitCode: null, signalCode: null, managed: true };
+  supervisor.tunnel = tunnel;
+  supervisor.daemon = { pid: process.pid, exitCode: null, signalCode: null };
+  supervisor.proxyHealth = async () => true;
+  supervisor.acquireDrain = async () => true;
+  supervisor.verifyTunnelHandoff = async (_config, expectedPid) => {
+    assert.equal(expectedPid, tunnel.pid);
+    return { pid: expectedPid };
+  };
+  let daemonStops = 0;
+  let tunnelStops = 0;
+  supervisor.shutdownDaemon = async () => {
+    daemonStops += 1;
+    supervisor.daemon = null;
+  };
+  supervisor.stopTunnelGracefully = async () => { tunnelStops += 1; };
+  try {
+    assert.deepEqual(await supervisor.shutdown({ preserveTunnel: true }), { status: "stopped" });
+    assert.equal(daemonStops, 1);
+    assert.equal(tunnelStops, 0);
+    assert.equal(supervisor.tunnel, tunnel);
+    const state = JSON.parse(fs.readFileSync(supervisor.statePath, "utf8"));
+    assert.equal(state.status, "handoff");
+    assert.equal(state.tunnelPid, process.pid);
+    assert.deepEqual(state.tunnelIdentity, {
+      alias: "codex-chatgpt-web",
+      tunnelIdHash: crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+    });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("a preserve request without an active dev-session lease keeps ordinary tunnel shutdown", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-no-lease-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+  fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+  const config = launcherConfig(descriptorPath, {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"b".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+      profileDir: path.join(root, "tunnel", "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  });
+  fs.writeFileSync(path.join(root, "config.json"), `${JSON.stringify(config)}\n`);
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: descriptorPath,
+  });
+  supervisor.tunnel = { pid: process.pid, exitCode: null, signalCode: null, managed: true };
+  supervisor.proxyHealth = async () => true;
+  supervisor.acquireDrain = async () => true;
+  let tunnelStops = 0;
+  supervisor.shutdownDaemon = async () => { supervisor.daemon = null; };
+  supervisor.stopTunnelGracefully = async () => {
+    tunnelStops += 1;
+    supervisor.tunnel = null;
+  };
+  try {
+    assert.deepEqual(await supervisor.shutdown({ preserveTunnel: true }), { status: "stopped" });
+    assert.equal(tunnelStops, 1);
+    assert.equal(supervisor.tunnel, null);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("live tunnel handoff adopts only the same healthy, unambiguous tunnel from a dead Electron owner", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-adopt-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+  fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+  const config = launcherConfig(descriptorPath, {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"c".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+      profileDir: path.join(root, "tunnel", "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  });
+  fs.writeFileSync(path.join(root, "config.json"), `${JSON.stringify(config)}\n`);
+  const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "d".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: descriptorPath,
+  });
+  const identity = {
+    alias: config.tunnel.alias,
+    tunnelIdHash: crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+  };
+  const state = {
+    version: 1,
+    ownerPid: Number.MAX_SAFE_INTEGER,
+    daemonPid: null,
+    tunnelPid: process.pid,
+    status: "handoff",
+    tunnelIdentity: identity,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(supervisor.statePath, `${JSON.stringify(state)}\n`);
+  supervisor.readTunnelHealth = async () => ({
+    ready: true, pid: process.pid, state: "ready", processRunning: true,
+    healthy: true, absent: false, statusKnown: true, tunnelIdMatches: true,
+    detail: "state=ready; pid=known; tunnel_id=matched",
+  });
+  supervisor.discoverTunnelHealthBaseUrl = async () => {
+    supervisor.tunnelHealthBaseUrl = "http://127.0.0.1:12345";
+    return supervisor.tunnelHealthBaseUrl;
+  };
+  supervisor.readLocalTunnelHealth = async () => ({
+    ready: true, pid: process.pid, state: "ready", processRunning: true,
+    healthy: true, absent: false, statusKnown: true, detail: "MCP health verified",
+  });
+  supervisor.waitForTunnelMcpTransport = async () => ({ observed: true, ok: true });
+  supervisor.startTunnelMonitor = () => {};
+  let stops = 0;
+  supervisor.runTunnelStopCommand = async () => {
+    stops += 1;
+    return { code: 0, output: "{}" };
+  };
+  try {
+    assert.equal(await supervisor.stopStaleOwnedRuntime(config), true);
+    assert.equal(supervisor.tunnel?.pid, process.pid);
+    assert.equal(stops, 0);
+    const adopted = JSON.parse(fs.readFileSync(supervisor.statePath, "utf8"));
+    assert.equal(adopted.ownerPid, process.pid);
+    assert.equal(adopted.tunnelPid, process.pid);
+    assert.deepEqual(adopted.tunnelIdentity, identity);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("live tunnel handoff adopts a PID-less native runtime only through its saved endpoint fingerprint", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-pidless-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+  fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+  const config = launcherConfig(descriptorPath, {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"e".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+      profileDir: path.join(root, "tunnel", "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  });
+  fs.writeFileSync(path.join(root, "config.json"), `${JSON.stringify(config)}\n`);
+  const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "e".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: descriptorPath,
+  });
+  const identity = {
+    alias: config.tunnel.alias,
+    tunnelIdHash: crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+  };
+  const healthUrl = "http://127.0.0.1:12345";
+  const healthFingerprint = crypto.createHash("sha256").update(healthUrl).digest("hex");
+  fs.writeFileSync(supervisor.statePath, `${JSON.stringify({
+    version: 1,
+    ownerPid: Number.MAX_SAFE_INTEGER,
+    daemonPid: null,
+    tunnelPid: null,
+    status: "handoff",
+    tunnelIdentity: identity,
+    tunnelHealthFingerprint: healthFingerprint,
+    updatedAt: new Date().toISOString(),
+  })}\n`);
+  supervisor.readTunnelHealth = async () => ({
+    ready: true, pid: null, state: "ready", processRunning: true,
+    healthy: true, absent: false, statusKnown: true, tunnelIdMatches: true,
+    detail: "state=ready; pid=missing; tunnel_id=matched",
+  });
+  supervisor.discoverTunnelHealthBaseUrl = async () => {
+    supervisor.tunnelHealthBaseUrl = healthUrl;
+    return healthUrl;
+  };
+  supervisor.readLocalTunnelHealth = async () => ({
+    ready: true, pid: null, state: "ready", processRunning: undefined,
+    healthy: true, absent: false, statusKnown: true, detail: "MCP health verified",
+  });
+  supervisor.waitForTunnelMcpTransport = async () => ({ observed: true, ok: true });
+  supervisor.startTunnelMonitor = () => {};
+  let stops = 0;
+  supervisor.runTunnelStopCommand = async () => { stops += 1; return { code: 0, output: "{}" }; };
+  try {
+    assert.equal(await supervisor.stopStaleOwnedRuntime(config), true);
+    assert.equal(supervisor.tunnel?.pid, null);
+    assert.equal(stops, 0);
+    const adopted = JSON.parse(fs.readFileSync(supervisor.statePath, "utf8"));
+    assert.equal(adopted.ownerPid, process.pid);
+    assert.equal(adopted.tunnelPid, null);
+    assert.equal(adopted.tunnelHealthFingerprint, healthFingerprint);
+    assert.deepEqual(adopted.tunnelIdentity, identity);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("live-session startup rejects a PID-less handoff without a saved endpoint fingerprint", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-legacy-pidless-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const leasePath = path.join(root, "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "c".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  const config = {
+    mode: "full",
+    tunnel: {
+      alias: "codex-chatgpt-web",
+      tunnelId: `tunnel_${"c".repeat(32)}`,
+    },
+  };
+  const healthUrl = "http://127.0.0.1:12345";
+  let healthChecks = 0;
+  supervisor.waitForKnownTunnelStatus = async () => {
+    healthChecks += 1;
+    return ({
+    ready: true, pid: null, state: "ready", processRunning: true,
+    healthy: true, absent: false, statusKnown: true, tunnelIdMatches: true,
+    detail: "state=ready; tunnel_id=matched",
+    });
+  };
+  supervisor.discoverTunnelHealthBaseUrl = async () => {
+    supervisor.tunnelHealthBaseUrl = healthUrl;
+    return healthUrl;
+  };
+  supervisor.readLocalTunnelHealth = async () => ({
+    ready: true, pid: null, healthy: true, statusKnown: true, detail: "MCP health verified",
+  });
+  supervisor.waitForTunnelMcpTransport = async () => ({ observed: true, ok: true });
+  supervisor.startTunnelMonitor = () => {};
+  try {
+    await assert.rejects(
+      supervisor.adoptLiveTunnelHandoff(config, {
+        ownerPid: Number.MAX_SAFE_INTEGER,
+        daemonPid: null,
+        tunnelPid: null,
+        status: "ready",
+      }),
+      /no adoptable configured tunnel identity/,
+    );
+    assert.equal(healthChecks, 0);
+    assert.equal(supervisor.tunnel, null);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("startup retains a verified PID-less endpoint fingerprint when it adopts the existing tunnel", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-restart-pidless-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+  fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+  const config = launcherConfig(descriptorPath, {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"d".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+      profileDir: path.join(root, "tunnel", "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  });
+  const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "d".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: descriptorPath,
+  });
+  const healthUrl = "http://127.0.0.1:23456";
+  const healthFingerprint = crypto.createHash("sha256").update(healthUrl).digest("hex");
+  supervisor.tunnel = { pid: null, exitCode: null, signalCode: null, managed: true };
+  supervisor.tunnelIdentity = {
+    alias: config.tunnel.alias,
+    tunnelIdHash: crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex"),
+  };
+  supervisor.tunnelHealthBaseUrl = healthUrl;
+  supervisor.assertTunnelClientReady = () => {};
+  supervisor.waitForKnownTunnelStatus = async () => ({
+    ready: true, pid: null, state: "ready", processRunning: true,
+    healthy: true, absent: false, statusKnown: true, tunnelIdMatches: true,
+    detail: "state=ready; pid=missing; tunnel_id=matched",
+  });
+  supervisor.waitForTunnelMcpTransport = async () => ({ observed: true, ok: true });
+  supervisor.startTunnelMonitor = () => {};
+  let stops = 0;
+  supervisor.runTunnelStopCommand = async () => { stops += 1; return { code: 0, output: "{}" }; };
+  try {
+    await supervisor.startTunnel(config);
+    supervisor.writeState("ready");
+    const state = JSON.parse(fs.readFileSync(supervisor.statePath, "utf8"));
+    assert.equal(state.tunnelPid, null);
+    assert.equal(state.tunnelHealthFingerprint, healthFingerprint);
+    assert.equal(stops, 0);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("a live-session startup failure keeps an adopted native tunnel running", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-start-failure-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const leasePath = path.join(root, "live-tunnel-handoff.json");
+  const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+  createLiveTunnelLease(leasePath, process.pid, "1".repeat(32));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  const config = {
+    mode: "full",
+    tunnel: {
+      binaryPath: path.join(root, "bin", "tunnel-client"),
+      tunnelId: `tunnel_${"1".repeat(32)}`,
+      runtimeKeyFile: path.join(root, "runtime.key"),
+      profileDir: path.join(root, "profiles"),
+      profileName: "codex-chatgpt-web",
+      alias: "codex-chatgpt-web",
+    },
+  };
+  const tunnel = { pid: process.pid, exitCode: null, signalCode: null, managed: true };
+  supervisor.tunnel = tunnel;
+  supervisor.liveSessionTunnelPid = process.pid;
+  supervisor.assertTunnelClientReady = () => {};
+  supervisor.waitForKnownTunnelStatus = async () => ({
+    ready: false, pid: process.pid, state: "starting", processRunning: true,
+    healthy: false, absent: false, statusKnown: true, detail: "native runtime is restarting",
+  });
+  let tunnelStops = 0;
+  supervisor.runTunnelStopCommand = async () => {
+    tunnelStops += 1;
+    return { code: 0, output: "{}" };
+  };
+  try {
+    await assert.rejects(supervisor.startTunnel(config), /retaining PID/);
+    assert.equal(supervisor.tunnel, tunnel);
+    assert.equal(tunnelStops, 0);
+    await supervisor.cleanupFailedStart(config);
+    assert.equal(tunnelStops, 0);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+    else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+  }
+});
+
+test("live tunnel handoff refuses stale, mismatched, unhealthy, or ambiguous evidence", async (t) => {
+  const cases = [
+    { name: "missing lease", lease: "missing", identity: true, pid: process.pid, ready: true, localReady: true },
+    { name: "dead-owner lease", lease: "dead", identity: true, pid: process.pid, ready: true, localReady: true },
+    { name: "malformed lease", lease: "malformed", identity: true, pid: process.pid, ready: true, localReady: true },
+    { name: "different tunnel identity", lease: "active", identity: false, pid: process.pid, ready: true, localReady: true },
+    { name: "ambiguous tunnel PID", lease: "active", identity: true, pid: null, ready: true, localReady: true },
+    { name: "unhealthy tunnel and MCP transport", lease: "active", identity: true, pid: process.pid, ready: false, localReady: false },
+    { name: "PID-less tunnel endpoint changed", lease: "active", identity: true, pid: null, ready: true, localReady: true, fingerprint: "0".repeat(64) },
+    { name: "PID-less tunnel ID mismatch", lease: "active", identity: true, pid: null, ready: true, localReady: true, fingerprint: crypto.createHash("sha256").update("http://127.0.0.1:12345").digest("hex"), tunnelIdMatches: false },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, async (t) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-handoff-reject-"));
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      const descriptorPath = path.join(root, "runtime", "launcher-browser.json");
+      fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+      const config = launcherConfig(descriptorPath, {
+        mode: "full",
+        tunnel: {
+          binaryPath: path.join(root, "bin", "tunnel-client"),
+          tunnelId: `tunnel_${"e".repeat(32)}`,
+          runtimeKeyFile: path.join(root, "secrets", "runtime.key"),
+          profileDir: path.join(root, "tunnel", "profiles"),
+          profileName: "codex-chatgpt-web",
+          alias: "codex-chatgpt-web",
+        },
+      });
+      fs.writeFileSync(path.join(root, "config.json"), `${JSON.stringify(config)}\n`);
+      const leasePath = path.join(root, "runtime", "live-tunnel-handoff.json");
+      const previous = process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+      if (scenario.lease !== "missing") {
+        process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = leasePath;
+        if (scenario.lease === "active") createLiveTunnelLease(leasePath, process.pid, "f".repeat(32));
+        else if (scenario.lease === "dead") {
+          createLiveTunnelLease(leasePath, Number.MAX_SAFE_INTEGER, "f".repeat(32));
+        } else {
+          fs.writeFileSync(leasePath, "malformed\n");
+        }
+      } else {
+        delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+      }
+      const supervisor = new RuntimeSupervisor({
+        app: { getVersion: () => "0.2.0", isPackaged: false },
+        logger: { info() {}, warn() {}, error() {} },
+        sourceRoot: root,
+        coreHome: root,
+        browserDescriptorPath: descriptorPath,
+      });
+      const actualHash = crypto.createHash("sha256").update(config.tunnel.tunnelId).digest("hex");
+      fs.writeFileSync(supervisor.statePath, `${JSON.stringify({
+        version: 1, ownerPid: Number.MAX_SAFE_INTEGER, daemonPid: null,
+        tunnelPid: scenario.pid === undefined ? process.pid : scenario.pid,
+        status: "handoff",
+        tunnelIdentity: {
+          alias: config.tunnel.alias,
+          tunnelIdHash: scenario.identity ? actualHash : "0".repeat(64),
+        },
+        ...(scenario.fingerprint ? { tunnelHealthFingerprint: scenario.fingerprint } : {}),
+        updatedAt: new Date().toISOString(),
+      })}\n`);
+      supervisor.readTunnelHealth = async () => ({
+        ready: scenario.ready, pid: scenario.pid, state: scenario.ready ? "ready" : "degraded",
+        processRunning: true, healthy: scenario.ready, absent: false,
+        statusKnown: true, tunnelIdMatches: scenario.tunnelIdMatches ?? true, detail: "synthetic status",
+      });
+      supervisor.discoverTunnelHealthBaseUrl = async () => {
+        supervisor.tunnelHealthBaseUrl = "http://127.0.0.1:12345";
+        return supervisor.tunnelHealthBaseUrl;
+      };
+      supervisor.readLocalTunnelHealth = async () => ({
+        ready: scenario.localReady, pid: scenario.pid, statusKnown: true,
+        detail: scenario.localReady ? "MCP ready" : "MCP failed",
+      });
+      try {
+        await assert.rejects(supervisor.adoptLiveTunnelHandoff(config, supervisor.readState()));
+        assert.equal(supervisor.tunnel, null);
+      } finally {
+        if (previous === undefined) delete process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+        else process.env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE = previous;
+      }
+    });
+  }
+});
+
+test("native tunnel inventory refuses duplicate entries for the configured alias", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-ambiguous-alias-"));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  supervisor.runTunnelCommand = async () => ({
+    code: 0,
+    output: JSON.stringify({ entries: [
+      { alias: "codex-chatgpt-web", runtime_state: "ready" },
+      { alias: "codex-chatgpt-web", runtime_state: "ready" },
+    ] }),
+  });
+  try {
+    const health = await supervisor.readTunnelHealth({ tunnel: { alias: "codex-chatgpt-web" } });
+    assert.equal(health.statusKnown, false);
+    assert.match(health.detail, /2 entries for the configured alias/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native tunnel handoff inventory requires the exact configured tunnel ID", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-id-mismatch-"));
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: root,
+    coreHome: root,
+    browserDescriptorPath: path.join(root, "launcher.json"),
+  });
+  supervisor.runTunnelCommand = async () => ({
+    code: 0,
+    output: JSON.stringify({ entries: [{
+      alias: "codex-chatgpt-web",
+      tunnel_id: "different-native-tunnel-id",
+      runtime_state: "ready",
+      live_runtime: { found: false },
+    }] }),
+  });
+  try {
+    const health = await supervisor.readTunnelHealth({
+      mode: "full",
+      tunnel: { alias: "codex-chatgpt-web", tunnelId: "configured-native-tunnel-id" },
+    });
+    assert.equal(health.ready, false);
+    assert.equal(health.statusKnown, false);
+    assert.equal(health.tunnelIdMatches, false);
+    assert.match(health.detail, /tunnel ID does not match/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -407,6 +1032,7 @@ test("tunnel health diagnostics preserve the machine-readable readiness state", 
       output: JSON.stringify({
         entries: [{
           alias: "codex-web-gpt",
+          tunnel_id: "configured-test-tunnel-id",
           runtime_state: "stopped",
           classification: "stale_alias",
           live_runtime: { found: false },
@@ -416,7 +1042,7 @@ test("tunnel health diagnostics preserve the machine-readable readiness state", 
   };
   try {
     assert.deepEqual(await supervisor.readTunnelHealth({
-      tunnel: { alias: "codex-web-gpt" },
+      tunnel: { alias: "codex-web-gpt", tunnelId: "configured-test-tunnel-id" },
     }), {
       ready: false,
       pid: null,
@@ -425,7 +1051,8 @@ test("tunnel health diagnostics preserve the machine-readable readiness state", 
       healthy: false,
       absent: false,
       statusKnown: true,
-      detail: "state=stopped; process_running=false; healthy=false; ready=false; classification=stale_alias; live_admin=false; pid=missing",
+      tunnelIdMatches: true,
+      detail: "state=stopped; process_running=false; healthy=false; ready=false; classification=stale_alias; live_admin=false; pid=missing; tunnel_id_matches=true",
     });
     assert.deepEqual(commandArgs, ["runtimes", "cleanup", "--json"]);
   } finally {
@@ -483,6 +1110,7 @@ test("tunnel readiness preserves a native managed process identity when one is r
     output: JSON.stringify({
       entries: [{
         alias: "codex-web-gpt",
+        tunnel_id: "configured-test-tunnel-id",
         runtime_state: "ready",
         classification: "active_runtime",
         live_runtime: {
@@ -495,7 +1123,7 @@ test("tunnel readiness preserves a native managed process identity when one is r
   });
   try {
     assert.deepEqual(await supervisor.readTunnelHealth({
-      tunnel: { alias: "codex-web-gpt" },
+      tunnel: { alias: "codex-web-gpt", tunnelId: "configured-test-tunnel-id" },
     }), {
       ready: true,
       pid: 123_456_779,
@@ -504,7 +1132,8 @@ test("tunnel readiness preserves a native managed process identity when one is r
       healthy: true,
       absent: false,
       statusKnown: true,
-      detail: "state=ready; process_running=true; healthy=true; ready=true; classification=active_runtime; live_admin=true; pid=123456779",
+      tunnelIdMatches: true,
+      detail: "state=ready; process_running=true; healthy=true; ready=true; classification=active_runtime; live_admin=true; pid=123456779; tunnel_id_matches=true",
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

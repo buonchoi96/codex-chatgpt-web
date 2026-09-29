@@ -68,6 +68,7 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(tokenMatches).toHaveLength(1);
   expect(compiled.text).toContain("[retired turn handle]");
   expect(transportOnly).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
+  expect(transportOnly).toContain("codex.control.parallel_exec");
   expect(transportOnly).toContain("Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.");
   expect(transportOnly).toContain("Use actual Codex Native results as evidence for local observations and effects.");
   expect(transportOnly).toContain("A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.");
@@ -77,15 +78,15 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("An intermediate implementation milestone, focused test pass, checkpoint, commit, partial success, or newly discovered remaining-work list is not completion");
   expect(transportOnly).toContain("If any actionable explicit requirement remains unfinished, continue using the available tools instead of describing it as future work or a next step.");
   expect(transportOnly).toContain("Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution");
-  expect(transportOnly).toContain("mandatory completion receipt is the dedicated codex_turn_complete tool");
+  expect(transportOnly).toContain("call codex_turn_complete directly when it is callable on the current connector surface");
   expect(transportOnly).toContain("remaining_actionable_requirements empty");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
-  expect(transportOnly).toContain("dedicated codex_turn_complete tool has accepted the full-task receipt");
+  expect(transportOnly).toContain("codex_turn_complete or its codex.control.turn_complete stable-ABI fallback has accepted the full-task receipt");
   expect(transportOnly).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
   expect(transportOnly).toContain("The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.");
   expect(transportOnly).toContain("Immediately before finalizing, compare the entire latest active user request with the work completed in this response.");
   expect(transportOnly).toContain("If any actionable explicit deliverable remains, continue the Codex Native tool loop; do not return a progress-only answer.");
-  expect(transportOnly).toContain("call the dedicated codex_turn_complete tool with remaining_actionable_requirements=[] before writing the final answer");
+  expect(transportOnly).toContain("When all independently actionable deliverables are complete, call codex_turn_complete if it is callable; if the connector reports it missing or not callable, submit the receipt through codex_tool_call with wire_name codex.control.turn_complete");
   expect(transportOnly).toContain("use a Computer Use capability that is actually exposed by the current outer Codex tool registry");
   expect(transportOnly).toContain("explicitly search for node_repl before concluding that desktop control is unavailable");
   expect(transportOnly).toContain("prefer the official Computer Use path through persistent node_repl and @oai/sky");
@@ -95,7 +96,8 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("Use official node_repl + @oai/sky for native Windows Computer Use");
   expect(transportOnly).not.toContain("do not use ChatGPT-native Computer Use, browser-only computer surfaces, or cua.* methods");
   expect(transportOnly).toContain("Never execute the literal word tool_search as a PowerShell, cmd.exe, or shell command");
-  expect(transportOnly).not.toContain("codex.control.turn_complete");
+  expect(transportOnly).toContain("wire_name codex.control.turn_complete");
+  expect(transportOnly).toContain("If the current connector reports codex_turn_complete is not callable or missing");
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
   expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory/);
   expect(transportOnly).not.toMatch(/expired turn token|invalid turn token|revoked turn token|security layer|permission gate/i);

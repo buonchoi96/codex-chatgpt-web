@@ -11,7 +11,7 @@ Improve reliability and measured throughput for GPT-5.6 Sol (Web) High through C
 - Baseline checks completed: `bun test ./tests` passed 907 tests with 22 skipped; `bun run launcher:test` passed 363 with 4 skipped; both root and launcher typechecks passed. The root suite required command-scoped `CODEX_CHATGPT_WEB_BROWSER_DIAGNOSTICS=0` because the user's diagnostic setting made one screenshot-free fake fail when diagnostics attempted a screenshot. The isolated test passed with diagnostics disabled.
 - The code already includes Computer Use fast-path guidance, parallel command execution, long-command yield/poll rules, decision-latency logging, and browser DOM response caching. Historical Computer Use latency lacks model/effort labels and is not a valid GPT-5.6 Sol High baseline.
 - `BrowserHost` currently detects an explicit Cloudflare backend challenge (`403` plus `cf-mitigated: challenge`) but may reload ChatGPT when idle. `ChatGptAccountSafety.trigger("account_security")` currently drains active work before reaching `HARD_STOP`. The authenticated loopback browser-control server, persistent launcher state store, browser-state IPC, and daemon safety file are available integration points.
-- Real Codex desktop testing has not begun: activation of the captured Codex window failed twice, including the one permitted refresh/retry. No prompt was sent and no security trigger was observed. Do not claim a real-model baseline until the requested GPT-5.6 Sol (Web), High route is actually exercised.
+- At initial spec approval, real Codex desktop testing had not begun: activation of the captured Codex window failed twice, including the one permitted refresh/retry. No prompt was sent and no security trigger was observed. The later CLI-backed Web tests are recorded separately below.
 
 ## Goals
 
@@ -69,6 +69,14 @@ Run matched before/after scenarios on GPT-5.6 Sol (Web), High, with the model an
 - E2E duration and any reconnect, stall, broker retirement, safety block, or lost result.
 
 Audit the 20 engineering areas in the request, including prompt/schema overhead, image and structured-state cost, caches/delta observations, deterministic batching, transport deadlines, broker/SSE behavior, retry/poll cadence, subagent aggregation, context growth, and hot reload. Preserve existing fast paths unless evidence indicates a defect. Change the narrowest repo-controlled cause demonstrated by the measurements; if the model or desktop transport dominates, report that limitation without claiming a product speedup.
+
+## Stable connector ABI for parallel commands
+
+The GPT-5.6 Sol High CLI run reached the ChatGPT Web turn, but the connector did not expose the bridge's `codex_parallel_exec` wrapper as a directly callable native tool. At 2026-09-29 21:43:26 +07, browser trace `ff90ad3713d3` completed after the 60-second stall checkpoint with `Codex tool is not available in this turn: codex_parallel_exec`; none of the eight read-only commands ran. The completion fallback worked, so the missing behavior is the bridge dispatch ABI rather than task completion.
+
+Add the reserved `codex.control.parallel_exec` route through `codex_tool_call` for connectors that omit the direct wrapper. It must parse the exact existing 2–8 command schema and call the same shared parallel executor as `codex_parallel_exec`. Preserve one-call-per-command dispatch, the default sandbox, the existing transport limits, and the conservative destructive/open-world annotations. Do not expose the reserved alias as a generic outer native tool or relax command safety.
+
+The real-model parallel suite passes only when the batch is dispatched concurrently, each result is returned, and the completion receipt is accepted. A missing command tool, invalid batch, or sandbox denial remains an explicit failure/blocker with no serial substitute.
 
 ## Verification plan
 

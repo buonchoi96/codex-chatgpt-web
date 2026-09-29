@@ -130,7 +130,7 @@ test("a foreground launch request survives hidden startup until the launcher win
 test("normal shutdown persists the ChatGPT session before closing browser views", () => {
   assert.match(
     electronMain,
-    /runtimeSupervisor\?\.shutdown\(\{ cancelActiveTurns: true, force: true \}\)/,
+    /runtimeSupervisor\?\.shutdown\(\{\s*cancelActiveTurns: true,\s*force: true,\s*preserveTunnel: runtimeSupervisor\?\.liveTunnelHandoffActive\(\) === true,/,
   );
   const persist = electronMain.indexOf("await browserHost?.persistSession()");
   const destroy = electronMain.indexOf("browserHost?.destroy()", persist);
@@ -246,7 +246,7 @@ test("packaged runtime is verified before launcher browser surfaces can bind por
 test("DEV launcher exposes its profile and supervises only its Full-mode MCP runtime", () => {
   assert.match(electronMain, /profile:\s*LAUNCHER_PROFILE\.kind/);
   assert.match(electronMain, /if \(IS_DEV_PROFILE\) \{[\s\S]*?config\?\.mode === "full"[\s\S]*?runtimeSupervisor\.startIfConfigured\(\)[\s\S]*?\} else void \(async \(\) => \{/);
-  assert.match(electronMain, /await runtimeSupervisor\?\.shutdown\(\{ cancelActiveTurns: true, force: true \}\)/);
+  assert.match(electronMain, /await runtimeSupervisor\?\.shutdown\(\{\s*cancelActiveTurns: true,\s*force: true,\s*preserveTunnel: runtimeSupervisor\?\.liveTunnelHandoffActive\(\) === true,/);
   assert.match(electronMain, /packaged:\s*app\.isPackaged && !IS_DEV_PROFILE/);
   assert.match(electronMain, /IS_DEV_PROFILE && !stateStore\.read\(\)\.onboardingComplete/);
   assert.match(electronMain, /onboardingComplete:\s*true,[\s\S]*?autoStart:\s*false/);
@@ -676,4 +676,47 @@ test("plugin name editor fixes Codex and edits Native2 before asking to reconfig
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(submitted, "Work");
   assert.equal(configureMode, "automatic");
+});
+
+test("account-safety resume is confirmed in the renderer and only advances the local state latch", async () => {
+  const vm = require("node:vm");
+  const handlers = new Map();
+  const calls = [];
+  const resumed = {
+    version: 1,
+    paused: false,
+    revision: 3,
+    signal: "security_challenge",
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: "2026-09-29T07:10:00.000Z",
+  };
+  const stateStore = {
+    read() { return { automationSecurity: { paused: true } }; },
+    resumeAutomationSecurity() {
+      calls.push("local-resume");
+      return { automationSecurity: resumed };
+    },
+  };
+  const browserHost = new Proxy({}, { get() { throw new Error("resume must not inspect or contact ChatGPT"); } });
+  const context = vm.createContext({
+    ipcMain: { on() {} },
+    logger: { info() {} },
+    stateStore,
+    browserHost,
+    registerLoggedIpc: (_ipc, _logger, channel, handler) => handlers.set(channel, handler),
+  });
+  const registerIpc = electronMain.slice(
+    electronMain.indexOf("function registerIpc("),
+    electronMain.indexOf("async function requestQuit("),
+  );
+  vm.runInContext(`${registerIpc}\nregisterIpc({ logger, stateStore });`, context);
+  const handler = handlers.get("launcher:automation-security-resume");
+  assert.equal(typeof handler, "function");
+  assert.deepEqual(await handler({}), resumed);
+  assert.deepEqual(calls, ["local-resume"]);
+  assert.match(preloadSource, /resumeAutomationSecurity:\s*\(\)\s*=>\s*ipcRenderer\.invoke\("launcher:automation-security-resume"\)/);
+  assert.match(appSource, /className="automation-security-warning"[\s\S]*?role="alert"/);
+  assert.match(appSource, /automationSecurityResumeConfirm/);
+  assert.match(appSource, /window\.confirm\(copy\.automationSecurityResumeConfirm\)/);
+  assert.match(appSource, /api!\.resumeAutomationSecurity\(\)/);
 });

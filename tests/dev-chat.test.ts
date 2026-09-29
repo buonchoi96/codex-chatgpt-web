@@ -291,6 +291,63 @@ test("browser-only DEV driver runs real turns without advertising simulated tool
   }
 });
 
+test("DEV account-safety cancellation aborts the active Responses request by its browser trace", async () => {
+  const root = scratch("cgw-dev-safety-cancel");
+  const config = {
+    ...defaultConfig("browser-only"),
+    purpose: "dev-harness" as const,
+    solAvailable: true,
+    extraHighAvailable: true, proAvailable: true,
+  };
+  let registeredTraceId: string | undefined;
+  let registeredController: AbortController | undefined;
+  let unregisterCalls = 0;
+  let adapterSignal: AbortSignal | undefined;
+  let resolveRegistration!: () => void;
+  const registration = new Promise<void>(resolve => { resolveRegistration = resolve; });
+  const registry = {
+    registerTraceAbortController(traceId: string, controller: AbortController) {
+      registeredTraceId = traceId;
+      registeredController = controller;
+      resolveRegistration();
+      return () => { unregisterCalls += 1; };
+    },
+  };
+  const factory = (): ProviderAdapter => ({
+    name: "dev-safety-cancel-test",
+    async runTurn(_parsed, incoming) {
+      const signal = incoming.abortSignal;
+      if (!signal) throw new Error("DEV Responses request did not propagate its abort signal");
+      adapterSignal = signal;
+      await new Promise<void>(resolve => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw signal.reason;
+    },
+  });
+  const driver = new DevChatDriver(
+    config,
+    new DevChatStore(join(root, "chats")),
+    factory,
+    root,
+    undefined,
+    registry,
+  );
+  try {
+    const state = driver.open("cancel-running-turn", "chatgpt-web/high").state;
+    const sending = driver.send(state, "Keep this request interruptible while its browser turn runs.");
+    await registration;
+    expect(registeredTraceId).toMatch(/^[a-f0-9]{12}$/);
+    registeredController!.abort(new Error("ChatGPT account-safety automation stop"));
+    await expect(sending).rejects.toBeInstanceOf(Error);
+    expect(adapterSignal?.aborted).toBe(true);
+    expect(unregisterCalls).toBe(1);
+  } finally {
+    await driver.close();
+  }
+});
+
 test("DEV chat attaches its broker to the launcher-owned tunnel without a Responses listener", async () => {
   const root = scratch("cgw-dev-transport");
   const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("normal Codex route") });

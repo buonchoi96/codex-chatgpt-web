@@ -21,6 +21,8 @@ const {
   loadCommittedBrowserSurface,
   MANUAL_COMPACTION_SUBMIT_TIMEOUT_MS,
   MANUAL_SUBMIT_TIMEOUT_MS,
+  automationSecuritySignalForPage,
+  isSameOriginAuthenticationRedirect,
   navigationErrorForLog,
   navigationOriginForLog,
 } = require("../electron/browser-host.cjs");
@@ -306,7 +308,7 @@ test("authentication diagnostics retain only origin and non-sensitive error meta
   );
 });
 
-test("only an explicit Cloudflare challenge on a ChatGPT backend response triggers recovery", () => {
+test("only an explicit Cloudflare challenge on a ChatGPT backend response is classified", () => {
   assert.equal(isChatGptCloudflareChallengeResponse({
     statusCode: 403,
     url: "https://chatgpt.com/backend-api/subscriptions",
@@ -327,21 +329,128 @@ test("only an explicit Cloudflare challenge on a ChatGPT backend response trigge
   }), false);
 });
 
-test("the idle home browser performs one bounded reload for a Cloudflare challenge burst", async () => {
+test("page security detection is bounded, scoped to trusted origins, and ignores generic verification copy", () => {
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://chatgpt.com/c/123",
+    text: "We have detected unusual activity on your account.",
+  }), "account_security_warning");
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://chatgpt.com/c/123",
+    text: "Please verify that you are human before continuing.",
+  }), "security_challenge");
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://chatgpt.com/c/123",
+    text: "Complete the CAPTCHA challenge to continue.",
+  }), "security_challenge");
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://example.com/",
+    text: "We have detected unusual activity. Verify you are human.",
+  }), null);
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://chatgpt.com/c/123",
+    text: "To verify your email, follow the instructions we sent you.",
+  }), null);
+  assert.equal(automationSecuritySignalForPage({
+    url: "https://chatgpt.com/c/123",
+    text: `${"x".repeat(65_536)} suspicious activity detected`,
+  }), null);
+  assert.equal(isSameOriginAuthenticationRedirect(
+    "https://auth.openai.com/log-in",
+    "https://auth.openai.com/authorize",
+  ), true);
+  assert.equal(isSameOriginAuthenticationRedirect(
+    "https://auth.openai.com/log-in",
+    "https://auth0.openai.com/authorize",
+  ), false);
+  assert.equal(isSameOriginAuthenticationRedirect(
+    "https://example.com/log-in",
+    "https://example.com/authorize",
+  ), false);
+});
+
+test("invalid stored automation-security state fails closed before browser work", async () => {
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    getAutomationSecurity: () => ({ version: 1, paused: false, revision: -1 }),
+  });
+  const status = BrowserHost.prototype.automationSecurityStatus.call(fixture);
+  assert.equal(status.paused, true);
+  assert.equal(status.signal, "invalid_security_state");
+  await assert.rejects(
+    BrowserHost.prototype.beginTurn.call(fixture, "turn", false, 1, null, "connector"),
+    error => error.code === "chatgpt_account_safety_stop" && error.retryable === false,
+  );
+  assert.throws(
+    () => BrowserHost.prototype.beginManualTurn.call(fixture, "turn", 1, "prompt", null, "prompt"),
+    error => error.code === "chatgpt_account_safety_stop" && error.retryable === false,
+  );
+});
+
+test("manual mode does not inspect page DOM for automation-security phrases", async () => {
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    getAutomationSecurity: () => ({
+      version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null,
+    }),
+    getBrowserInteractionMode: () => "manual",
+  });
+  const contents = {
+    isDestroyed: () => false,
+    getURL: () => "https://chatgpt.com/",
+    executeJavaScript: async () => { throw new Error("manual mode must not inspect the page"); },
+  };
+  assert.equal(await BrowserHost.prototype.observeAutomationSecurityPage.call(fixture, contents, "manual-trace"), false);
+});
+
+test("automatic page observation passes only the finite signal and trace correlation", async () => {
   const calls = [];
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
-    turnTabs: new Map(),
+    getAutomationSecurity: () => ({
+      version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null,
+    }),
+    getBrowserInteractionMode: () => "automatic",
+    triggerAutomationSecurity: (signal, context) => calls.push([signal, context]),
+  });
+  const contents = {
+    isDestroyed: () => false,
+    getURL: () => "https://chatgpt.com/c/example",
+    executeJavaScript: async script => {
+      assert.match(script, /slice\(0, 64000\)/);
+      return "We have detected unusual activity on your account.";
+    },
+  };
+  assert.equal(await BrowserHost.prototype.observeAutomationSecurityPage.call(fixture, contents, "trace-123"), true);
+  assert.deepEqual(calls, [["account_security_warning", { traceId: "trace-123" }]]);
+});
+
+test("a backend challenge persists the stop before cancelling exact active traces and never reloads or probes", async () => {
+  const calls = [];
+  let automationSecurity = {
+    version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null,
+  };
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    turnTabs: new Map([
+      ["active-a", { traceId: "turn-a", status: "running", interactionMode: "automatic", view: { webContents: { id: 99 } } }],
+      ["active-b", { traceId: "turn-b", status: "running", interactionMode: "manual", view: { webContents: { id: 100 } } }],
+      ["ready", { traceId: "turn-ready", status: "ready", view: { webContents: { id: 101 } } }],
+    ]),
     manualOperation: null,
-    cloudflareChallengeRecovery: null,
-    cloudflareChallengeRecoveryArmed: true,
-    cloudflareChallengeRecoveryDelayMs: 0,
-    cloudflareChallengeRecoverySettleMs: 0,
+    getAutomationSecurity: () => automationSecurity,
+    pauseAutomationSecurity: (signal) => {
+      calls.push(["persist", signal]);
+      automationSecurity = {
+        version: 1, paused: true, revision: 1, signal,
+        detectedAt: "2026-09-29T06:00:00.000Z", resumedAt: null,
+      };
+      return automationSecurity;
+    },
+    cancelTurn: async (traceId) => calls.push(["cancel", traceId]),
+    getBrowserInteractionMode: () => "manual",
+    automationSecurityPaused: false,
+    authenticationRedirectsByContents: new Map(),
     view: {
       webContents: {
         id: 42,
         getURL: () => "https://chatgpt.com/?temporary-chat=true",
         isDestroyed: () => false,
-        loadURL: async (url) => calls.push(["loadURL", url]),
       },
     },
     logger: {
@@ -350,31 +459,38 @@ test("the idle home browser performs one bounded reload for a Cloudflare challen
       error: (event, detail) => calls.push(["error", event, detail]),
     },
     setState: (patch) => calls.push(["setState", patch]),
-    probeAuthentication: async () => calls.push(["probeAuthentication"]),
   });
   const challenge = {
     statusCode: 403,
     url: "https://chatgpt.com/backend-api/subscriptions",
-    webContentsId: 42,
+    webContentsId: 99,
     responseHeaders: { "cf-mitigated": ["challenge"] },
   };
 
   assert.equal(BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, challenge), true);
-  assert.equal(BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, challenge), true);
-  await fixture.cloudflareChallengeRecovery;
+  await fixture.automationSecurityCancellation;
 
-  assert.deepEqual(calls.filter(([name]) => name === "loadURL"), [
-    ["loadURL", "https://chatgpt.com/?temporary-chat=true"],
+  assert.deepEqual(calls.filter(([name]) => name === "persist" || name === "cancel"), [
+    ["persist", "cloudflare_challenge"],
+    ["cancel", "turn-a"],
+    ["cancel", "turn-b"],
   ]);
-  assert.equal(fixture.cloudflareChallengeRecoveryArmed, false);
+  assert.equal(calls.some(([name]) => name === "loadURL" || name === "probeAuthentication"), false);
+  assert.equal(fixture.automationSecurityStatus().paused, true);
+});
 
-  BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, {
-    statusCode: 200,
-    url: "https://chatgpt.com/backend-api/subscriptions",
-    webContentsId: 42,
-    responseHeaders: { "content-type": ["application/json"] },
+test("three same-origin authentication redirects within one minute trigger the reauthentication stop", () => {
+  const calls = [];
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    authenticationRedirectsByContents: new Map(),
+    triggerAutomationSecurity: (signal, context) => calls.push([signal, context]),
   });
-  assert.equal(fixture.cloudflareChallengeRecoveryArmed, true);
+  const from = "https://auth.openai.com/log-in";
+  const to = "https://auth.openai.com/authorize";
+  assert.equal(BrowserHost.prototype.recordAuthenticationRedirect.call(fixture, 8, from, to, "trace", 1_000), false);
+  assert.equal(BrowserHost.prototype.recordAuthenticationRedirect.call(fixture, 8, from, to, "trace", 2_000), false);
+  assert.equal(BrowserHost.prototype.recordAuthenticationRedirect.call(fixture, 8, from, to, "trace", 3_000), true);
+  assert.deepEqual(calls, [["reauthentication_loop", { traceId: "trace" }]]);
 });
 
 function createContents() {
@@ -486,6 +602,36 @@ test("session inspection delegates navigation and capability detection to the sh
   assert.equal(calls[1].operation, "inspect");
   assert.equal(calls[1].appName, "Codex Native2");
   assert.deepEqual(calls[1].payload, { detectCapabilities: true });
+});
+
+test("paused account safety blocks both session inspection entrypoints before refresh or helper work", async () => {
+  const calls = [];
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    helper: { executable: "/runtime/electron", script: "/runtime/browser-helper.cjs" },
+    descriptorPath: "/runtime/launcher-browser.json",
+    getConnectorName: () => "Codex Native2",
+    getBrowserInteractionMode: () => "automatic",
+    getAutomationSecurity: () => ({
+      version: 1, paused: true, revision: 1, signal: "security_challenge",
+      detectedAt: "2026-09-29T00:00:00.000Z", resumedAt: null,
+    }),
+    manualOperation: "browser interaction mode change",
+    logger: { info() {} },
+    view: { webContents: { getURL: () => "https://chatgpt.com/" } },
+    refreshChatGptHomeDocument: async () => calls.push("refresh"),
+    runBrowserHelperOperation: async () => {
+      calls.push("inspect");
+      return { type: "result", value: {} };
+    },
+  });
+
+  for (const inspect of [
+    () => BrowserHost.prototype.inspectSession.call(fixture, true),
+    () => BrowserHost.prototype.runSessionInspection.call(fixture, true),
+  ]) {
+    await assert.rejects(inspect(), error => error.code === "chatgpt_account_safety_stop");
+  }
+  assert.deepEqual(calls, []);
 });
 
 test("session inspection fails closed on incomplete shared-helper capability evidence", async () => {

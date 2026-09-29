@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getConfigDir } from "../../config";
+import {
+  isLauncherAutomationSecurityRecord,
+  type LauncherAutomationSecurityRecord,
+} from "../../launcher-browser-host";
 
 export type ChatGptAccountSafetyState = "NORMAL" | "DRAINING" | "PAUSED" | "HARD_STOP";
 export type ChatGptAccountSafetyReason = "duration_limit" | "rate_limit" | "account_security";
@@ -22,6 +26,7 @@ interface PersistedSafetyState {
   sessionIds?: string[];
   capturedTraceIds?: string[];
   steeredTraceIds?: string[];
+  launcherSecurityRevision?: number;
 }
 
 function validPersistedSafetyState(value: unknown): PersistedSafetyState | undefined {
@@ -31,6 +36,9 @@ function validPersistedSafetyState(value: unknown): PersistedSafetyState | undef
     || !["NORMAL", "DRAINING", "PAUSED", "HARD_STOP"].includes(String(parsed.state ?? ""))) return undefined;
   if (parsed.windowStartedAt !== undefined
     && (!Number.isSafeInteger(parsed.windowStartedAt) || (parsed.windowStartedAt as number) < 0)) return undefined;
+  if (parsed.launcherSecurityRevision !== undefined
+    && (!Number.isSafeInteger(parsed.launcherSecurityRevision)
+      || (parsed.launcherSecurityRevision as number) < 0)) return undefined;
   if (parsed.reason !== undefined
     && parsed.reason !== "duration_limit" && parsed.reason !== "rate_limit" && parsed.reason !== "account_security") return undefined;
   const validIds = (ids: unknown): ids is string[] => Array.isArray(ids)
@@ -193,8 +201,19 @@ export class ChatGptAccountSafety {
   trigger(reason: ChatGptAccountSafetyReason, activeTraceIds: readonly string[]): string[] {
     if (this.data.state === "HARD_STOP") return [];
     if (reason === "account_security") {
-      this.beginDrain(reason, activeTraceIds);
-      return this.pendingSteering();
+      const traceIds = [...new Set(activeTraceIds)];
+      this.data = {
+        version: 1,
+        state: "HARD_STOP",
+        reason,
+        ...(this.data.windowStartedAt !== undefined ? { windowStartedAt: this.data.windowStartedAt } : {}),
+        ...(this.data.sessionUsages !== undefined ? { sessionUsages: this.data.sessionUsages } : {}),
+        ...(this.data.launcherSecurityRevision !== undefined
+          ? { launcherSecurityRevision: this.data.launcherSecurityRevision }
+          : {}),
+      };
+      this.persist();
+      return traceIds;
     }
     if (this.data.state === "DRAINING") {
       return this.pendingSteering();
@@ -241,8 +260,53 @@ export class ChatGptAccountSafety {
 
   acknowledgeHardStop(): void {
     if (this.data.state !== "HARD_STOP") throw new Error("Account safety hard stop is not active");
+    if (this.data.launcherSecurityRevision !== undefined) {
+      throw new Error("Launcher account-safety hard stop requires an explicit Launcher resume");
+    }
     this.data = { version: 1, state: "NORMAL" };
     this.persist();
+  }
+
+  reconcileLauncherAutomationSecurity(value: unknown): boolean {
+    if (!isLauncherAutomationSecurityRecord(value)) return false;
+    const record: LauncherAutomationSecurityRecord = value;
+
+    if (record.paused) {
+      if (this.data.state !== "HARD_STOP" || this.data.reason !== "account_security"
+        || this.data.launcherSecurityRevision !== record.revision) {
+        const windowStartedAt = this.data.windowStartedAt;
+        const sessionUsages = this.data.sessionUsages;
+        this.data = {
+          version: 1,
+          state: "HARD_STOP",
+          reason: "account_security",
+          launcherSecurityRevision: Math.max(this.data.launcherSecurityRevision ?? 0, record.revision!),
+          ...(windowStartedAt !== undefined ? { windowStartedAt } : {}),
+          ...(sessionUsages !== undefined ? { sessionUsages } : {}),
+        };
+        this.persist();
+      }
+      return false;
+    }
+
+    if (this.data.state !== "HARD_STOP" || this.data.reason !== "account_security"
+      || this.data.launcherSecurityRevision === undefined) return true;
+    if (record.resumedAt === null || record.revision! <= this.data.launcherSecurityRevision) return false;
+    const windowStartedAt = this.data.windowStartedAt;
+    const sessionUsages = this.data.sessionUsages;
+    this.data = {
+      version: 1,
+      state: "NORMAL",
+      launcherSecurityRevision: record.revision,
+      ...(windowStartedAt !== undefined ? { windowStartedAt } : {}),
+      ...(sessionUsages !== undefined ? { sessionUsages } : {}),
+    };
+    this.persist();
+    return true;
+  }
+
+  isHardStopped(): boolean {
+    return this.data.state === "HARD_STOP";
   }
 
   resetUsage(): void {

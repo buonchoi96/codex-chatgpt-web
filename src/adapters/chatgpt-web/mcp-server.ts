@@ -99,6 +99,17 @@ function assertWindowsComputerUseReadOnlyCall(
 
 const turnTokenSchema = z.string().min(20).max(256);
 const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
+const parallelCommandSchema = z.object({
+  cmd: z.string().min(1).max(100_000),
+  workdir: z.string().max(16_384).optional(),
+  yield_time_ms: z.number().int().min(250).max(30_000).optional(),
+  max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
+  tty: z.boolean().optional(),
+});
+const parallelCommandBatchSchema = z.object({
+  commands: z.array(parallelCommandSchema).min(2).max(8),
+});
+type ParallelCommand = z.infer<typeof parallelCommandSchema>;
 // Match Codex's default wait interval while returning before the MCP invocation deadline.
 export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
@@ -106,6 +117,8 @@ export const COMMAND_SAFETY_TRANSPORT_RULE = "Codex command-safety compatibility
 export const COMMAND_SESSION_TRANSPORT_RULE = "Long-running command transport: exec_command must yield control within 30 seconds. If the process is still running, continue it through its returned session_id with write_stdin polls instead of keeping one native command invocation open across the bridge deadline.";
 export const COMPUTER_USE_FAST_PATH_RULE = "Computer Use fast path: keep the persistent node_repl/@oai/sky session and reuse already-discovered module, app, window, and control state across calls. Prefer structured app/window/control state over a new screenshot whenever it is sufficient to choose the next action. Do not re-describe or re-analyze an unchanged screen. When a screenshot is necessary, focus on the relevant or changed UI region when the capability supports it, preserve enough detail for reliable coordinates/text, then choose the next action immediately. When no intermediate branch, confirmation, or safety-sensitive decision is required, execute a short deterministic sequence of low-risk UI actions before observing again. Re-observe after a meaningful UI state transition, when the target is ambiguous, or before a destructive/irreversible action. Avoid repeating list_apps, imports, discovery, or full-screen observation when the persistent session already has valid state.";
 export const PARALLEL_COMMAND_RULE = "Parallel command fast path: when two or more command operations are independent, do not depend on each other's output, and do not mutate the same file/process/session/state, prefer codex_parallel_exec so separate native command calls can run concurrently. Keep every command single-purpose; parallelism is across separate Codex tool calls, never by joining commands with semicolons, &&, ||, Write-Output separators, or shell pipelines. Do not parallelize commands whose ordering matters, commands that share a session_id, or commands requiring approval/escalation; run those serially with codex_exec.";
+export const CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME = "codex.control.parallel_exec";
+export const PARALLEL_COMMAND_STABLE_ABI_RULE = `If the current connector does not expose codex_parallel_exec or reports it is not callable, immediately use codex_tool_call with wire_name ${CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME}; keep turn_token at the top level and pass {commands:[...]} in arguments. Do not pass codex_parallel_exec as an ordinary native wire name. This fallback applies the same 2–8 command schema and default-sandbox dispatch.`;
 export const WRITE_STDIN_TRANSPORT_RULE = "Long-running command transport: write_stdin is a poll/continuation tool, not a place to wait for several minutes in one MCP call. Keep each write_stdin yield_time at or below 60 seconds and poll the same session_id again if the process is still alive. This preserves the native session while staying below the bridge transport deadline.";
 // The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
@@ -140,10 +153,12 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   COMMAND_SAFETY_TRANSPORT_RULE,
   COMMAND_SESSION_TRANSPORT_RULE,
   PARALLEL_COMMAND_RULE,
+  PARALLEL_COMMAND_STABLE_ABI_RULE,
   WRITE_STDIN_TRANSPORT_RULE,
   "If a required tool invocation is blocked by safety checks and no safe alternative can complete that requirement, finish every independent requirement and then call the dedicated codex_turn_complete with state=blocked, exact blocked_requirements, remaining_actionable_requirements=[], and a concrete blocker before producing final prose.",
   "Before ending the response, re-check the entire active request against work actually completed and verified. If any actionable explicit deliverable remains, continue using Codex Native tools instead of returning a progress-only answer or listing it as future work.",
   "For Full Harness turns, the mandatory completion receipt is the dedicated codex_turn_complete tool. Call it only after every independently actionable requirement is finished and remaining_actionable_requirements is empty.",
+  "Call codex_turn_complete directly when it is callable on the current connector surface. If the current connector reports codex_turn_complete is not callable or missing, use the callable codex_tool_call with wire_name codex.control.turn_complete; keep turn_token at the top level and put the receipt fields inside arguments. Do not retry that unavailable direct tool. Do not search the outer Codex tool inventory for codex_turn_complete.",
   "For state=complete, blocked_requirements must be empty and blocker must be omitted. For state=blocked, blocked_requirements must be non-empty and blocker must be a concrete non-empty string.",
   "After codex_turn_complete is accepted, provide the final user-facing answer. If it is rejected, continue the task and submit a new receipt only when the rejection is resolved.",
   "Only stop early for a genuine external blocker that cannot be resolved with the available Codex tools or environment.",
@@ -899,6 +914,73 @@ export async function runChatGptMcpServer(options: {
     }
   };
 
+  const runParallelCommands = async (
+    claimed: ClaimedTurn,
+    commands: ParallelCommand[],
+    signal?: AbortSignal,
+  ) => {
+    const bound = claimed.environment;
+    const directTool = exactTool(bound, "exec_command") ?? exactTool(bound, "shell_command");
+    const gateway = directTool ? undefined : execGateway(bound);
+    if (!directTool && !gateway) {
+      throw new Error("This Codex turn did not advertise a native command tool or the native exec gateway");
+    }
+    const runOne = async (command: ParallelCommand, index: number) => {
+      const execCommandArguments = {
+        cmd: command.cmd,
+        ...(command.workdir ? { workdir: command.workdir } : {}),
+        ...(command.yield_time_ms !== undefined ? { yield_time_ms: command.yield_time_ms } : {}),
+        ...(command.max_output_tokens !== undefined ? { max_output_tokens: command.max_output_tokens } : {}),
+        ...(command.tty !== undefined ? { tty: command.tty } : {}),
+      };
+      const shellCommandArguments = {
+        command: command.cmd,
+        ...(command.workdir ? { workdir: command.workdir } : {}),
+        ...(command.yield_time_ms !== undefined ? { timeout_ms: command.yield_time_ms } : {}),
+      };
+      try {
+        const output = directTool
+          ? await invoke(
+              claimed.bindingId,
+              bound,
+              directTool,
+              { arguments: directTool.name === "exec_command" ? execCommandArguments : shellCommandArguments },
+              signal,
+            )
+          : await invoke(
+              claimed.bindingId,
+              bound,
+              gateway!,
+              { input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments) },
+              signal,
+            );
+        return {
+          index,
+          ok: output.isError !== true,
+          content: output.content,
+          ...(output.structuredContent !== undefined ? { structured_content: output.structuredContent } : {}),
+        };
+      } catch (error) {
+        return {
+          index,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    };
+    const startedAt = Date.now();
+    const results = await Promise.all(commands.map((command, index) => runOne(command, index)));
+    const failedCount = results.filter(item => item.ok === false).length;
+    return result({
+      parallel: true,
+      command_count: commands.length,
+      elapsed_ms: Date.now() - startedAt,
+      succeeded: results.length - failedCount,
+      failed: failedCount,
+      results,
+    }, failedCount === results.length);
+  };
+
   const invokeNestedNative = (
     bindingId: string,
     bound: ChatGptTurnEnvironment & { expiresAt?: number },
@@ -1000,18 +1082,13 @@ export async function runChatGptMcpServer(options: {
       description: afterSafeStart(contract, [
         "Run 2 to 8 independent command operations concurrently as separate native Codex command tool calls.",
         PARALLEL_COMMAND_RULE,
+        ...(contract === "native" ? [PARALLEL_COMMAND_STABLE_ABI_RULE] : []),
         COMMAND_SAFETY_TRANSPORT_RULE,
         "Parallel calls always use the default sandbox. If a command needs escalation/approval, ordering, shared mutable state, or another command's output, use serial codex_exec instead.",
       ].join(" ")),
       inputSchema: {
         ...turnReferenceInput(contract),
-        commands: z.array(z.object({
-          cmd: z.string().min(1).max(100_000),
-          workdir: z.string().max(16_384).optional(),
-          yield_time_ms: z.number().int().min(250).max(30_000).optional(),
-          max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
-          tty: z.boolean().optional(),
-        })).min(2).max(8),
+        commands: parallelCommandBatchSchema.shape.commands,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
@@ -1019,74 +1096,7 @@ export async function runChatGptMcpServer(options: {
       "codex_parallel_exec",
       turnReference(contract, input),
       extra,
-      async claimed => {
-        const bound = claimed.environment;
-        const directTool = exactTool(bound, "exec_command") ?? exactTool(bound, "shell_command");
-        const gateway = directTool ? undefined : execGateway(bound);
-        if (!directTool && !gateway) {
-          throw new Error("This Codex turn did not advertise a native command tool or the native exec gateway");
-        }
-        const runOne = async (command: {
-          cmd: string;
-          workdir?: string;
-          yield_time_ms?: number;
-          max_output_tokens?: number;
-          tty?: boolean;
-        }, index: number) => {
-          const execCommandArguments = {
-            cmd: command.cmd,
-            ...(command.workdir ? { workdir: command.workdir } : {}),
-            ...(command.yield_time_ms !== undefined ? { yield_time_ms: command.yield_time_ms } : {}),
-            ...(command.max_output_tokens !== undefined ? { max_output_tokens: command.max_output_tokens } : {}),
-            ...(command.tty !== undefined ? { tty: command.tty } : {}),
-          };
-          const shellCommandArguments = {
-            command: command.cmd,
-            ...(command.workdir ? { workdir: command.workdir } : {}),
-            ...(command.yield_time_ms !== undefined ? { timeout_ms: command.yield_time_ms } : {}),
-          };
-          try {
-            const output = directTool
-              ? await invoke(
-                  claimed.bindingId,
-                  bound,
-                  directTool,
-                  { arguments: directTool.name === "exec_command" ? execCommandArguments : shellCommandArguments },
-                  extra.signal,
-                )
-              : await invoke(
-                  claimed.bindingId,
-                  bound,
-                  gateway!,
-                  { input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments) },
-                  extra.signal,
-                );
-            return {
-              index,
-              ok: output.isError !== true,
-              content: output.content,
-              ...(output.structuredContent !== undefined ? { structured_content: output.structuredContent } : {}),
-            };
-          } catch (error) {
-            return {
-              index,
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
-        };
-        const startedAt = Date.now();
-        const results = await Promise.all(input.commands.map((command, index) => runOne(command, index)));
-        const failedCount = results.filter(item => item.ok === false).length;
-        return result({
-          parallel: true,
-          command_count: input.commands.length,
-          elapsed_ms: Date.now() - startedAt,
-          succeeded: results.length - failedCount,
-          failed: failedCount,
-          results,
-        }, failedCount === results.length);
-      },
+      async claimed => runParallelCommands(claimed, input.commands, extra.signal),
     ),
   );
 
@@ -1397,7 +1407,9 @@ export async function runChatGptMcpServer(options: {
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           `A passive recovery checkpoint may similarly provide ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}; both controls accept only the issued one-shot token and {handoff_id, summary}.`,
+          `If the current connector does not expose codex_turn_complete, the reserved ${CODEX_COMPLETION_CONTROL_WIRE_NAME} operation submits its receipt through this stable ABI; pass turn_token at the top level and the receipt fields in arguments.`,
           "These controls store summaries for continuation/recovery; they do not execute commands, access files, or invoke other tools.",
+          PARALLEL_COMMAND_STABLE_ABI_RULE,
           `Enhanced tool-capable turns may also bind the reserved ${CODEX_OUTPUT_CONTROL_WIRE_NAME} operation. It is supplied by the prompt, not inventory, and accepts only {kind, text}.`,
         ] : []),
       ].join(" ")),
@@ -1483,6 +1495,16 @@ export async function runChatGptMcpServer(options: {
           }, 5_000, extra.signal);
           return result(response);
         }
+        if (contract === "native" && wire_name === CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME) {
+          if (input !== undefined) {
+            throw new Error("Parallel command fallback does not accept freeform input");
+          }
+          const parsed = parallelCommandBatchSchema.safeParse(args ?? {});
+          if (!parsed.success) {
+            throw new Error(`Parallel command fallback arguments are invalid: ${parsed.error.message}`);
+          }
+          return runParallelCommands(claimed, parsed.data.commands, extra.signal);
+        }
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);
@@ -1526,7 +1548,7 @@ export async function runChatGptMcpServer(options: {
       "codex_turn_complete",
       {
         title: "Acknowledge Codex task completion",
-        description: "Internal control-plane acknowledgement only. This tool does not run commands, modify files, contact external services, or change user data. Submit the mandatory Full Harness completion receipt. Use state=complete only with no blocked requirements and no blocker. Use state=blocked only with at least one blocked requirement and a concrete blocker. remaining_actionable_requirements must always be empty.",
+        description: `Internal control-plane acknowledgement only. This tool does not run commands, modify files, contact external services, or change user data. Submit the mandatory Full Harness completion receipt when this tool is callable on the current connector surface. If the current connector reports codex_turn_complete is not callable or missing, use codex_tool_call with wire_name ${CODEX_COMPLETION_CONTROL_WIRE_NAME}, keeping turn_token at the top level and the receipt fields in arguments; do not search the outer Codex registry or retry the unavailable direct tool. Use state=complete only with no blocked requirements and no blocker. Use state=blocked only with at least one blocked requirement and a concrete blocker. remaining_actionable_requirements must always be empty.`,
         inputSchema: {
           turn_token: turnTokenSchema,
           state: z.enum(["complete", "blocked"]),

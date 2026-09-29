@@ -6,9 +6,12 @@ import {
   cancelLauncherManualTurn,
   endLauncherManualTurn,
   LauncherBrowserTurnCancelledError,
+  LauncherAccountSafetyStopError,
+  LauncherAutomationSecurityStatusUnavailableError,
   LauncherManualTurnFailedError,
   LauncherManualTurnTimedOutError,
   markLauncherManualTurnStarted,
+  readLauncherAutomationSecurityStatus,
   releaseLauncherRetainedConversation,
   startLauncherManualTurn,
   waitForLauncherManualSent,
@@ -16,6 +19,7 @@ import {
   type LauncherManualTurnEnd,
   type LauncherManualTurnOwner,
   type LauncherManualTurnStart,
+  type LauncherAutomationSecurityRecord,
 } from "../../launcher-browser-host";
 import { namespacedToolName, type AdapterEvent, type CodexContentPart, type CodexParsedRequest, type CodexProviderConfig, type CodexToolResultMessage, type CodexUsage } from "../../types";
 import type { ProviderAdapter } from "../base";
@@ -162,6 +166,17 @@ const launcherZeroRiskManualControl: ChatGptZeroRiskManualControl = {
 function safeManualAdapterError(error: unknown): Error {
   if (error instanceof DOMException && error.name === "AbortError") return error;
   if (error instanceof ChatGptWebAdapterError) return error;
+  if (error instanceof LauncherAccountSafetyStopError) {
+    return new ChatGptWebAdapterError(error.message, {
+      status: 403,
+      errorType: "authentication_error",
+      code: "chatgpt_account_safety_stop",
+      retryable: false,
+      signal: error.signal,
+      launcherAutomationSecurity: error.automationSecurity,
+      cause: error,
+    });
+  }
   if (error instanceof LauncherManualTurnTimedOutError) {
     return new ChatGptWebAdapterError(error.message, {
       status: 408,
@@ -435,21 +450,96 @@ export function createChatGptWebAdapter(
     broker?: TurnBrokerOwner;
     zeroRiskManualControl?: ChatGptZeroRiskManualControl;
     accountSafety?: ChatGptAccountSafety;
+    launcherAutomationSecurityStatus?: (descriptorPath: string) => Promise<LauncherAutomationSecurityRecord>;
   } = {},
 ): ProviderAdapter {
   const worker = ChatGptBrowserWorker.forProvider(provider);
   const broker = dependencies.broker ?? TurnBroker.forSocket(brokerSocketPath(provider));
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
+  const launcherBacked = provider.chatgptWeb?.browserHost === "launcher";
+  const retainedLauncherDescriptor = launcherBacked && provider.chatgptWeb?.browserHostDescriptorPath
+    ? resolve(expandUserPath(provider.chatgptWeb.browserHostDescriptorPath))
+    : undefined;
   const accountSafetyConfigured = provider.chatgptWeb?.accountSafetyEnabled === true
     || provider.chatgptWeb?.automaticWebSessionLimitMinutes !== undefined
-    || dependencies.accountSafety !== undefined;
+    || dependencies.accountSafety !== undefined
+    || launcherBacked;
   const accountSafety = dependencies.accountSafety
     ?? (accountSafetyConfigured
       ? chatGptAccountSafety(provider.chatgptWeb?.accountSafetyStatePath
         ? resolve(expandUserPath(provider.chatgptWeb.accountSafetyStatePath))
         : undefined)
       : undefined);
+  const readLauncherSecurityStatus = dependencies.launcherAutomationSecurityStatus
+    ?? readLauncherAutomationSecurityStatus;
+  const stoppedLauncherTraces = new Map<string, { error: ChatGptWebAdapterError; expiresAt: number }>();
+  const launcherTraceBlockTtlMs = 30 * 60_000;
+  const rememberLauncherTraceStop = (traceId: string, error: ChatGptWebAdapterError): void => {
+    const now = Date.now();
+    for (const [blockedTraceId, blocked] of stoppedLauncherTraces) {
+      if (blocked.expiresAt <= now) stoppedLauncherTraces.delete(blockedTraceId);
+    }
+    stoppedLauncherTraces.delete(traceId);
+    stoppedLauncherTraces.set(traceId, { error, expiresAt: now + launcherTraceBlockTtlMs });
+    while (stoppedLauncherTraces.size > 512) {
+      const oldest = stoppedLauncherTraces.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      stoppedLauncherTraces.delete(oldest);
+    }
+    chatGptTurnSessions.beginCancelTrace(traceId, error);
+  };
+  const stopLauncherTraces = (error: ChatGptWebAdapterError, traceIds: readonly string[]): void => {
+    for (const traceId of new Set(traceIds)) rememberLauncherTraceStop(traceId, error);
+  };
+  const ensureLauncherAutomationSecurity = async (traceId: string): Promise<void> => {
+    if (!launcherBacked) return;
+    const previousStop = stoppedLauncherTraces.get(traceId);
+    if (previousStop && previousStop.expiresAt > Date.now()) throw previousStop.error;
+    if (previousStop) stoppedLauncherTraces.delete(traceId);
+
+    let record: LauncherAutomationSecurityRecord;
+    try {
+      if (!retainedLauncherDescriptor) {
+        throw new LauncherAutomationSecurityStatusUnavailableError("Launcher browser-host descriptor is not configured");
+      }
+      record = await readLauncherSecurityStatus(retainedLauncherDescriptor);
+    } catch (error) {
+      const unavailable = new ChatGptWebAdapterError(
+        "The Launcher account-safety status could not be verified. This ChatGPT Web turn has been stopped.",
+        {
+          status: 503,
+          errorType: "server_error",
+          code: "chatgpt_account_safety_status_unavailable",
+          retryable: false,
+          cause: error,
+        },
+      );
+      stopLauncherTraces(unavailable, [traceId]);
+      throw unavailable;
+    }
+
+    const reconciled = accountSafety?.reconcileLauncherAutomationSecurity(record) === true;
+    if (!reconciled || accountSafety?.isHardStopped()) {
+      const signal = record.signal ?? "invalid_security_state";
+      const stopped = new ChatGptWebAdapterError(
+        `ChatGPT Web automation is paused by Launcher account safety (${signal}). Resolve the issue in Launcher before resuming.`,
+        {
+          status: 403,
+          errorType: "authentication_error",
+          code: "chatgpt_account_safety_stop",
+          retryable: false,
+          signal,
+          launcherAutomationSecurity: record,
+        },
+      );
+      stopLauncherTraces(stopped, [...chatGptTurnSessions.activeTraceIds(), traceId]);
+      throw stopped;
+    }
+  };
+  if (launcherBacked) {
+    structuredBroker?.setDispatchGuard(traceId => ensureLauncherAutomationSecurity(traceId));
+  }
   const automaticWebSessionLimitMinutes = provider.chatgptWeb?.automaticWebSessionLimitMinutes;
   const automaticWebSessionLimitCount = automaticWebSessionLimitMinutes === undefined
     ? undefined
@@ -490,10 +580,6 @@ export function createChatGptWebAdapter(
     throw new Error("Fresh browser conversations per turn is available only in automatic mode");
   }
   const executionNamespace = chatGptWebExecutionNamespace(provider);
-  const retainedLauncherDescriptor = provider.chatgptWeb?.browserHost === "launcher"
-    && provider.chatgptWeb.browserHostDescriptorPath
-      ? resolve(expandUserPath(provider.chatgptWeb.browserHostDescriptorPath))
-      : undefined;
   if (manualInteraction) {
     if (!configuredCapabilities.localToolsEnabled) {
       throw new Error("ChatGPT Zero Risk requires the Full Codex harness");
@@ -1013,6 +1099,8 @@ export function createChatGptWebAdapter(
           });
           return;
         }
+        const traceId = chatGptWebTraceId(provider, parsed);
+        if (launcherBacked) await ensureLauncherAutomationSecurity(traceId);
         const turnCapabilities = parsed._compactionRequest && !manualRequest
           ? { ...configuredCapabilities, localToolsEnabled: false }
           : configuredCapabilities;
@@ -1353,7 +1441,6 @@ export function createChatGptWebAdapter(
         if (abortedTurnIds?.size) {
           chatGptTurnSessions.retireAbortedOwnerTurns(ownerKey, abortedTurnIds, executionKey);
         }
-        const traceId = chatGptWebTraceId(provider, parsed);
         if (!manualRequest && accountSafety) {
           const admission = accountSafety.admit(
             traceId,
@@ -1623,12 +1710,14 @@ export function createChatGptWebAdapter(
                   throw new Error("ChatGPT browser Markdown stream did not reproduce the completed answer");
                 }
                 const tunneledFinal = observerNativeOutputTunnel ? session.nativeFinalAnswer() : undefined;
-                if (tunneledFinal !== undefined
-                  && tunneledFinal.trim() !== completedOutcome.answer.trim()) {
-                  if (turnToken) await broker.revoke(turnToken);
-                  throw new Error("ChatGPT Native2 final output conflicts with the browser-verified final answer");
+                const nativeOutputConflict = tunneledFinal !== undefined
+                  && tunneledFinal.trim() !== completedOutcome.answer.trim();
+                if (nativeOutputConflict) {
+                  console.warn(`[chatgpt-web] native_output_conflict_fallback trace=${traceId}`);
                 }
-                const finalAnswer = tunneledFinal ?? completedOutcome.answer;
+                const finalAnswer = tunneledFinal !== undefined && !nativeOutputConflict
+                  ? tunneledFinal
+                  : completedOutcome.answer;
                 structuredOutputValidator?.(finalAnswer);
                 if (observerNativeOutputTunnel) {
                   if (session.nativeOutputAfterSequence() === 0 && roundReasoning.length > 0) {
@@ -1779,7 +1868,13 @@ export function createChatGptWebAdapter(
             })}`,
           );
           const turnError = submittedTurnFailure(session, error);
-          if (!manualRequest && turnError instanceof ChatGptWebAdapterError) {
+          if (launcherBacked && turnError instanceof ChatGptWebAdapterError
+            && turnError.code === "chatgpt_account_safety_stop") {
+            if (turnError.launcherAutomationSecurity) {
+              accountSafety?.reconcileLauncherAutomationSecurity(turnError.launcherAutomationSecurity);
+            }
+            stopLauncherTraces(turnError, [...chatGptTurnSessions.activeTraceIds(), traceId]);
+          } else if (!launcherBacked && !manualRequest && turnError instanceof ChatGptWebAdapterError) {
             const safetyReason = turnError.code === "rate_limit_exceeded"
               ? "rate_limit"
               : turnError.code === "chatgpt_account_safety_stop"

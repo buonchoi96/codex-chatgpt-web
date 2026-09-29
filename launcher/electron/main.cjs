@@ -21,6 +21,7 @@ const {
 } = require("electron");
 const { BrowserHost, navigationErrorForLog } = require("./browser-host.cjs");
 const { BrowserControlServer } = require("./control-server.cjs");
+const { cancelDevChatTurn } = require("./dev-chat-turn-control.cjs");
 const { LimitsController } = require("./limits-controller.cjs");
 const { SOURCE_URL: LIMITS_SOURCE_URL } = require("./limits-store.cjs");
 const { releaseRetainedConversation } = require("./retained-turn-release.cjs");
@@ -623,6 +624,14 @@ function registerIpc({ logger, stateStore }) {
   handle("launcher:browser-tab-close", (_event, tabId) => browserHost.closeTab(tabId));
   handle("launcher:manual-prompt-copy", (_event, tabId) => browserHost.copyManualPrompt(tabId));
   handle("launcher:manual-prompt-sent", (_event, tabId) => browserHost.confirmManualSent(tabId));
+  handle("launcher:automation-security-resume", () => {
+    if (stateStore.read().automationSecurity?.paused !== true) {
+      throw new Error("ChatGPT Web account-safety pause is no longer active");
+    }
+    const automationSecurity = stateStore.resumeAutomationSecurity().automationSecurity;
+    logger.info("launcher.automation_security_resumed", { revision: automationSecurity.revision });
+    return automationSecurity;
+  });
   handle("launcher:browser-login", async () => {
     const browser = await browserHost.openLogin();
     if (browser.authenticated) {
@@ -1062,12 +1071,18 @@ async function requestQuit() {
     return { ok: false, message: "Launcher shutdown is already in progress" };
   }
   shutdownInProgress = true;
+  let runtimeShutdownAttempted = false;
   try {
     const activeOperation = runtimeHost?.currentOperation() || browserHost?.currentOperation();
     if (activeOperation) {
       throw new Error(`Wait for ${activeOperation} to finish before quitting Codex Web GPT`);
     }
-    await runtimeSupervisor?.shutdown({ cancelActiveTurns: true, force: true });
+    runtimeShutdownAttempted = true;
+    await runtimeSupervisor?.shutdown({
+      cancelActiveTurns: true,
+      force: true,
+      preserveTunnel: runtimeSupervisor?.liveTunnelHandoffActive() === true,
+    });
     stopCatalogVerificationMonitor();
     quitting = true;
     await browserHost?.persistSession();
@@ -1077,7 +1092,14 @@ async function requestQuit() {
     app.quit();
     return { ok: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    let message = error instanceof Error ? error.message : String(error);
+    if (runtimeShutdownAttempted && !exitCommitted) {
+      try {
+        await runtimeSupervisor?.startIfConfigured();
+      } catch (recoveryError) {
+        message += `; runtime recovery failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`;
+      }
+    }
     quitting = false;
     showMainWindow();
     publishOperation({ name: "launcher-quit", status: "failed", message });
@@ -1211,7 +1233,13 @@ async function start() {
     descriptorPath: BROWSER_DESCRIPTOR_PATH,
     cdpPort,
     control: browserControl.descriptor(),
-    cancelTurn: IS_DEV_PROFILE ? undefined : (traceId, reason) => runtimeSupervisor.cancelBrowserTurn(traceId, reason),
+    cancelTurn: IS_DEV_PROFILE
+      ? (traceId, reason) => cancelDevChatTurn(
+        runtimeHost.runtimeConfigSnapshot().config?.brokerSocketPath,
+        traceId,
+        reason,
+      )
+      : (traceId, reason) => runtimeSupervisor.cancelBrowserTurn(traceId, reason),
     getConnectorName: () => runtimeHost.browserConnectorName(),
     getUseSavedChats: () => runtimeHost.runtimeConfigSnapshot().config?.useSavedChats === true,
     helper: { executable: process.execPath, script: BROWSER_HELPER_PATH },
@@ -1222,6 +1250,8 @@ async function start() {
     publishState: (state) => send("launcher:browser-state", state),
     showWindow: showMainWindow,
     getBrowserInteractionMode: () => stateStore.read().browserInteractionMode,
+    getAutomationSecurity: () => stateStore.read().automationSecurity,
+    pauseAutomationSecurity: signal => stateStore.pauseAutomationSecurity(signal).automationSecurity,
   });
   await browserHost.ready();
   const updaterRuntimeRoot = runtimeRootProvider();

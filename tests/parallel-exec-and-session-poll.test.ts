@@ -5,6 +5,7 @@ import {
   CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS,
   CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS,
   COMMAND_SESSION_TRANSPORT_RULE,
+  PARALLEL_COMMAND_STABLE_ABI_RULE,
   PARALLEL_COMMAND_RULE,
   WRITE_STDIN_TRANSPORT_RULE,
   chatGptCommandYieldMs,
@@ -42,7 +43,11 @@ test("write_stdin polling remains below the MCP invocation deadline", () => {
 test("parallel command bridge preserves single-purpose command safety", () => {
   expect(PARALLEL_COMMAND_RULE).toContain("codex_parallel_exec");
   expect(PARALLEL_COMMAND_RULE).toContain("never by joining commands");
+  expect(PARALLEL_COMMAND_STABLE_ABI_RULE).toContain("codex.control.parallel_exec");
+  expect(PARALLEL_COMMAND_STABLE_ABI_RULE).toContain("Do not pass codex_parallel_exec as an ordinary native wire name");
   expect(CHATGPT_NATIVE_MCP_INSTRUCTIONS).toContain(PARALLEL_COMMAND_RULE);
+  expect(CHATGPT_NATIVE_MCP_INSTRUCTIONS).toContain(PARALLEL_COMMAND_STABLE_ABI_RULE);
+  expect(readFileSync("src/adapters/chatgpt-web/prompt.ts", "utf8")).toContain("codex.control.parallel_exec");
 
   const source = readFileSync("src/adapters/chatgpt-web/mcp-server.ts", "utf8");
   const startMatch = /server\.registerTool\(\r?\n\s*"codex_parallel_exec"/.exec(source);
@@ -52,9 +57,9 @@ test("parallel command bridge preserves single-purpose command safety", () => {
   const endMatch = /server\.registerTool\(\r?\n\s*"codex_write_stdin"/.exec(remainder);
   expect(endMatch?.index ?? -1).toBeGreaterThan(0);
   const parallelBlock = remainder.slice(0, endMatch!.index);
-  expect(parallelBlock).toContain("z.array(z.object({");
-  expect(parallelBlock).toContain("})).min(2).max(8)");
-  expect(parallelBlock).toContain("Promise.all(input.commands.map");
+  expect(parallelBlock).toContain("parallelCommandBatchSchema.shape.commands");
+  expect(parallelBlock).toContain("runParallelCommands(claimed, input.commands, extra.signal)");
+  expect(source).toContain("Promise.all(commands.map");
   expect(parallelBlock).toContain("Parallel calls always use the default sandbox");
   expect(parallelBlock).not.toContain("require_escalated");
   expect(parallelBlock).not.toContain("sandbox_permissions");

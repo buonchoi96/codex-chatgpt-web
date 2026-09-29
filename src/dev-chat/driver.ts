@@ -25,6 +25,10 @@ import {
 
 type AdapterFactory = (provider: CodexProviderConfig) => ProviderAdapter;
 
+export interface DevChatTurnCancellationRegistry {
+  registerTraceAbortController(traceId: string, controller: AbortController): () => void;
+}
+
 export type DevChatEvent =
   | { type: "reasoning"; text: string }
   | { type: "commentary"; text: string }
@@ -414,6 +418,7 @@ export class DevChatDriver {
     readonly adapterFactory: AdapterFactory,
     readonly cwd = process.cwd(),
     readonly features: DevChatFeatures = DEFAULT_DEV_CHAT_FEATURES,
+    readonly cancellationRegistry?: DevChatTurnCancellationRegistry,
   ) {}
 
   open(name: string, requestedModel?: DevChatModel): { state: DevChatState; created: boolean } {
@@ -509,61 +514,76 @@ export class DevChatDriver {
     let totalToolCalls = 0;
     const usage: DevChatUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let finalText = "";
-    for (let round = 0; round < 64; round += 1) {
-      const body = requestBody(state, this.cwd, turnId, workingInput, false, this.config.mode === "full");
-      const response = await responseRequest(new Request("http://codex-web-gpt.dev/v1/responses", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      }), this.config, this.adapterFactory, {
-        rememberState: false,
-        onAdapterEvent: event => observeAdapterEvent(event, emit),
-      });
-      const envelope = await response.json() as ResponsesEnvelope;
-      if (!Array.isArray(envelope.output)) throw new Error("DEV Responses handler returned no output array");
-      if (envelope.status !== "completed") throw new Error(responseError(envelope));
-      const output = historyOutput(envelope.output!, turnId);
-      workingInput.push(...output);
-      const roundUsage = usageOf(envelope);
-      usage.inputTokens += roundUsage.inputTokens;
-      usage.outputTokens += roundUsage.outputTokens;
-      usage.totalTokens += roundUsage.totalTokens;
-      const calls = toolCalls(output);
-      if (calls.length === 0) {
-        if (envelope.end_turn !== true) {
-          throw new Error("DEV Responses turn completed without tool calls or end_turn=true");
+    const turnAbort = new AbortController();
+    let registeredTraceId: string | undefined;
+    let unregisterTrace: (() => void) | undefined;
+    const registerTrace = (traceId: string): void => {
+      if (registeredTraceId === traceId) return;
+      unregisterTrace?.();
+      registeredTraceId = traceId;
+      unregisterTrace = this.cancellationRegistry?.registerTraceAbortController(traceId, turnAbort);
+    };
+    try {
+      for (let round = 0; round < 64; round += 1) {
+        const body = requestBody(state, this.cwd, turnId, workingInput, false, this.config.mode === "full");
+        const response = await responseRequest(new Request("http://codex-web-gpt.dev/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: turnAbort.signal,
+        }), this.config, this.adapterFactory, {
+          rememberState: false,
+          onAdapterEvent: event => observeAdapterEvent(event, emit),
+          onTraceId: registerTrace,
+        });
+        const envelope = await response.json() as ResponsesEnvelope;
+        if (!Array.isArray(envelope.output)) throw new Error("DEV Responses handler returned no output array");
+        if (envelope.status !== "completed") throw new Error(responseError(envelope));
+        const output = historyOutput(envelope.output!, turnId);
+        workingInput.push(...output);
+        const roundUsage = usageOf(envelope);
+        usage.inputTokens += roundUsage.inputTokens;
+        usage.outputTokens += roundUsage.outputTokens;
+        usage.totalTokens += roundUsage.totalTokens;
+        const calls = toolCalls(output);
+        if (calls.length === 0) {
+          if (envelope.end_turn !== true) {
+            throw new Error("DEV Responses turn completed without tool calls or end_turn=true");
+          }
+          finalText = outputText(output);
+          state.input = workingInput;
+          state.turns += 1;
+          state.compactions += pendingCompactions;
+          state.lastUsage = usage;
+          this.store.save(state);
+          return {
+            text: finalText,
+            usage,
+            toolCalls: totalToolCalls,
+            compactions,
+            status: this.status(state),
+          };
         }
-        finalText = outputText(output);
-        state.input = workingInput;
-        state.turns += 1;
-        state.compactions += pendingCompactions;
-        state.lastUsage = usage;
-        this.store.save(state);
-        return {
-          text: finalText,
-          usage,
-          toolCalls: totalToolCalls,
-          compactions,
-          status: this.status(state),
-        };
-      }
 
-      totalToolCalls += calls.length;
-      for (const call of calls) {
-        emit({ type: "tool_call", name: call.name, input: call.input });
-        const receipt = simulatedReceipt(state, turnId, call);
-        emit({ type: "tool_result", name: call.name, receipt });
-        workingInput.push(toolOutput(call, receipt));
-      }
+        totalToolCalls += calls.length;
+        for (const call of calls) {
+          emit({ type: "tool_call", name: call.name, input: call.input });
+          const receipt = simulatedReceipt(state, turnId, call);
+          emit({ type: "tool_result", name: call.name, receipt });
+          workingInput.push(toolOutput(call, receipt));
+        }
 
-      context = this.statusForInput(state, turnId, workingInput);
-      if (this.shouldAutoCompact(state, context)) {
-        workingInput = await this.compactInput(state, workingInput, "automatic", emit);
-        pendingCompactions += 1;
-        compactions += 1;
+        context = this.statusForInput(state, turnId, workingInput);
+        if (this.shouldAutoCompact(state, context)) {
+          workingInput = await this.compactInput(state, workingInput, "automatic", emit);
+          pendingCompactions += 1;
+          compactions += 1;
+        }
       }
+      throw new Error("DEV chat exceeded 64 simulated tool rounds without a final answer");
+    } finally {
+      unregisterTrace?.();
     }
-    throw new Error("DEV chat exceeded 64 simulated tool rounds without a final answer");
   }
 
   async close(): Promise<void> {

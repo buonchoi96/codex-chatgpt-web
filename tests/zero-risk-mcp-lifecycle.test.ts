@@ -12,7 +12,11 @@ import {
   type BrokerToolResult,
 } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint } from "../src/config";
-import { chatGptMcpInstructions } from "../src/adapters/chatgpt-web/mcp-server";
+import {
+  CODEX_COMPLETION_CONTROL_WIRE_NAME,
+  CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME,
+  chatGptMcpInstructions,
+} from "../src/adapters/chatgpt-web/mcp-server";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const testTempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
@@ -50,9 +54,15 @@ test("MCP instructions keep native multi-task execution active until the full re
   expect(native).toContain("continue to the next unfinished requested requirement without asking whether to proceed");
   expect(native).toContain("If any actionable explicit deliverable remains, continue using Codex Native tools");
   expect(native).toContain("mandatory completion receipt is the dedicated codex_turn_complete tool");
+  expect(native).toContain("If the current connector reports codex_turn_complete is not callable or missing");
+  expect(native).toContain("codex_tool_call with wire_name codex.control.turn_complete");
+  expect(native).toContain("Do not search the outer Codex tool inventory for codex_turn_complete");
+  expect(native).toContain("keep turn_token at the top level and put the receipt fields inside arguments");
   expect(native).toContain("remaining_actionable_requirements is empty");
   expect(native).toContain("If it is rejected, continue the task");
   expect(native).toContain("Only stop early for a genuine external blocker");
+  expect(native).toContain("codex.control.parallel_exec");
+  expect(native).toContain("Do not pass codex_parallel_exec as an ordinary native wire name");
 
   const safe = chatGptMcpInstructions("safe");
   expect(safe).toContain("begin with codex_turn_start using the request_id");
@@ -301,6 +311,7 @@ describe("Full Harness native completion receipt", () => {
     try {
       await client.connect(transport);
       expect(client.getInstructions()).toContain("dedicated codex_turn_complete tool");
+      expect(client.getInstructions()).toContain("wire_name codex.control.turn_complete");
       const listed = await client.listTools();
       expect(listed.tools.some(tool => tool.name === "codex_turn_complete")).toBe(true);
       expect(listed.tools.some(tool => tool.name === "codex_tool_call")).toBe(true);
@@ -343,6 +354,23 @@ describe("Full Harness native completion receipt", () => {
       });
       expect(broker.nativeCompletionReceiptAccepted(token)).toBe(false);
       expect(broker.beginCompletionFence(token)).toBeUndefined();
+
+      const stableAbiFallback = await client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_COMPLETION_CONTROL_WIRE_NAME,
+          arguments: {
+            state: "complete",
+            summary: "all requested requirements completed through the stable connector ABI",
+            completed_requirements: ["step A", "step B", "final regression"],
+            blocked_requirements: [],
+            remaining_actionable_requirements: [],
+          },
+        },
+      });
+      expect(stableAbiFallback.structuredContent).toEqual({ accepted: true });
+      expect(broker.nativeCompletionReceiptAccepted(token)).toBe(true);
 
       const final = await client.callTool({
         name: "codex_turn_complete",
@@ -400,6 +428,97 @@ describe("Full Harness native completion receipt", () => {
       await broker.close();
     }
   });
+});
+
+describe("Full Harness native parallel command stable ABI", () => {
+  test("dispatches the reserved parallel fallback concurrently through the existing native command tool", async () => {
+    const socketPath = endpoint("native-parallel-command-fallback");
+    const broker = TurnBroker.forSocket(socketPath);
+    const token = await broker.register(environment([{
+      name: "exec_command",
+      description: "Run one command in the default sandbox",
+      parameters: {
+        type: "object",
+        properties: { cmd: { type: "string" }, workdir: { type: "string" } },
+        required: ["cmd"],
+        additionalProperties: false,
+      },
+    }]), undefined, "native-parallel-command-fallback");
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["src/cli.ts", "mcp", "--contract", "native", "--broker-socket", socketPath],
+      cwd: process.cwd(),
+      stderr: "pipe",
+    });
+    const client = new Client({ name: "codex-native-parallel-fallback-test", version: "1.0.0" });
+    const batchAbort = new AbortController();
+    try {
+      await client.connect(transport);
+      expect(client.getInstructions()).toContain("codex.control.parallel_exec");
+      expect((await client.listTools()).tools.find(tool => tool.name === "codex_tool_call")?.description)
+        .toContain("codex.control.parallel_exec");
+
+      const invalid = await client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME,
+          arguments: { commands: [{ cmd: "git status --short" }] },
+        },
+      });
+      expect(invalid.isError).toBe(true);
+
+      const commands = [
+        { cmd: "git status --short", workdir: root },
+        { cmd: "git rev-parse HEAD", workdir: root },
+      ];
+      const pending = client.callTool({
+        name: "codex_tool_call",
+        arguments: {
+          turn_token: token,
+          wire_name: CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME,
+          arguments: { commands },
+        },
+      });
+      const earlyResponse = await Promise.race([
+        pending,
+        Bun.sleep(50).then(() => undefined),
+      ]);
+      if (earlyResponse) {
+        expect(earlyResponse.isError).not.toBe(true);
+        throw new Error("Parallel fallback returned before dispatching the command batch");
+      }
+
+      const batch = await Promise.race([
+        broker.nextToolBatch(token, batchAbort.signal),
+        Bun.sleep(2_000).then(() => { throw new Error("Parallel fallback did not dispatch its commands"); }),
+      ]);
+      expect(batch).toHaveLength(2);
+      expect(batch.map(request => request.wireName)).toEqual(["exec_command", "exec_command"]);
+      expect(batch.map(request => request.arguments?.cmd).sort()).toEqual(commands.map(command => command.cmd).sort());
+      expect(batch.every(request => !("sandbox_permissions" in (request.arguments ?? {})))).toBe(true);
+      for (const request of batch) {
+        broker.completeTool(token, request.callId, toolResult({
+          cmd: request.arguments?.cmd as string,
+          exit_code: 0,
+        }));
+      }
+
+      const response = await pending;
+      expect(response.isError).not.toBe(true);
+      expect(response.structuredContent).toMatchObject({
+        parallel: true,
+        command_count: 2,
+        succeeded: 2,
+        failed: 0,
+      });
+    } finally {
+      batchAbort.abort();
+      await client.close().catch(() => {});
+      broker.revoke(token);
+      await broker.close();
+    }
+  }, 30_000);
 });
 
 describe("Zero Risk public MCP ABI", () => {

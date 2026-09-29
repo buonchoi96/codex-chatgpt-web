@@ -8,6 +8,74 @@ export const LAUNCHER_BROWSER_HOST_KIND = "codex-web-gpt-launcher";
 export const LAUNCHER_BROWSER_IDLE_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
 export type LauncherBrowserHostProfile = "production" | "development";
 
+export type LauncherAutomationSecuritySignal =
+  | "cloudflare_challenge"
+  | "security_challenge"
+  | "account_security_warning"
+  | "reauthentication_loop"
+  | "invalid_security_state";
+
+export interface LauncherAutomationSecurityRecord {
+  version: 1;
+  paused: boolean;
+  revision: number;
+  signal: LauncherAutomationSecuritySignal | null;
+  detectedAt: string | null;
+  resumedAt: string | null;
+}
+
+const LAUNCHER_AUTOMATION_SECURITY_SIGNALS = new Set<LauncherAutomationSecuritySignal>([
+  "cloudflare_challenge",
+  "security_challenge",
+  "account_security_warning",
+  "reauthentication_loop",
+  "invalid_security_state",
+]);
+
+export function isLauncherAutomationSecurityRecord(value: unknown): value is LauncherAutomationSecurityRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || typeof record.paused !== "boolean"
+    || !Number.isSafeInteger(record.revision) || (record.revision as number) < 0
+    || (record.signal !== null
+      && !LAUNCHER_AUTOMATION_SECURITY_SIGNALS.has(record.signal as LauncherAutomationSecuritySignal))) return false;
+  const validTimestamp = (candidate: unknown): candidate is string => typeof candidate === "string"
+    && Number.isFinite(Date.parse(candidate)) && new Date(candidate).toISOString() === candidate;
+  if (record.signal === null) {
+    return !record.paused && record.revision === 0 && record.detectedAt === null && record.resumedAt === null;
+  }
+  return (record.revision as number) > 0 && validTimestamp(record.detectedAt)
+    && (record.paused ? record.resumedAt === null : validTimestamp(record.resumedAt));
+}
+
+export class LauncherAutomationSecurityStatusUnavailableError extends Error {
+  readonly code = "chatgpt_account_safety_status_unavailable";
+  readonly retryable = false;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "LauncherAutomationSecurityStatusUnavailableError";
+  }
+}
+
+export class LauncherAccountSafetyStopError extends Error {
+  readonly code = "chatgpt_account_safety_stop";
+  readonly retryable = false;
+  readonly signal?: LauncherAutomationSecuritySignal;
+  readonly automationSecurity?: LauncherAutomationSecurityRecord;
+
+  constructor(
+    message: string,
+    signal?: LauncherAutomationSecuritySignal,
+    automationSecurity?: LauncherAutomationSecurityRecord,
+  ) {
+    super(message);
+    this.name = "LauncherAccountSafetyStopError";
+    this.signal = signal;
+    this.automationSecurity = automationSecurity;
+  }
+}
+
 export class LauncherBrowserTurnCancelledError extends Error {
   constructor(message: string) {
     super(message);
@@ -499,6 +567,16 @@ function isLauncherManualTurnLease(body: Record<string, unknown>): boolean {
 function throwManualControlError(response: Response, body: Record<string, unknown>): never {
   const message = typeof body.error === "string" ? body.error : `HTTP ${response.status}`;
   if (body.code === "turn_cancelled") throw new LauncherBrowserTurnCancelledError(message);
+  if (body.code === "chatgpt_account_safety_stop") {
+    const signal = typeof body.signal === "string"
+      && LAUNCHER_AUTOMATION_SECURITY_SIGNALS.has(body.signal as LauncherAutomationSecuritySignal)
+      ? body.signal as LauncherAutomationSecuritySignal
+      : undefined;
+    const automationSecurity = isLauncherAutomationSecurityRecord(body.automationSecurity)
+      ? body.automationSecurity
+      : undefined;
+    throw new LauncherAccountSafetyStopError(message, signal, automationSecurity);
+  }
   if (body.code === "manual_turn_timed_out") throw new LauncherManualTurnTimedOutError(message);
   throw new LauncherManualTurnFailedError(message);
 }
@@ -664,6 +742,20 @@ export async function notifyLauncherTurn(
           typeof body.error === "string" ? body.error : "The retained ChatGPT conversation is no longer available",
         );
       }
+      if (response.status === 409 && body.code === "chatgpt_account_safety_stop") {
+        const signal = typeof body.signal === "string"
+          && LAUNCHER_AUTOMATION_SECURITY_SIGNALS.has(body.signal as LauncherAutomationSecuritySignal)
+          ? body.signal as LauncherAutomationSecuritySignal
+          : undefined;
+        const automationSecurity = isLauncherAutomationSecurityRecord(body.automationSecurity)
+          ? body.automationSecurity
+          : undefined;
+        throw new LauncherAccountSafetyStopError(
+          typeof body.error === "string" ? body.error : "ChatGPT Web automation is paused for account-safety review",
+          signal,
+          automationSecurity,
+        );
+      }
       const detail = typeof body.error === "string" ? body.error : "";
       throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
     }
@@ -702,8 +794,45 @@ export async function notifyLauncherTurn(
     if (signal?.aborted) throw new DOMException("Launcher browser acquisition cancelled", "AbortError");
     if (controller.signal.aborted) throw new Error(`Launcher browser control ${activity.phase} timed out after ${timeoutMs}ms`);
     if (error instanceof LauncherBrowserTurnCancelledError
-      || error instanceof LauncherRetainedConversationUnavailableError) throw error;
+      || error instanceof LauncherRetainedConversationUnavailableError
+      || error instanceof LauncherAccountSafetyStopError) throw error;
     throw new Error(`Launcher browser control channel failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function readLauncherAutomationSecurityStatus(
+  descriptorPath: string,
+  timeoutMs = 1_500,
+): Promise<LauncherAutomationSecurityRecord> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const descriptor = readLauncherBrowserHostDescriptor(descriptorPath);
+    const response = await fetch(`${descriptor.control.endpoint}/v1/automation-security/status`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${descriptor.control.token}` },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new LauncherAutomationSecurityStatusUnavailableError(
+        `Launcher automation-security status request failed with HTTP ${response.status}`,
+      );
+    }
+    const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || !isLauncherAutomationSecurityRecord(body.automationSecurity)) {
+      throw new LauncherAutomationSecurityStatusUnavailableError(
+        "Launcher returned an invalid automation-security status record",
+      );
+    }
+    return body.automationSecurity;
+  } catch (error) {
+    if (error instanceof LauncherAutomationSecurityStatusUnavailableError) throw error;
+    throw new LauncherAutomationSecurityStatusUnavailableError(
+      `Launcher automation-security status is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
   } finally {
     clearTimeout(timer);
   }

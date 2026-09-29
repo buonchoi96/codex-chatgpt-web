@@ -163,7 +163,7 @@ test("time-window expiry resets usage instead of draining active traces", () => 
   } finally { cleanup(); }
 });
 
-test("account security upgrades an existing drain and preserves one steering per active trace", () => {
+test("account security upgrades an existing drain to immediate hard stop", () => {
   const { manager, cleanup } = fixture();
   try {
     expect(manager.trigger("rate_limit", ["trace-a", "trace-b"])).toEqual(["trace-a", "trace-b"]);
@@ -171,16 +171,14 @@ test("account security upgrades an existing drain and preserves one steering per
     manager.markSteeringQueued("trace-a");
     manager.markSteeringQueued("trace-b");
     expect(manager.trigger("rate_limit", ["trace-a", "trace-b"])).toEqual([]);
-    expect(manager.trigger("account_security", ["trace-a", "trace-b", "trace-c"])).toEqual(["trace-c"]);
+    expect(manager.trigger("account_security", ["trace-a", "trace-b", "trace-c"])).toEqual(["trace-a", "trace-b", "trace-c"]);
     expect(manager.status(undefined, undefined, ["trace-a", "trace-b", "trace-c"])).toMatchObject({
-      state: "DRAINING",
+      state: "HARD_STOP",
       reason: "account_security",
-      capturedTraceIds: ["trace-a", "trace-b", "trace-c"],
+      capturedTraceIds: [],
     });
-    expect(manager.admit("trace-a", "session-a", undefined, undefined, ["trace-a", "trace-b", "trace-c"]).allowed).toBe(true);
-    manager.markSteeringQueued("trace-c");
+    expect(manager.admit("trace-a", "session-a", undefined, undefined, ["trace-a", "trace-b", "trace-c"]).allowed).toBe(false);
     expect(manager.trigger("account_security", ["trace-a", "trace-b", "trace-c"])).toEqual([]);
-    expect(manager.status(undefined, undefined, [])).toMatchObject({ state: "HARD_STOP", reason: "account_security" });
     expect(manager.admit("trace-new", "session-new", undefined, undefined, []).allowed).toBe(false);
   } finally { cleanup(); }
 });
@@ -204,17 +202,16 @@ test("reactive rate limits upgrade a rolling session-limit pause into draining",
   } finally { cleanup(); }
 });
 
-test("account security upgrades a rolling session-limit pause into a hard-stop drain", () => {
+test("account security immediately hard-stops a rolling session-limit pause", () => {
   const { manager, cleanup } = fixture();
   try {
     expect(manager.admit("trace-a", "session-a", 1, 300, [], 1_000).allowed).toBe(true);
     expect(manager.trigger("account_security", ["trace-a"])).toEqual(["trace-a"]);
     expect(manager.status(1, 300, ["trace-a"], 1_001)).toMatchObject({
-      state: "DRAINING",
+      state: "HARD_STOP",
       reason: "account_security",
-      capturedTraceIds: ["trace-a"],
+      capturedTraceIds: [],
     });
-    manager.markSteeringQueued("trace-a");
     expect(manager.trigger("account_security", ["trace-a"])).toEqual([]);
     expect(manager.status(1, 300, [], 1_002)).toMatchObject({
       state: "HARD_STOP",
@@ -224,20 +221,19 @@ test("account security upgrades a rolling session-limit pause into a hard-stop d
   } finally { cleanup(); }
 });
 
-test("account security drains active work before persisting a hard stop", () => {
+test("account security hard-stop persists immediately and blocks active trace admission", () => {
   const { path, manager, cleanup } = fixture();
   try {
     const now = Date.now();
     expect(manager.admit("trace-a", "session-a", 50, 300, [], now).allowed).toBe(true);
     expect(manager.trigger("account_security", ["trace-a"])).toEqual(["trace-a"]);
     expect(manager.status(50, 300, ["trace-a"], now + 1)).toMatchObject({
-      state: "DRAINING",
+      state: "HARD_STOP",
       reason: "account_security",
       windowStartedAt: now,
-      capturedTraceIds: ["trace-a"],
+      capturedTraceIds: [],
     });
-    expect(manager.admit("trace-a", "session-a", 50, 300, ["trace-a"], now + 2).allowed).toBe(true);
-    manager.markSteeringQueued("trace-a");
+    expect(manager.admit("trace-a", "session-a", 50, 300, ["trace-a"], now + 2).allowed).toBe(false);
     expect(manager.status(50, 300, [], now + 3)).toMatchObject({
       state: "HARD_STOP",
       reason: "account_security",
@@ -256,6 +252,46 @@ test("account security drains active work before persisting a hard stop", () => 
     expect(() => restarted.resume()).toThrow("requires acknowledgement");
     restarted.acknowledgeHardStop();
     expect(restarted.status(50, 300, [])).toMatchObject({ state: "NORMAL" });
+  } finally { cleanup(); }
+});
+
+test("launcher security reconciliation requires a newer explicit resume revision", () => {
+  const { manager, cleanup } = fixture();
+  try {
+    const paused = {
+      version: 1 as const,
+      paused: true,
+      revision: 3,
+      signal: "cloudflare_challenge" as const,
+      detectedAt: "2026-09-29T07:00:00.000Z",
+      resumedAt: null,
+    };
+    expect(manager.reconcileLauncherAutomationSecurity(paused)).toBe(false);
+    expect(manager.status(undefined, undefined, [])).toMatchObject({ state: "HARD_STOP", reason: "account_security" });
+    expect(manager.reconcileLauncherAutomationSecurity({
+      ...paused,
+      paused: false,
+      resumedAt: "2026-09-29T07:01:00.000Z",
+    })).toBe(false);
+    expect(manager.reconcileLauncherAutomationSecurity(paused)).toBe(false);
+    expect(manager.reconcileLauncherAutomationSecurity({
+      ...paused,
+      paused: false,
+      revision: 4,
+      resumedAt: "2026-09-29T07:02:00.000Z",
+    })).toBe(true);
+    expect(manager.status(undefined, undefined, [])).toMatchObject({ state: "NORMAL" });
+  } finally { cleanup(); }
+});
+
+test("invalid launcher status fails closed without persisting an unresumable hard stop", () => {
+  const { manager, cleanup } = fixture();
+  try {
+    expect(manager.reconcileLauncherAutomationSecurity({ version: 1, paused: false, revision: -1 })).toBe(false);
+    expect(manager.status(undefined, undefined, [])).toMatchObject({ state: "NORMAL" });
+    expect(manager.reconcileLauncherAutomationSecurity({
+      version: 1, paused: false, revision: 0, signal: null, detectedAt: null, resumedAt: null,
+    })).toBe(true);
   } finally { cleanup(); }
 });
 

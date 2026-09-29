@@ -73,6 +73,7 @@ import { loginVerificationMarkerPath } from "../../browser-login";
 import {
   connectLauncherBrowserHost,
   LauncherBrowserTurnCancelledError,
+  LauncherAccountSafetyStopError,
   LauncherRetainedConversationUnavailableError,
   LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS,
   LAUNCHER_TURN_HEARTBEAT_TIMEOUT_MS,
@@ -239,6 +240,7 @@ function chatGptConnectorUnavailableError(message: string): ChatGptWebAdapterErr
 }
 
 const CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE = "ChatGPT model controls are unavailable. Reload ChatGPT and retry the task.";
+const CHATGPT_EFFORT_SLIDER_READY_TIMEOUT_MS = 15_000;
 
 function chatGptModelControlUnavailableError(diagnostic: string): Error {
   return new Error(CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE, { cause: new Error(diagnostic) });
@@ -1422,6 +1424,7 @@ export function chatGptCompletionReceiptRecoveryPrompt(
       "Use exactly the turn_token above for every Codex Native call in this recovery. Do not reconstruct it, alter it, or reuse a token from earlier task history.",
     ] : []),
     "The bridge rejected that final-answer boundary: the Codex task is still open, and final prose cannot complete it until codex_turn_complete is accepted.",
+    "Call codex_turn_complete directly when it is callable on the current connector surface. If the current connector reports codex_turn_complete is not callable or missing, immediately submit the same receipt through the callable codex_tool_call with wire_name codex.control.turn_complete; keep turn_token at the top level and put the receipt fields inside arguments. Do not try that unavailable direct tool again. Do not search the outer Codex tool inventory for codex_turn_complete.",
     "Resume from the next unfinished action in this existing conversation. Preserve verified work already completed; do not restart from the beginning or merely restate the request.",
     "Do not repeat the progress report as a final answer.",
     "Re-read the entire active user request and continue every remaining independently actionable requirement with Codex Native tools.",
@@ -2941,13 +2944,15 @@ export class ChatGptBrowserWorker {
     const effortSlider = activation.slider;
     const sliderContainer = activation.sliderContainer;
     const waitAbort = new AbortController();
+    const effortSliderReadyDeadline = Date.now() + CHATGPT_EFFORT_SLIDER_READY_TIMEOUT_MS;
+    const effortSliderReadyTimeout = () => Math.max(1, effortSliderReadyDeadline - Date.now());
     try {
       const ready = await Promise.race([
-        sliderContainer.waitFor({ state: "visible", timeout: 70_000, signal: waitAbort.signal })
-          .then(() => effortSlider.waitFor({ state: "attached", timeout: 70_000, signal: waitAbort.signal }))
+        sliderContainer.waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal })
+          .then(() => effortSlider.waitFor({ state: "attached", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }))
           .then(() => "slider" as const),
-        chatGptRateLimitDialog(page).waitFor({ state: "visible", timeout: 70_000, signal: waitAbort.signal }).then(() => "rate-limit" as const),
-        chatGptExpiredSessionAlert(page).waitFor({ state: "visible", timeout: 70_000, signal: waitAbort.signal }).then(() => "session-expired" as const),
+        chatGptRateLimitDialog(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "rate-limit" as const),
+        chatGptExpiredSessionAlert(page).waitFor({ state: "visible", timeout: effortSliderReadyTimeout(), signal: waitAbort.signal }).then(() => "session-expired" as const),
       ]);
       if (ready === "rate-limit") await throwIfChatGptRateLimitDialog(page);
       if (ready === "session-expired") await throwIfChatGptSessionFailureAlert(page);
@@ -5236,6 +5241,20 @@ export class ChatGptBrowserWorker {
       if (error instanceof LauncherBrowserTurnCancelledError) throw chatGptBrowserTabClosedError();
       if (error instanceof LauncherRetainedConversationUnavailableError) {
         throw chatGptRetainedConversationUnavailableError();
+      }
+      if (error instanceof LauncherAccountSafetyStopError) {
+        throw new ChatGptWebAdapterError(
+          error.message,
+          {
+            status: 403,
+            errorType: "authentication_error",
+            code: "chatgpt_account_safety_stop",
+            retryable: false,
+            signal: error.signal,
+            launcherAutomationSecurity: error.automationSecurity,
+            cause: error,
+          },
+        );
       }
       throw error;
     });

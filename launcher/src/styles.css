@@ -447,6 +447,8 @@ code {
 }
 
 .workspace {
+  display: flex;
+  flex-direction: column;
   position: relative;
   z-index: 0;
   min-width: 0;
@@ -461,7 +463,44 @@ code {
 
 .surface-transition {
   width: 100%;
-  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.automation-security-warning {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 14px 18px 0;
+  padding: 13px 15px;
+  border: 1px solid var(--color-border-heavy);
+  border-left: 3px solid var(--color-text-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-background-status-warning);
+}
+
+.automation-security-warning__content {
+  min-width: 0;
+}
+
+.automation-security-warning h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.automation-security-warning p {
+  margin: 5px 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.automation-security-warning button {
+  flex: 0 0 auto;
 }
 
 .state-dot {

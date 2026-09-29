@@ -27,7 +27,7 @@ import {
 } from "../src/adapters/chatgpt-web/conversation-key";
 import {
   chatGptWebExecutionNamespace,
-  createChatGptWebAdapter,
+  createChatGptWebAdapter as createChatGptWebAdapterImpl,
 } from "../src/adapters/chatgpt-web/index";
 import { SUMMARY_PREFIX } from "../src/responses/compaction";
 import {
@@ -50,6 +50,24 @@ import {
   structuredCompactionHandoffInstruction,
 } from "../src/adapters/chatgpt-web/native-compaction-control";
 import type { AdapterEvent, CodexParsedRequest, CodexProviderConfig } from "../src/types";
+
+const openLauncherAutomationSecurity = {
+  version: 1 as const,
+  paused: false,
+  revision: 0,
+  signal: null,
+  detectedAt: null,
+  resumedAt: null,
+};
+type ChatGptWebAdapterDependencies = NonNullable<Parameters<typeof createChatGptWebAdapterImpl>[1]>;
+function createChatGptWebAdapter(provider: CodexProviderConfig, dependencies: ChatGptWebAdapterDependencies = {}) {
+  const statusReader = dependencies.launcherAutomationSecurityStatus
+    ?? (provider.chatgptWeb?.browserHost === "launcher" ? async () => openLauncherAutomationSecurity : undefined);
+  return createChatGptWebAdapterImpl(provider, {
+    ...dependencies,
+    ...(statusReader ? { launcherAutomationSecurityStatus: statusReader } : {}),
+  });
+}
 
 /**
  * These fixtures hand the turn broker a Unix socket under their temp root. macOS puts TMPDIR at
@@ -264,6 +282,7 @@ test("active compaction delivers the current result and converts every later MCP
     broker.completeTool(token, request!.callId, {
       content: [{ type: "text", text: "current result" }],
     });
+    await Bun.sleep(0);
     await expect(current).resolves.toMatchObject({
       content: [{ type: "text", text: "current result" }],
     });
@@ -313,6 +332,7 @@ test("active compaction drains an MCP call already queued without an outer Codex
       isError: true,
     });
     expect(interrupted).toBe(1);
+    await Bun.sleep(0);
     await expect(invocation).resolves.toMatchObject({
       content: [{ type: "text", text: "compact instead" }],
       isError: true,

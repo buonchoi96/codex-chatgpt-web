@@ -10,6 +10,7 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   const rootPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
   const launcherPackage = JSON.parse(fs.readFileSync(path.join(launcherRoot, "package.json"), "utf8"));
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
 
   assert.equal(rootPackage.scripts["dev:live"], "bun run --cwd launcher dev:live");
   assert.equal(launcherPackage.scripts["dev:live"], "bun run scripts/dev-live.cjs");
@@ -30,4 +31,29 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   assert.match(source, /--strictPort/);
   assert.match(source, /restarting dev server without stopping the live runtime/);
   assert.match(source, /restarting the source launcher to recover it now/);
+  assert.match(source, /drainRuntimeForElectronRestart/);
+  assert.match(source, /waitForReplacementRuntime/);
+  assert.match(source, /recoverableTunnelHandoff/);
+  assert.match(source, /new AbortController\(\)/);
+  assert.match(source, /signal: controller\.signal/);
+  assert.match(source, /forceKill: false/);
+  assert.match(main, /preserveTunnel: runtimeSupervisor\?\.liveTunnelHandoffActive\(\) === true/);
+  assert.match(main, /cancelTurn: IS_DEV_PROFILE[\s\S]*cancelDevChatTurn\([\s\S]*brokerSocketPath[\s\S]*runtimeSupervisor\.cancelBrowserTurn/);
+  assert.doesNotMatch(main, /cancelTurn: IS_DEV_PROFILE \? undefined/);
+  assert.match(main, /runtime recovery failed/);
+});
+
+test("source live owns a tunnel handoff lease through Electron restarts and removes it before normal exit", () => {
+  const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live.cjs"), "utf8");
+  const lifecycle = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-lifecycle.cjs"), "utf8");
+  assert.match(source, /live-tunnel-lease\.cjs/);
+  assert.match(source, /CODEX_WEB_GPT_LIVE_TUNNEL_LEASE/);
+  assert.match(source, /createLiveTunnelLease/);
+  assert.match(source, /removeLiveTunnelLease/);
+  const mainStart = source.indexOf("async function main()");
+  assert.ok(source.indexOf("createLiveTunnelLease(liveTunnelLeasePath", mainStart)
+    < source.indexOf("startElectron();", mainStart));
+  assert.ok(source.indexOf("removeLiveTunnelLease(liveTunnelLeasePath") < source.indexOf("await waitForElectronShutdown(electron"));
+  assert.match(lifecycle, /waitForExit\(child, ELECTRON_SHUTDOWN_WAIT_MS, \{ forceKill: false \}\)/);
+  assert.match(lifecycle, /while \(child && child\.exitCode === null && child\.signalCode === null\)/);
 });

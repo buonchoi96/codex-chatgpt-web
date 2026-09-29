@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import {
-  createChatGptWebAdapter,
+  createChatGptWebAdapter as createChatGptWebAdapterImpl,
   type ChatGptZeroRiskManualControl,
 } from "../src/adapters/chatgpt-web/index";
 import { chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
@@ -23,6 +23,24 @@ afterAll(() => {
   chatGptTurnSessions.clear();
   rmSync(root, { recursive: true, force: true });
 });
+
+const openLauncherAutomationSecurity = {
+  version: 1 as const,
+  paused: false,
+  revision: 0,
+  signal: null,
+  detectedAt: null,
+  resumedAt: null,
+};
+type ChatGptWebAdapterDependencies = NonNullable<Parameters<typeof createChatGptWebAdapterImpl>[1]>;
+function createChatGptWebAdapter(provider: CodexProviderConfig, dependencies: ChatGptWebAdapterDependencies = {}) {
+  const statusReader = dependencies.launcherAutomationSecurityStatus
+    ?? (provider.chatgptWeb?.browserHost === "launcher" ? async () => openLauncherAutomationSecurity : undefined);
+  return createChatGptWebAdapterImpl(provider, {
+    ...dependencies,
+    ...(statusReader ? { launcherAutomationSecurityStatus: statusReader } : {}),
+  });
+}
 
 function request(turnId: string): CodexParsedRequest {
   const threadId = "thread_safe_adapter";

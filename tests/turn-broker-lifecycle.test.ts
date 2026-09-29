@@ -299,6 +299,46 @@ test("turn broker revokes only channels owned by the closed browser trace", asyn
   }
 });
 
+test("turn broker account-safety cancellation aborts the matching DEV response and revokes only its trace", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-safety-cancel-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  const environment = {
+    cwd: root,
+    roots: [root],
+    writableRoots: [root],
+    sandboxPolicy: { type: "dangerFullAccess" as const },
+    tools: [],
+  };
+  const targetTrace = "a1b2c3d4e5f6";
+  const targetController = new AbortController();
+  const otherController = new AbortController();
+  try {
+    const targetToken = await broker.register(environment, undefined, targetTrace, true);
+    await broker.register(environment, undefined, "f6e5d4c3b2a1", true);
+    broker.registerTraceAbortController(targetTrace, targetController);
+    broker.registerTraceAbortController("f6e5d4c3b2a1", otherController);
+
+    await expect(callTurnBroker<{
+      cancelled_responses: number;
+      revoked_turns: number;
+    }>(socketPath, {
+      method: "cancel_trace",
+      traceId: targetTrace,
+      reason: "account_security",
+    })).resolves.toEqual({ cancelled_responses: 1, revoked_turns: 1 });
+
+    expect(targetController.signal.aborted).toBe(true);
+    expect(otherController.signal.aborted).toBe(false);
+    expect(broker.externalOwnerActiveCount()).toBe(1);
+    await expect(callTurnBroker(socketPath, { method: "claim", token: targetToken }))
+      .rejects.toThrow(/already finished|invalid or expired/);
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function unansweredBrokerEndpoint(name: string, onConnection: (socket: Socket) => void) {
   const root = mkdtempSync(join(tmpdir(), name));
   const socketPath = defaultBrokerEndpoint(root);
@@ -335,7 +375,7 @@ test("bounded broker calls preserve server-owned closure before advancing the li
       const request = JSON.parse(chunk.toString().trim());
       const frame = JSON.stringify({ id: request.id, result: { ready: true } }) + "\n";
       socket.write(frame.slice(0, -1));
-      setImmediate(() => { socket.write(frame.slice(-1)); finishFrame(); });
+      setImmediate(() => { socket.write(frame.slice(-1), finishFrame); });
     });
   });
   await broker.listen();
@@ -348,7 +388,8 @@ test("bounded broker calls preserve server-owned closure before advancing the li
     await frameWritten;
     await Bun.sleep(25);
     expect(settled).toBeFalse();
-    peer.end();
+    peer.destroy();
+    await Bun.sleep(0);
     await expect(call).resolves.toEqual({ ready: true });
   } finally {
     peer?.destroy();
@@ -438,6 +479,44 @@ test("turn broker names the finished turn that owns a replayed handle", async ()
       wireName: "exec_command",
     });
     expect(unknownBinding).toBe("internal Codex turn binding is invalid or expired");
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch guard rejects an MCP call before it is queued or delivered", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-dispatch-guard-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  const guardedTraceIds: string[] = [];
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "guarded-trace");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    broker.setDispatchGuard(traceId => {
+      guardedTraceIds.push(traceId);
+      throw new Error("chatgpt_account_safety_stop");
+    });
+
+    await expect(callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: "call_guarded_mcp_123456789",
+      wireName: "exec_command",
+      arguments: { cmd: "must not be queued" },
+    }, null)).rejects.toThrow("chatgpt_account_safety_stop");
+    expect(guardedTraceIds).toEqual(["guarded-trace"]);
+
+    const abort = new AbortController();
+    const nextBatch = broker.nextToolBatch(token, abort.signal);
+    setTimeout(() => abort.abort(), 20);
+    await expect(nextBatch).rejects.toMatchObject({ name: "AbortError" });
   } finally {
     await broker.close();
     rmSync(root, { recursive: true, force: true });

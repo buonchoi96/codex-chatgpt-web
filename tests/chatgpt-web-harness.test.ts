@@ -7,11 +7,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildResponseJSON } from "../src/bridge";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
+import { ChatGptAccountSafety } from "../src/adapters/chatgpt-web/account-safety";
 import { ChatGptCompletionTracker, chatGptCompletionReceiptRecoveryPrompt, chatGptImageFilePayloads, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
 import { CHATGPT_TURN_REVISION_CONFLICT_MESSAGE, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds } from "../src/adapters/chatgpt-web/environment";
-import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebExecutionNamespace, chatGptWebTraceId, createChatGptWebAdapter } from "../src/adapters/chatgpt-web/index";
+import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebExecutionNamespace, chatGptWebTraceId, createChatGptWebAdapter as createChatGptWebAdapterImpl } from "../src/adapters/chatgpt-web/index";
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer } from "../src/adapters/chatgpt-web/markdown";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import {
@@ -33,13 +34,32 @@ const tempRoot = join(tmpdir(), `codex-chatgpt-web-harness-${process.pid}-${Date
 mkdirSync(tempRoot, { recursive: true });
 afterAll(() => rmSync(tempRoot, { recursive: true, force: true }));
 
+const openLauncherAutomationSecurity = {
+  version: 1 as const,
+  paused: false,
+  revision: 0,
+  signal: null,
+  detectedAt: null,
+  resumedAt: null,
+};
+type ChatGptWebAdapterDependencies = NonNullable<Parameters<typeof createChatGptWebAdapterImpl>[1]>;
+function createChatGptWebAdapter(provider: CodexProviderConfig, dependencies: ChatGptWebAdapterDependencies = {}) {
+  const statusReader = dependencies.launcherAutomationSecurityStatus
+    ?? (provider.chatgptWeb?.browserHost === "launcher" ? async () => openLauncherAutomationSecurity : undefined);
+  return createChatGptWebAdapterImpl(provider, {
+    ...dependencies,
+    ...(statusReader ? { launcherAutomationSecurityStatus: statusReader } : {}),
+  });
+}
+
 test("completion receipt recovery uses the dedicated terminal tool for complete and blocked outcomes", () => {
   const prompt = chatGptCompletionReceiptRecoveryPrompt(1, 2, "turn_abcdefghijklmnopqrstuvwxyz012345");
   expect(prompt).toContain("dedicated codex_turn_complete tool");
+  expect(prompt).toContain("codex_tool_call with wire_name codex.control.turn_complete");
   expect(prompt).toContain("state=complete");
   expect(prompt).toContain("state=blocked");
   expect(prompt).toContain("safety-blocked required tool");
-  expect(prompt).not.toContain("wire_name codex.control.turn_complete");
+  expect(prompt).toContain("If the current connector reports codex_turn_complete is not callable or missing");
 });
 
 test("Full Harness transport keeps command results intermediate until the completion receipt", () => {
@@ -51,7 +71,8 @@ test("Full Harness transport keeps command results intermediate until the comple
   );
   expect(compiled.text).toContain("Treat every command, inspection, inventory lookup, and intermediate tool result as progress only.");
   expect(compiled.text).toContain("A successful command or inspection is only an intermediate checkpoint");
-  expect(compiled.text).toContain("dedicated codex_turn_complete");
+  expect(compiled.text).toContain("call codex_turn_complete directly when it is callable on the current connector surface");
+  expect(compiled.text).toContain("wire_name codex.control.turn_complete");
 });
 
 test("current-turn MCP progress tracks active calls without claiming completion", async () => {
@@ -254,6 +275,116 @@ function rawWireRequest(environmentText: string): CodexParsedRequest {
   return request;
 }
 
+test("Launcher account-safety latch rejects a routed turn before browser work", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const socketPath = brokerTestEndpoint(`launcher-safety-turn-${suffix}`);
+  const safetyPath = join(tempRoot, `launcher-safety-turn-${suffix}.json`);
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: `browser://launcher-safety-turn-${suffix}`,
+    chatgptWeb: {
+      browserHost: "launcher",
+      browserHostDescriptorPath: join(tempRoot, `launcher-safety-turn-${suffix}.json`),
+      accountSafetyStatePath: safetyPath,
+      brokerSocketPath: socketPath,
+      localToolsEnabled: false,
+      solAvailable: true,
+      extraHighAvailable: true,
+      proAvailable: true,
+    },
+  };
+  const worker = ChatGptBrowserWorker.forProvider(provider);
+  const originalRun = worker.run.bind(worker);
+  let browserStarts = 0;
+  (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async () => {
+    browserStarts += 1;
+    throw new Error("browser must not start while the Launcher latch is paused");
+  };
+  const accountSafety = new ChatGptAccountSafety(safetyPath);
+  const paused = {
+    version: 1 as const,
+    paused: true,
+    revision: 2,
+    signal: "cloudflare_challenge" as const,
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: null,
+  };
+  try {
+    const adapter = createChatGptWebAdapter(provider, {
+      accountSafety,
+      launcherAutomationSecurityStatus: async () => paused,
+    });
+    await expect(adapter.runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, () => {}))
+      .rejects.toMatchObject({ code: "chatgpt_account_safety_stop", retryable: false });
+    expect(browserStarts).toBe(0);
+    expect(accountSafety.status(undefined, undefined, [])).toMatchObject({
+      state: "HARD_STOP",
+      reason: "account_security",
+    });
+  } finally {
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+    await TurnBroker.forSocket(socketPath).close();
+    rmSync(safetyPath, { force: true });
+  }
+});
+
+test("Launcher status outage blocks the active MCP call and does not persist an unresumable latch", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const socketPath = brokerTestEndpoint(`launcher-safety-mcp-${suffix}`);
+  const safetyPath = join(tempRoot, `launcher-safety-mcp-${suffix}.json`);
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: `browser://launcher-safety-mcp-${suffix}`,
+    chatgptWeb: {
+      browserHost: "launcher",
+      browserHostDescriptorPath: join(tempRoot, `launcher-safety-mcp-${suffix}.json`),
+      accountSafetyStatePath: safetyPath,
+      brokerSocketPath: socketPath,
+      localToolsEnabled: false,
+      solAvailable: true,
+      extraHighAvailable: true,
+      proAvailable: true,
+    },
+  };
+  const accountSafety = new ChatGptAccountSafety(safetyPath);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const adapter = createChatGptWebAdapter(provider, {
+      broker,
+      accountSafety,
+      launcherAutomationSecurityStatus: async () => {
+        throw new Error("simulated Launcher control outage");
+      },
+    });
+    await expect(adapter.runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, () => {}))
+      .rejects.toMatchObject({ code: "chatgpt_account_safety_status_unavailable", retryable: false });
+    const token = await broker.register({
+      cwd: tempRoot,
+      roots: [tempRoot],
+      writableRoots: [tempRoot],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "launcher-status-outage-trace");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    await expect(callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: "call_launcher_outage_12345",
+      wireName: "exec_command",
+      arguments: { cmd: "must not be queued" },
+    }, null)).rejects.toThrow("Launcher account-safety status could not be verified");
+    expect(accountSafety.status(undefined, undefined, [])).toMatchObject({ state: "NORMAL" });
+
+    const abort = new AbortController();
+    const nextBatch = broker.nextToolBatch(token, abort.signal);
+    setTimeout(() => abort.abort(), 20);
+    await expect(nextBatch).rejects.toMatchObject({ name: "AbortError" });
+  } finally {
+    await broker.close();
+    rmSync(safetyPath, { force: true });
+  }
+});
+
 function canonicalCurrentWireRequest(environmentText: string): CodexParsedRequest {
   const request = rawWireRequest(environmentText);
   const raw = request._rawBody as {
@@ -386,6 +517,59 @@ describe("ChatGPT outer-native harness v4", () => {
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
       await TurnBroker.forSocket(socketPath).close();
+    }
+  });
+
+  test("uses the browser-verified final when Native2 final output disagrees", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-h3-native-output-conflict-${process.pid}-${Date.now()}`);
+    const provider: CodexProviderConfig = {
+      adapter: "chatgpt-web",
+      baseUrl: `browser://native-output-conflict-${Date.now()}`,
+      chatgptWeb: {
+        brokerSocketPath: socketPath,
+        localToolsEnabled: true,
+        solAvailable: true,
+        extraHighAvailable: true,
+        proAvailable: true,
+      },
+    };
+    const broker = TurnBroker.forSocket(socketPath);
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const originalRun = worker.run.bind(worker);
+    const browserAnswer = "Browser-verified final answer.";
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+      const prepared = await turn.prepare();
+      try {
+        const token = prepared.text.match(/"turn_token":"(turn_[A-Za-z0-9_-]+)"/)?.[1];
+        if (!token) throw new Error("native-output test turn has no broker token");
+        turn.onSubmitted?.();
+        broker.submitOutput(token, "final", "A different Native2 final answer.");
+        turn.onTextDelta(browserAnswer);
+        return browserAnswer;
+      } finally {
+        prepared.release();
+      }
+    };
+
+    const events: AdapterEvent[] = [];
+    try {
+      await createChatGptWebAdapter(provider, { broker }).runTurn!(
+        rawWireRequest(environmentXml),
+        { headers: new Headers() },
+        event => events.push(event),
+      );
+
+      expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
+      expect(events
+        .filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => event.type === "text_delta")
+        .filter(event => event.phase === "final_answer")
+        .map(event => event.text)
+        .join(""))
+        .toBe(browserAnswer);
+    } finally {
+      (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+      chatGptTurnSessions.clear();
+      await broker.close();
     }
   });
 
@@ -2418,6 +2602,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }, 10_000);
     await broker.nextToolBatch(token);
     broker.revoke(token);
+    await Bun.sleep(0);
     await expect(invocation).rejects.toThrow("revoked");
     await expect(callTurnBroker(socketPath, { method: "resolve", bindingId: claimed.bindingId }))
       .rejects.toThrow("has already finished");

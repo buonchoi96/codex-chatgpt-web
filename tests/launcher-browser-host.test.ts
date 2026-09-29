@@ -9,12 +9,15 @@ import {
   LauncherManualTurnTimedOutError,
   LauncherRetainedConversationUnavailableError,
   LauncherBrowserTurnCancelledError,
+  LauncherAccountSafetyStopError,
+  LauncherAutomationSecurityStatusUnavailableError,
   endLauncherManualTurn,
   inspectLauncherBrowserHost,
   inspectLauncherBrowserHostLiveness,
   notifyLauncherTurn,
   markLauncherManualTurnStarted,
   readLauncherBrowserHostDescriptor,
+  readLauncherAutomationSecurityStatus,
   releaseLauncherRetainedConversation,
   selectLauncherPage,
   startLauncherManualTurn,
@@ -25,6 +28,89 @@ import type { Browser, BrowserContext, Page } from "playwright-core";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 
 const roots: string[] = [];
+
+test("launcher automation-security status uses authenticated loopback control and validates the finite record", async () => {
+  const record = {
+    version: 1,
+    paused: true,
+    revision: 3,
+    signal: "cloudflare_challenge",
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: null,
+  } as const;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
+    expect(req.method).toBe("GET");
+    expect(new URL(req.url).pathname).toBe("/v1/automation-security/status");
+    expect(req.headers.get("authorization")).toBe("Bearer launcher-control-token-0123456789abcdefghijklmnop");
+    return Response.json({ automationSecurity: record });
+  } });
+  try {
+    const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
+    await expect(readLauncherAutomationSecurityStatus(descriptor)).resolves.toEqual(record);
+  } finally { server.stop(true); }
+});
+
+test("launcher automation-security status fails closed on invalid records", async () => {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+    return Response.json({ automationSecurity: { version: 1, paused: false, revision: -1 } });
+  } });
+  try {
+    const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
+    await expect(readLauncherAutomationSecurityStatus(descriptor))
+      .rejects.toBeInstanceOf(LauncherAutomationSecurityStatusUnavailableError);
+  } finally { server.stop(true); }
+});
+
+test("account-safety stop remains typed through automatic and manual Launcher controls and BrowserWorker", async () => {
+  const automationSecurity = {
+    version: 1,
+    paused: true,
+    revision: 4,
+    signal: "security_challenge",
+    detectedAt: "2026-09-29T07:00:00.000Z",
+    resumedAt: null,
+  } as const;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+    expect(req.method).toBe("POST");
+    return Response.json({
+      error: "ChatGPT Web automation is paused by account safety",
+      code: "chatgpt_account_safety_stop",
+      signal: automationSecurity.signal,
+      automationSecurity,
+    }, { status: 409 });
+  } });
+  try {
+    const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
+    const activity = { phase: "start" as const, traceId: "guarded-launcher", helperPid: process.pid };
+    await expect(notifyLauncherTurn(descriptor, activity)).rejects.toMatchObject({
+      name: "LauncherAccountSafetyStopError",
+      code: "chatgpt_account_safety_stop",
+      retryable: false,
+      signal: automationSecurity.signal,
+      automationSecurity,
+    });
+    await expect(startLauncherManualTurn(descriptor, {
+      traceId: activity.traceId,
+      helperPid: process.pid,
+      prompt: "Inspect a local task",
+    })).rejects.toBeInstanceOf(LauncherAccountSafetyStopError);
+
+    const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+      config: { browserHost: "launcher", browserHostDescriptorPath: descriptor },
+      runBrowserTurn: async () => "must not start",
+    });
+    await expect(worker.runExclusive({
+      traceId: activity.traceId,
+      capabilities: { localToolsEnabled: false },
+    })).rejects.toMatchObject({
+      status: 403,
+      code: "chatgpt_account_safety_stop",
+      retryable: false,
+      signal: automationSecurity.signal,
+      launcherAutomationSecurity: automationSecurity,
+    });
+  } finally { server.stop(true); }
+});
 
 test("a blocked sign-in replaces an opaque navigation abort with a non-retryable session error", async () => {
   let needsSignIn: unknown = true;

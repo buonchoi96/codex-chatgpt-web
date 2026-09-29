@@ -95,6 +95,8 @@ class BrowserControlServer {
       writeJson(response, 401, { error: "unauthorized" });
       return;
     }
+    const isAutomationSecurityStatus = request.method === "GET"
+      && request.url === "/v1/automation-security/status";
     const isTurn = request.url === "/v1/turn/start"
       || request.url === "/v1/turn/heartbeat"
       || request.url === "/v1/turn/usage"
@@ -110,11 +112,24 @@ class BrowserControlServer {
       ["/v1/manual/end", "end"],
       ["/v1/manual/cancel", "cancel"],
     ]).get(request.url);
-    if (request.method !== "POST" || (!isTurn && !isTurnRelease && !isSessionInspect && !isProxyResolution && !manualAction)) {
+    if (!isAutomationSecurityStatus && (request.method !== "POST"
+      || (!isTurn && !isTurnRelease && !isSessionInspect && !isProxyResolution && !manualAction))) {
       writeJson(response, 404, { error: "not_found" });
       return;
     }
     try {
+      if (isAutomationSecurityStatus) {
+        const host = this.getBrowserHost();
+        if (!host || typeof host.automationSecurityStatus !== "function") {
+          writeJson(response, 503, {
+            error: "automation security status is unavailable",
+            code: "chatgpt_account_safety_status_unavailable",
+          });
+          return;
+        }
+        writeJson(response, 200, { automationSecurity: host.automationSecurityStatus() });
+        return;
+      }
       const body = await readJson(
         request,
         manualAction === "start" ? MAX_MANUAL_START_BODY_BYTES : MAX_BODY_BYTES,
@@ -357,9 +372,10 @@ class BrowserControlServer {
       const manualInspectionDisabled = error?.code === "manual_browser_inspection_disabled";
       const manualOwnerLost = error?.code === "manual_turn_owner_lost";
       const manualTimedOut = error?.code === "manual_turn_timed_out";
+      const accountSafetyStop = error?.code === "chatgpt_account_safety_stop";
       writeJson(
         response,
-        cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost
+        accountSafetyStop || cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost
           ? 409
           : manualTimedOut ? 408 : 400,
         {
@@ -369,6 +385,11 @@ class BrowserControlServer {
         ...(manualInspectionDisabled ? { code: "manual_browser_inspection_disabled" } : {}),
         ...(manualOwnerLost ? { code: "manual_turn_owner_lost" } : {}),
         ...(manualTimedOut ? { code: "manual_turn_timed_out" } : {}),
+        ...(accountSafetyStop ? {
+          code: "chatgpt_account_safety_stop",
+          ...(typeof error.signal === "string" ? { signal: error.signal } : {}),
+          ...(error.automationSecurity ? { automationSecurity: error.automationSecurity } : {}),
+        } : {}),
         },
       );
     }
