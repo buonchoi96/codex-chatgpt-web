@@ -395,6 +395,26 @@ test("saved ChatGPT authentication is refreshed before setup is presented", () =
   assert.match(appSource, /browser\?\.status === "loading" \? copy\.checkingSignIn/);
 });
 
+test("production runtime startup re-verifies the model catalog even when the bridge route is unchanged", () => {
+  const productionStartup = electronMain.indexOf("} else void (async () => {");
+  const readyStart = electronMain.indexOf('if (runtime.status === "ready") {', productionStartup);
+  const readyEnd = electronMain.indexOf('if (runtime.status === "not-configured")', readyStart);
+  const ready = electronMain.slice(readyStart, readyEnd);
+
+  assert.ok(readyStart > productionStartup && readyEnd > readyStart);
+  assert.match(ready, /codexCatalogVerified: false,/);
+  assert.doesNotMatch(
+    ready,
+    /runtime\.bridgeRouteChanged[\s\S]*?codexCatalogVerified: false/,
+    "catalog verification must not depend on the route URL changing",
+  );
+  assert.match(ready, /runtime\.bridgeRouteChanged[\s\S]*?codexRestartRequired: true/);
+  assert.ok(
+    ready.indexOf("codexCatalogVerified: false") < ready.indexOf("startCatalogVerificationMonitor"),
+    "the stale persisted verification bit must be cleared before the current daemon is probed",
+  );
+});
+
 test("completed model setup remains a repeatable capability probe", () => {
   assert.match(appSource, /<SetupRow[\s\S]*?onAction=\{install\}[\s\S]*?repeatable/);
   assert.match(appSource, /complete && !repeatable/);

@@ -1427,8 +1427,11 @@ async function start() {
         experimentalFreshConversationPerTurn: config.experimentalFreshConversationPerTurn === true,
         useSavedChats: config.useSavedChats === true,
         zeroRiskProEnabled: config.zeroRiskProEnabled === true,
+        // Catalog counters belong to the current daemon process. Electron can relaunch and
+        // start a fresh daemon while keeping the exact same bridge route, so a persisted
+        // verification bit from the previous daemon is not evidence for this runtime.
+        codexCatalogVerified: false,
         ...(runtime.bridgeRouteChanged ? {
-          codexCatalogVerified: false,
           codexRestartRequired: true,
         } : {}),
         ...(config.mode === "browser-only" ? {
