@@ -26,15 +26,20 @@ export type ChatGptWebModelFamily = "5.6" | "6";
  * (commonly a much smaller effective window); routed Web rows must not inherit that value.
  */
 export const CHATGPT_WEB_MODEL_CONTEXT_WINDOW = 1_050_000;
+/** Nominal one-megatoken reference used by the Settings percentage slider. */
+export const CHATGPT_WEB_AUTO_COMPACT_REFERENCE_WINDOW = 1_048_576;
+export const CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN = 5;
+export const CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX = 95;
+export const CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT = 26;
 /**
- * Codex clamps auto_compact_token_limit to 90% of resolved_context_window. Automatic Web routes
- * therefore advertise a calibrated raw window while keeping the effective usable window exactly
- * equal to the real 1,050,000-token Web model window:
- * floor(1,105,264 * 95 / 100) = 1,050,000, while floor(1,105,264 * 90 / 100)
- * = 994,737, safely above the explicit 986,000 compaction threshold.
+ * Codex clamps auto_compact_token_limit to 90% of resolved_context_window. Web routes therefore
+ * advertise a calibrated raw window while keeping the effective usable window exactly equal to the
+ * real 1,050,000-token Web model window:
+ * floor(1,117,022 * 94 / 100) = 1,050,000, while floor(1,117,022 * 90 / 100)
+ * = 1,005,319, safely above the slider maximum of 996,000 tokens.
  */
-export const CHATGPT_WEB_CODEX_CONTEXT_WINDOW = 1_105_264;
-export const CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 95;
+export const CHATGPT_WEB_CODEX_CONTEXT_WINDOW = 1_117_022;
+export const CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 94;
 
 /**
  * These are Web-product compaction heuristics, not model context windows. They keep completed
@@ -50,14 +55,14 @@ export const CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 95;
  * Browser/composer pressure is handled independently by archive/file transport, so it must not
  * force semantic compaction at the old 32K/80K heuristics.
  */
-export const CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT = 986_000;
+export const CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT = 272_000;
 export const CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 /**
  * Zero Risk remains a manual-paste workflow, so preserve its existing manual three-turn budget
  * independently of automatic archive transport.
  */
 export const CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW = CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
-export const CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT = 96_000;
+export const CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 export const CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 export const CHATGPT_WEB_INSTANT_COMPOSER_CHAR_LIMIT = 211_256;
 export const CHATGPT_WEB_MEDIUM_HIGH_COMPOSER_CHAR_LIMIT = 1_048_572;
@@ -79,7 +84,7 @@ export const CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT = 104_000;
  */
 export const CHATGPT_WEB_ZERO_RISK_PRO_CONTEXT_WINDOW =
   CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
-export const CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT = 285_000;
+export const CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
 export const CHATGPT_WEB_PRO_INSTANT_COMPOSER_CHAR_LIMIT = 545_000;
 // Rechecked 2026-09-19: Pro-account Medium/High accept 500k characters but the server
 // rejects larger messages with HTTP 413 (message_length_exceeds_limit), even below
@@ -112,6 +117,15 @@ export interface ChatGptWebTransportLimits {
   browserComposerCharLimit?: number;
 }
 
+export function chatGptWebAutoCompactTokenLimit(percent = CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT): number {
+  if (!Number.isInteger(percent)
+    || percent < CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN
+    || percent > CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX) {
+    throw new Error(`ChatGPT Web auto compact percentage must be an integer from ${CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN} to ${CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX}`);
+  }
+  return Math.floor((CHATGPT_WEB_AUTO_COMPACT_REFERENCE_WINDOW * percent / 100) / 1_000) * 1_000;
+}
+
 export function isChatGptWebZeroRiskBackendModel(
   model: string,
 ): model is ChatGptWebZeroRiskBackendModel {
@@ -142,54 +156,22 @@ export function resolveChatGptWebContextLimits(
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
 ): ChatGptWebContextLimits {
+  const autoCompactTokenLimit = chatGptWebAutoCompactTokenLimit(
+    capabilities.autoCompactPercent ?? CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT,
+  );
   if (isChatGptWebZeroRiskBackendModel(backendModel)) {
-    if (capabilities.experimentalBiggerContext) {
-      throw new Error("Zero Risk does not support Bigger Context");
-    }
-    if (backendModel === CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL) {
-      return contextLimits(
-        CHATGPT_WEB_ZERO_RISK_PRO_CONTEXT_WINDOW,
-        CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT,
-      );
-    }
-    return contextLimits(
-      CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT,
-    );
+    if (capabilities.experimentalBiggerContext) throw new Error("Zero Risk does not support Bigger Context");
+    return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
   if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
-    // Luna carries continuity through a private checkpoint on every completed browser turn. Codex
-    // internally clamps this field to 90% of the model window, but the reported active usage is the
-    // bounded payload actually sent to ChatGPT and therefore stays far below that threshold.
-    return contextLimits(
-      CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
-      CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT,
-      CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
-    );
+    return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
-
-  let autoCompactTokenLimit: number;
-  if (capabilities.proAvailable) {
-    autoCompactTokenLimit = CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT;
-  } else if (effort === "low") {
-    autoCompactTokenLimit = CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT;
-  } else if (effort === "medium" || effort === "high" || (effort === "xhigh" && capabilities.extraHighAvailable)) {
-    autoCompactTokenLimit = CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT;
-  } else {
+  if (!capabilities.proAvailable
+    && effort !== "low" && effort !== "medium" && effort !== "high"
+    && !(effort === "xhigh" && capabilities.extraHighAvailable)) {
     throw new Error(`ChatGPT Plus context limit is not defined for unavailable effort: ${effort}`);
   }
-  if (!capabilities.experimentalBiggerContext) {
-    return contextLimits(
-      CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
-      autoCompactTokenLimit,
-      CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
-    );
-  }
-  return contextLimits(
-    CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
-    autoCompactTokenLimit * CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER,
-    CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
-  );
+  return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
 }
 
 /** Resolve limits of one visible ChatGPT composer message, independently of model context. */
@@ -288,6 +270,8 @@ export interface ChatGptWebAccountCapabilities {
   experimentalBiggerContext?: boolean;
   browserInteractionMode?: "automatic" | "manual";
   zeroRiskProEnabled?: boolean;
+  /** One global auto-compaction threshold shared by every routed ChatGPT Web model. */
+  autoCompactPercent?: number;
 }
 
 export const CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {

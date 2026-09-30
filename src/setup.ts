@@ -54,6 +54,7 @@ export interface SetupOptions {
   forceLogin?: boolean;
   autoApproveToolCalls?: boolean;
   experimentalBiggerContext?: boolean;
+  autoCompactPercent?: number;
   experimentalSkillAttachments?: boolean;
   experimentalFreshConversationPerTurn?: boolean;
   useSavedChats?: boolean;
@@ -134,6 +135,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     host: before.host,
     port: before.port,
     contextWindow: before.contextWindow,
+    autoCompactPercent: before.autoCompactPercent,
     appName: before.appName,
     automaticAppName: before.automaticAppName,
     manualAppName: before.manualAppName,
@@ -165,6 +167,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     host: after.host,
     port: after.port,
     contextWindow: after.contextWindow,
+    autoCompactPercent: after.autoCompactPercent,
     appName: after.appName,
     automaticAppName: after.automaticAppName,
     manualAppName: after.manualAppName,
@@ -288,6 +291,12 @@ function baseConfig(
   }
   if (options.experimentalBiggerContext !== undefined) {
     config.experimentalBiggerContext = options.experimentalBiggerContext;
+  }
+  if (options.autoCompactPercent !== undefined) {
+    if (!Number.isInteger(options.autoCompactPercent) || options.autoCompactPercent < 5 || options.autoCompactPercent > 95) {
+      throw new Error("--auto-compact-percent must be an integer from 5 to 95");
+    }
+    config.autoCompactPercent = options.autoCompactPercent;
   }
   if (options.zeroRiskProEnabled !== undefined) {
     if (config.browserInteractionMode !== "manual") {

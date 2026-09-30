@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import {
   CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL,
   CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
+  CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT,
+  CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN,
+  CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX,
 } from "./chatgpt-web-models";
 import type { CodexProviderConfig } from "./types";
 import { VERSION } from "./version";
@@ -104,6 +107,7 @@ export interface AppConfig {
   host: "127.0.0.1";
   port: number;
   contextWindow: number;
+  autoCompactPercent: number;
   appName: string;
   automaticAppName: string;
   manualAppName: string;
@@ -237,6 +241,7 @@ export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
     host: "127.0.0.1",
     port: 17841,
     contextWindow: 256_000,
+    autoCompactPercent: CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT,
     appName: CHATGPT_CONNECTOR_NAME,
     automaticAppName: CHATGPT_CONNECTOR_NAME,
     manualAppName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
@@ -436,6 +441,12 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (!Number.isSafeInteger(parsed.contextWindow) || parsed.contextWindow! <= 0) {
     throw new Error(`Invalid contextWindow in ${path}`);
   }
+  const autoCompactPercent = parsed.autoCompactPercent ?? CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT;
+  if (!Number.isInteger(autoCompactPercent)
+    || autoCompactPercent < CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN
+    || autoCompactPercent > CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX) {
+    throw new Error(`Invalid autoCompactPercent in ${path}; expected an integer from ${CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN} to ${CHATGPT_WEB_AUTO_COMPACT_PERCENT_MAX}`);
+  }
   if (typeof parsed.headed !== "boolean") throw new Error(`Invalid headed in ${path}`);
   if (typeof parsed.autoApproveToolCalls !== "boolean") {
     throw new Error(`Invalid autoApproveToolCalls in ${path}`);
@@ -577,6 +588,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
     manualAppName,
     browserInteractionMode,
     subagentProtocol,
+    autoCompactPercent,
     solAvailable,
     proAvailable,
     experimentalBiggerContext,

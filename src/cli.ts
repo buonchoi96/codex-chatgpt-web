@@ -77,6 +77,7 @@ Setup options:
   --restart-service            Explicitly restart this project's daemon after an update
   --login                      Refresh the stored ChatGPT login even if one exists
   --auto-approve-tool-calls    Opt in to per-call browser clicks on "Allow once" prompts
+  --auto-compact-percent N     Auto-compact all ChatGPT Web models at 5-95% (default: 26)
   --bigger-context             Enable experimental adaptive 1/2/6-message context
   --fresh-conversation         Start each automatic turn in a fresh browser chat
   --retained-conversation      Reuse the browser chat between turns (default)
@@ -326,6 +327,14 @@ async function setupCommand(args: string[]): Promise<void> {
     throw new Error("Choose at most one context mode: --bigger-context or --standard-context");
   }
   if (biggerContext || standardContext) options.experimentalBiggerContext = biggerContext;
+  const autoCompactPercentRaw = takeOption(args, "--auto-compact-percent");
+  if (autoCompactPercentRaw !== undefined) {
+    const autoCompactPercent = Number(autoCompactPercentRaw);
+    if (!Number.isInteger(autoCompactPercent) || autoCompactPercent < 5 || autoCompactPercent > 95) {
+      throw new Error("--auto-compact-percent must be an integer from 5 to 95");
+    }
+    options.autoCompactPercent = autoCompactPercent;
+  }
   if (skillAttachments || inlineSkills) options.experimentalSkillAttachments = skillAttachments;
   const zeroRiskPro = takeFlag(args, "--zero-risk-pro");
   const zeroRiskDefault = takeFlag(args, "--zero-risk-default");
