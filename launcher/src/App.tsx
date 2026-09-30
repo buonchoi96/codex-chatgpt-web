@@ -1681,11 +1681,15 @@ function SettingsSurface({
   const currentPluginName = snapshot.connectorNames[snapshot.state.browserInteractionMode];
   const [nameSuffix, setNameSuffix] = useState(currentPluginName.slice(6));
   const [confirmNameChange, setConfirmNameChange] = useState(false);
+  const [autoCompactDraft, setAutoCompactDraft] = useState(snapshot.state.autoCompactPercent);
   const proposedName = `Codex ${nameSuffix.trim()}`;
   useEffect(() => {
     setNameSuffix(currentPluginName.slice(6));
     setConfirmNameChange(false);
   }, [currentPluginName]);
+  useEffect(() => {
+    setAutoCompactDraft(snapshot.state.autoCompactPercent);
+  }, [snapshot.state.autoCompactPercent]);
   const changePluginName = async () => {
     setBusy(true);
     setError(null);
@@ -1735,6 +1739,19 @@ function SettingsSurface({
     try {
       updateState(await api!.setBiggerContext(enabled));
     } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const commitAutoCompactPercent = async (percent: number) => {
+    if (percent === snapshot.state.autoCompactPercent) return;
+    setBusy(true);
+    setError(null);
+    try {
+      updateState(await api!.setAutoCompactPercent(percent));
+    } catch (cause) {
+      setAutoCompactDraft(snapshot.state.autoCompactPercent);
       setError(messageOf(cause));
     } finally {
       setBusy(false);
@@ -1861,6 +1878,27 @@ function SettingsSurface({
               .then(updateState)
               .catch((cause) => setError(messageOf(cause)))}
           />
+        </SettingRow>
+        <SettingRow body={copy.autoCompactContextBody} label={copy.autoCompactContext}>
+          <div className="auto-compact-slider">
+            <output aria-live="polite">
+              {autoCompactDraft}% ({Math.floor((1_048_576 * autoCompactDraft / 100) / 1_000)}K)
+            </output>
+            <input
+              aria-label={copy.autoCompactContext}
+              disabled={busy || snapshot.state.coreSetupComplete !== true}
+              max={95}
+              min={5}
+              onBlur={() => void commitAutoCompactPercent(autoCompactDraft)}
+              onChange={(event) => setAutoCompactDraft(Number(event.target.value))}
+              onKeyUp={() => void commitAutoCompactPercent(autoCompactDraft)}
+              onPointerUp={() => void commitAutoCompactPercent(autoCompactDraft)}
+              step={1}
+              type="range"
+              value={autoCompactDraft}
+            />
+            <span className="auto-compact-range"><small>5%</small><small>95%</small></span>
+          </div>
         </SettingRow>
         <SettingRow
           body={snapshot.state.browserInteractionMode === "manual"

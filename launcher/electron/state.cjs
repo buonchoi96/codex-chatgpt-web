@@ -34,6 +34,7 @@ const DEFAULT_STATE = Object.freeze({
   showBrowserDuringTurns: true,
   browserInteractionMode: "automatic",
   experimentalBiggerContext: false,
+  autoCompactPercent: 26,
   experimentalSkillAttachments: false,
   experimentalFreshConversationPerTurn: false,
   useSavedChats: false,
@@ -144,6 +145,11 @@ function readState(filePath) {
   }
   if (state.browserInteractionMode !== "automatic" && state.browserInteractionMode !== "manual") {
     state.browserInteractionMode = DEFAULT_STATE.browserInteractionMode;
+  }
+  if (!Number.isInteger(state.autoCompactPercent)
+    || state.autoCompactPercent < 5
+    || state.autoCompactPercent > 95) {
+    state.autoCompactPercent = DEFAULT_STATE.autoCompactPercent;
   }
   if (state.coreSetupComplete !== true) {
     if (state.onboardingComplete !== true) state.browserInteractionMode = "automatic";

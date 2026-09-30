@@ -1136,6 +1136,40 @@ class RuntimeHost {
     return { ...result, mode, enabled: enabled === true };
   }
 
+  async setAutoCompactPercent(percent) {
+    if (!Number.isInteger(percent) || percent < 5 || percent > 95) {
+      throw new Error("Auto compact percentage must be an integer from 5 to 95");
+    }
+    const current = this.runtimeConfigSnapshot();
+    if (!current.configured) {
+      throw new Error("Initialize the runtime before changing auto compact context");
+    }
+    const development = this.launcherProfile === "development";
+    const args = [
+      ...(development ? ["dev", "setup"] : ["setup"]),
+      current.mode === "full" ? "--full" : "--browser-only",
+      "--browser-host-descriptor",
+      this.browserDescriptorPath,
+      ...this.browserInteractionArgs(),
+      "--acknowledge-unofficial",
+      ...(development ? [] : ["--replace-codex-route", "--restart-service"]),
+      "--auto-compact-percent",
+      String(percent),
+    ];
+    if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
+    const options = {
+      message: `Setting auto compact context to ${percent}%`,
+      successMessage: development
+        ? `Auto compact context set to ${percent}%`
+        : `Auto compact context set to ${percent}%; restart Codex`,
+      timeoutMs: CORE_SETUP_TIMEOUT_MS,
+    };
+    const result = development
+      ? await this.runDevSetup("auto-compact-percent", args, options)
+      : await this.runSetup("auto-compact-percent", args, options);
+    return { ...result, percent };
+  }
+
   async setSkillAttachments(enabled) {
     const current = this.runtimeConfigSnapshot();
     if (!current.configured) throw new Error("Initialize the runtime before changing Skills as files");

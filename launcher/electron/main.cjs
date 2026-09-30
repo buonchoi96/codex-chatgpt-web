@@ -534,7 +534,7 @@ function syncFreshConversationPreference(stateStore, config) {
 function registerIpc({ logger, stateStore }) {
   const runtimeChannels = new Set([
     "launcher:setup-core", "launcher:setup-mcp", "launcher:uninstall-integration",
-    "launcher:bigger-context", "launcher:skill-attachments", "launcher:fresh-conversation-per-turn",
+    "launcher:bigger-context", "launcher:auto-compact-percent", "launcher:skill-attachments", "launcher:fresh-conversation-per-turn",
     "launcher:use-saved-chats", "launcher:zero-risk-pro", "launcher:browser-interaction-mode",
     "launcher:connector-name", "launcher:mcp-verify", "launcher:doctor", "launcher:cancel-turns",
     "launcher:browser-passkey-login", "launcher:browser-logout", "launcher:browser-smoke",
@@ -918,6 +918,24 @@ function registerIpc({ logger, stateStore }) {
       experimentalBiggerContext: result.enabled,
       codexCatalogVerified: IS_DEV_PROFILE ? true : false,
       codexRestartRequired: IS_DEV_PROFILE ? false : true,
+    });
+    send("launcher:state-changed", state);
+    if (!IS_DEV_PROFILE) startCatalogVerificationMonitor({ logger, stateStore });
+    return state;
+  });
+  handle("launcher:auto-compact-percent", async (_event, rawPercent) => {
+    const percent = Number(rawPercent);
+    if (!Number.isInteger(percent) || percent < 5 || percent > 95) {
+      throw new Error("Auto compact percentage must be an integer from 5 to 95");
+    }
+    if (browserHost.activeTraceId || browserHost.currentOperation()) {
+      throw new Error("Finish or cancel active ChatGPT turns before changing auto compact context");
+    }
+    const result = await runtimeHost.setAutoCompactPercent(percent);
+    const state = stateStore.update({
+      autoCompactPercent: result.percent,
+      codexCatalogVerified: IS_DEV_PROFILE,
+      codexRestartRequired: !IS_DEV_PROFILE,
     });
     send("launcher:state-changed", state);
     if (!IS_DEV_PROFILE) startCatalogVerificationMonitor({ logger, stateStore });
@@ -1343,6 +1361,7 @@ async function start() {
       codexRestartRequired: false,
       autoStart: false,
       experimentalBiggerContext: config?.experimentalBiggerContext === true,
+      autoCompactPercent: Number.isInteger(config?.autoCompactPercent) ? config.autoCompactPercent : 26,
       experimentalSkillAttachments: config?.experimentalSkillAttachments === true,
       experimentalFreshConversationPerTurn: config?.experimentalFreshConversationPerTurn === true,
       useSavedChats: config?.useSavedChats === true,
@@ -1372,6 +1391,8 @@ async function start() {
         codexCatalogVerified: false,
         codexRestartRequired: true,
         experimentalBiggerContext: runtimeHost.runtimeConfigSnapshot().config?.experimentalBiggerContext === true,
+        autoCompactPercent: Number.isInteger(runtimeHost.runtimeConfigSnapshot().config?.autoCompactPercent)
+          ? runtimeHost.runtimeConfigSnapshot().config.autoCompactPercent : 26,
         experimentalSkillAttachments: runtimeHost.runtimeConfigSnapshot().config?.experimentalSkillAttachments === true,
         experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
         useSavedChats: runtimeHost.runtimeConfigSnapshot().config?.useSavedChats === true,
@@ -1397,6 +1418,8 @@ async function start() {
     const configuredRuntime = runtimeHost.runtimeConfigSnapshot();
     if (configuredRuntime.configured) {
       const enabled = configuredRuntime.config?.experimentalBiggerContext === true;
+      const autoCompactPercent = Number.isInteger(configuredRuntime.config?.autoCompactPercent)
+        ? configuredRuntime.config.autoCompactPercent : 26;
       const experimentalSkillAttachments = configuredRuntime.config?.experimentalSkillAttachments === true;
       const experimentalFreshConversationPerTurn = configuredRuntime.config?.experimentalFreshConversationPerTurn === true;
       const useSavedChats = configuredRuntime.config?.useSavedChats === true;
@@ -1406,8 +1429,16 @@ async function start() {
         || saved.experimentalFreshConversationPerTurn !== experimentalFreshConversationPerTurn
         || saved.useSavedChats !== useSavedChats
         || saved.experimentalBiggerContext !== enabled
+        || saved.autoCompactPercent !== autoCompactPercent
         || saved.zeroRiskProEnabled !== zeroRiskProEnabled) {
-        const state = stateStore.update({ experimentalBiggerContext: enabled, experimentalSkillAttachments, experimentalFreshConversationPerTurn, useSavedChats, zeroRiskProEnabled });
+        const state = stateStore.update({
+          experimentalBiggerContext: enabled,
+          autoCompactPercent,
+          experimentalSkillAttachments,
+          experimentalFreshConversationPerTurn,
+          useSavedChats,
+          zeroRiskProEnabled,
+        });
         send("launcher:state-changed", state);
       }
     }
@@ -1423,6 +1454,7 @@ async function start() {
         coreSetupComplete: true,
         mcpRuntimeInstalled: config.mode === "full",
         experimentalBiggerContext: config.experimentalBiggerContext === true,
+        autoCompactPercent: Number.isInteger(config.autoCompactPercent) ? config.autoCompactPercent : 26,
         experimentalSkillAttachments: config.experimentalSkillAttachments === true,
         experimentalFreshConversationPerTurn: config.experimentalFreshConversationPerTurn === true,
         useSavedChats: config.useSavedChats === true,
