@@ -10,6 +10,17 @@ const electronMain = fs.readFileSync(path.join(launcherRoot, "electron", "main.c
 const browserHostSource = fs.readFileSync(path.join(launcherRoot, "electron", "browser-host.cjs"), "utf8");
 const preloadSource = fs.readFileSync(path.join(launcherRoot, "electron", "preload.cjs"), "utf8");
 
+test("renderer exposes a persisted global auto compact slider", () => {
+  assert.match(appSource, /type="range"/);
+  assert.match(appSource, /min=\{5\}/);
+  assert.match(appSource, /max=\{95\}/);
+  assert.match(appSource, /autoCompactDraft/);
+  assert.match(appSource, /1_048_576/);
+  assert.match(appSource, /setAutoCompactPercent/);
+  assert.match(preloadSource, /launcher:auto-compact-percent/);
+  assert.match(electronMain, /launcher:auto-compact-percent/);
+});
+
 test("Bigger Context waits for startup and route recovery without invalidating healthy setup", async () => {
   const vm = require("node:vm");
   for (const fails of [false, true]) {

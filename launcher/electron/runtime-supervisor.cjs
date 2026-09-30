@@ -280,6 +280,12 @@ function validateConfig(config, descriptorPath, platform = process.platform, lau
     && typeof config.experimentalBiggerContext !== "boolean") {
     throw new Error("Runtime configuration has an invalid experimentalBiggerContext");
   }
+  if (config.autoCompactPercent !== undefined
+    && (!Number.isInteger(config.autoCompactPercent)
+      || config.autoCompactPercent < 5
+      || config.autoCompactPercent > 95)) {
+    throw new Error("Runtime configuration has an invalid autoCompactPercent");
+  }
   if (config.experimentalFreshConversationPerTurn !== undefined
     && typeof config.experimentalFreshConversationPerTurn !== "boolean") {
     throw new Error("Runtime configuration has an invalid experimentalFreshConversationPerTurn");
