@@ -42,7 +42,7 @@ describe("fixed ChatGPT Web model routes", () => {
   test("global auto compact percentage maps 26% to 272K and spans 5-95%", () => {
     expect(chatGptWebAutoCompactTokenLimit()).toBe(272_000);
     expect(chatGptWebAutoCompactTokenLimit(5)).toBe(52_000);
-    expect(chatGptWebAutoCompactTokenLimit(95)).toBe(9272_000);
+    expect(chatGptWebAutoCompactTokenLimit(95)).toBe(996_000);
     expect(() => chatGptWebAutoCompactTokenLimit(4)).toThrow("5 to 95");
     expect(() => chatGptWebAutoCompactTokenLimit(96)).toThrow("5 to 95");
   });

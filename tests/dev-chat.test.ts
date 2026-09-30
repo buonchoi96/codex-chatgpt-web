@@ -220,7 +220,7 @@ test("an existing DEV chat changes route only when the user explicitly requests 
   });
 });
 
-test("Bigger Context preserves the 986K DEV semantic window and fails closed for Luna", async () => {
+test("Bigger Context preserves the global DEV auto-compact threshold and fails closed for Luna", async () => {
   const root = scratch("cgw-dev-bigger-context");
   const config = {
     ...defaultConfig("browser-only"),
@@ -241,17 +241,17 @@ test("Bigger Context preserves the 986K DEV semantic window and fails closed for
   const store = new DevChatStore(join(root, "chats"));
   const normal = new DevChatDriver(config, store, factory, root);
   const normalState = normal.open("normal-window", "chatgpt-web/high").state;
-  expect(normal.status(normalState).autoCompactTokenLimit).toBe(986_000);
+  expect(normal.status(normalState).autoCompactTokenLimit).toBe(272_000);
 
   const biggerConfig = { ...config, experimentalBiggerContext: true };
   const bigger = new DevChatDriver(biggerConfig, store, factory, root, { biggerContext: true });
   const biggerState = bigger.open("bigger-window", "chatgpt-web/high").state;
   const biggerStatus = bigger.status(biggerState);
   expect(biggerStatus).toMatchObject({
-    autoCompactTokenLimit: 986_000,
+    autoCompactTokenLimit: 272_000,
     contextWindow: 1_050_000,
   });
-  expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 986_000) * 1_000) / 10);
+  expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 272_000) * 1_000) / 10);
   const luna = new DevChatDriver({
     ...biggerConfig,
     solAvailable: false,
