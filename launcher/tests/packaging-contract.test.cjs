@@ -208,6 +208,7 @@ test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   const release = fs.readFileSync(path.join(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
   assert.match(ci, /macos-15, ubuntu-latest, windows-latest/);
   assert.match(ci, /bun run app:package/);
+  assert.match(ci, /bun run app:package[\s\S]*CSC_FOR_PULL_REQUEST/);
   assert.match(ci, /bun run app:smoke/);
   assert.match(ci, /prepare-linux-libnotify\.sh/);
   assert.match(ci, /prepare-linux-appimage-tools\.cjs/);
