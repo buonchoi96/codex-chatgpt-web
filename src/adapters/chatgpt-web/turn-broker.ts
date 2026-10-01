@@ -241,6 +241,94 @@ function retiredTurnLabel(traceId: string): string {
   return traceId && traceId !== "unknown" ? `Codex turn ${traceId}` : "a Codex turn";
 }
 
+function textToolResult(text: string): { type: "text"; text: string } {
+  return { type: "text", text };
+}
+
+/**
+ * A completed delivered call can outlive the MCP response that originally requested it. If
+ * ChatGPT asks for another work tool before polling codex_tool_wait, surface the oldest retained
+ * result at that new boundary instead of allowing detached results to accumulate indefinitely.
+ *
+ * The newly requested operation is deliberately NOT executed. The textual envelope binds the
+ * canonical payload to its original call id so the model can consume it and then request the new
+ * operation again only if it is still needed.
+ */
+function detachedToolReplayResult(
+  originalCallId: string,
+  requestedWireName: string,
+  result: BrokerToolResult,
+): BrokerToolResult {
+  return {
+    content: [
+      textToolResult(
+        `<codex_detached_tool_result call_id="${originalCallId}">\n`
+        + `A previously delivered Codex Native operation completed after its MCP response deadline. `
+        + `The newly requested tool "${requestedWireName}" was NOT executed. Consume the authoritative `
+        + `result below for original call_id=${originalCallId}. Do not repeat that original operation. `
+        + "After consuming it, request the new tool again only if it is still needed.",
+      ),
+      ...structuredClone(result.content),
+      textToolResult("</codex_detached_tool_result>"),
+    ],
+    structuredContent: {
+      code: "codex_detached_tool_result_replayed",
+      original_call_id: originalCallId,
+      requested_tool: requestedWireName,
+      requested_tool_executed: false,
+      original_is_error: result.isError === true,
+      original_structured_content: result.structuredContent === undefined
+        ? null
+        : structuredClone(result.structuredContent),
+    },
+    // This envelope is control flow, not a failure of the newly requested operation: that operation
+    // did not run. The original result's own error bit remains explicit in structured metadata.
+    isError: false,
+  };
+}
+
+/**
+ * Automatic context compaction must never fail merely because completed detached results have not
+ * yet been polled. Carry those canonical results through the compaction control boundary, then
+ * clear the detached-result fence so the retained source can settle and produce its checkpoint.
+ */
+function compactionResultWithDetachedResults(
+  base: BrokerToolResult,
+  detached: Array<[string, BrokerToolResult]>,
+): BrokerToolResult {
+  if (detached.length === 0) return structuredClone(base);
+  const content = structuredClone(base.content);
+  content.push(textToolResult(
+    `<codex_detached_results_before_compaction count="${detached.length}">\n`
+    + "The following Codex Native operations already executed and completed after their original "
+    + "MCP response deadlines. Consume these authoritative results while preparing the compaction "
+    + "checkpoint. Do not retry the original operations.",
+  ));
+  for (const [callId, result] of detached) {
+    content.push(textToolResult(`<codex_detached_result call_id="${callId}">`));
+    content.push(...structuredClone(result.content));
+    content.push(textToolResult(`</codex_detached_result>`));
+  }
+  content.push(textToolResult("</codex_detached_results_before_compaction>"));
+  return {
+    ...structuredClone(base),
+    content,
+    structuredContent: {
+      code: "codex_compaction_carries_detached_results",
+      base_structured_content: base.structuredContent === undefined
+        ? null
+        : structuredClone(base.structuredContent),
+      detached_results: detached.map(([callId, result]) => ({
+        call_id: callId,
+        is_error: result.isError === true,
+        structured_content: result.structuredContent === undefined
+          ? null
+          : structuredClone(result.structuredContent),
+      })),
+    },
+  };
+}
+
 
 export interface BrokerToolResultDiagnostic {
   wireName: string;
@@ -887,11 +975,16 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.compactionRequested) {
       throw new Error("Codex context compaction was already requested for this turn");
     }
-    if (channel.detachedResults.size > 0) {
-      throw new Error("Codex context compaction cannot start while detached tool results are awaiting consumption");
-    }
+    const detached = [...channel.detachedResults.entries()];
     channel.compactionRequested = true;
-    channel.compactionResult = structuredClone(queuedResult);
+    channel.compactionResult = compactionResultWithDetachedResults(queuedResult, detached);
+    if (detached.length > 0) {
+      channel.detachedResults.clear();
+      channel.activityRevision += 1;
+      console.info(
+        `[chatgpt-web] broker trace=${channel.traceId} carried detached results into compaction count=${detached.length}`,
+      );
+    }
     if (channel.batchTimer) {
       clearTimeout(channel.batchTimer);
       channel.batchTimer = undefined;
@@ -1760,6 +1853,21 @@ export class TurnBroker implements TurnBrokerOwner {
     if (binding.channel.invocations.has(callId) || binding.channel.deliveredCallIds.has(callId)) {
       throw new Error("turn broker invocation call id is already active");
     }
+
+    // Do not let a model that forgot to poll codex_tool_wait strand completed work until context
+    // compaction. Any later work-tool boundary first drains the oldest detached result. The newly
+    // requested tool is not dispatched, so side effects cannot be duplicated or reordered.
+    const detached = binding.channel.detachedResults.entries().next();
+    if (!detached.done) {
+      const [originalCallId, retained] = detached.value;
+      binding.channel.detachedResults.delete(originalCallId);
+      binding.channel.activityRevision += 1;
+      console.info(
+        `[chatgpt-web] broker trace=${binding.channel.traceId} replayed detached result call=${originalCallId.slice(0, 17)} insteadOf=${wireName} remaining=${binding.channel.detachedResults.size}`,
+      );
+      return detachedToolReplayResult(originalCallId, wireName, retained);
+    }
+
     await this.dispatchGuard?.(binding.channel.traceId);
     if (socketSignal?.aborted) throw new Error("turn broker invocation was cancelled before dispatch");
     const toolRequest: BrokerToolRequest = {
