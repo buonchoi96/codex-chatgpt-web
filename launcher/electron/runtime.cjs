@@ -1136,6 +1136,36 @@ class RuntimeHost {
     return { ...result, mode, enabled: enabled === true };
   }
 
+  async setNativeFullAccess(enabled) {
+    if (this.launcherProfile !== "production") {
+      throw new Error("Native Full Access changes the real Codex policy and is unavailable in the isolated DEV launcher");
+    }
+    const current = this.runtimeConfigSnapshot();
+    if (!current.configured) {
+      throw new Error("Install the Codex integration before changing Native Full Access");
+    }
+    const args = [
+      "setup",
+      current.mode === "full" ? "--full" : "--browser-only",
+      "--browser-host-descriptor",
+      this.browserDescriptorPath,
+      ...this.browserInteractionArgs(),
+      "--replace-codex-route",
+      "--acknowledge-unofficial",
+      "--restart-service",
+      enabled === true ? "--native-full-access" : "--native-default-access",
+    ];
+    if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
+    const result = await this.runSetup("native-full-access", args, {
+      message: enabled ? "Enabling Native Full Access" : "Restoring native Codex access policy",
+      successMessage: enabled
+        ? "Native Full Access enabled; restart Codex"
+        : "Native Codex access policy restored; restart Codex",
+      timeoutMs: CORE_SETUP_TIMEOUT_MS,
+    });
+    return { ...result, mode: current.mode, enabled: enabled === true };
+  }
+
   async setAutoCompactPercent(percent) {
     if (!Number.isInteger(percent) || percent < 5 || percent > 95) {
       throw new Error("Auto compact percentage must be an integer from 5 to 95");
