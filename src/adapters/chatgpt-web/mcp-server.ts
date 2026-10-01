@@ -29,6 +29,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_apply_patch",
   "codex_view_image",
   "codex_tool_inventory",
+  "codex_tool_wait",
   "codex_readonly_tool_call",
   "codex_windows_computer_use_observe",
   "codex_windows_computer_use_action",
@@ -120,9 +121,9 @@ export const PARALLEL_COMMAND_RULE = "Parallel command fast path: when two or mo
 export const CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME = "codex.control.parallel_exec";
 export const PARALLEL_COMMAND_STABLE_ABI_RULE = `If the current connector does not expose codex_parallel_exec or reports it is not callable, immediately use codex_tool_call with wire_name ${CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME}; keep turn_token at the top level and pass {commands:[...]} in arguments. Do not pass codex_parallel_exec as an ordinary native wire name. This fallback applies the same 2–8 command schema and default-sandbox dispatch.`;
 export const WRITE_STDIN_TRANSPORT_RULE = "Long-running command transport: write_stdin is a poll/continuation tool, not a place to wait for several minutes in one MCP call. Keep each write_stdin yield_time at or below 60 seconds and poll the same session_id again if the process is still alive. This preserves the native session while staying below the bridge transport deadline.";
-// The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
-// must settle first so an abandoned native tool call is returned as an MCP error instead of
-// letting the tunnel tear down and poison its long-lived stdio transport.
+// The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP response
+// settles at 90 seconds, but a call already delivered to Codex is detached rather than cancelled:
+// the turn remains live and codex_tool_wait retrieves the eventual retained result.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
 export const CHATGPT_WEB_COMMAND_YIELD_MAX_MS = 30_000;
 export const CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS = 60_000;
@@ -140,6 +141,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Treat every explicit deliverable in the active Codex request as part of one task completion condition.",
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
+  "If a Codex Native call returns codex_tool_in_progress, the operation was already delivered and may still be running. Never repeat that original operation. Poll codex_tool_wait with the returned call_id until it yields the terminal tool result, then continue normally.",
   "A successful command, inspection, inventory lookup, or intermediate tool result is progress only. Do not end the response while any requested edit, test, validation, publication, or other actionable requirement remains; continue the Codex Native tool loop.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For native desktop automation, prefer an official OpenAI Codex Computer Use capability that is actually present in the current outer Codex registry.",
@@ -831,13 +833,25 @@ export async function runChatGptMcpServer(options: {
     } catch (error) {
       if (error instanceof TurnBrokerTimeoutError) {
         const toolName = wireName(tool);
-        let abandoned: { cancelled: boolean; delivered: boolean; pending: boolean };
+        let abandoned: {
+          cancelled: boolean;
+          delivered: boolean;
+          pending: boolean;
+          completed?: boolean;
+          toolResult?: BrokerToolResult;
+        };
         try {
-          abandoned = await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(
+          abandoned = await callTurnBroker<{
+            cancelled: boolean;
+            delivered: boolean;
+            pending: boolean;
+            completed?: boolean;
+            toolResult?: BrokerToolResult;
+          }>(
             options.brokerSocketPath,
             {
               method: "cancel_invoke",
-            bindingId,
+              bindingId,
               callId,
             },
           );
@@ -878,25 +892,50 @@ export async function runChatGptMcpServer(options: {
             message: `Codex did not claim ${toolName} before the MCP transport deadline. This invocation was cancelled before delivery, the current turn remains valid, and the operation may be retried.`,
           }, true);
         }
-        // Delivered (or already settled) calls can have side effects. A timeout after that boundary
-        // remains fail-closed so ChatGPT cannot unknowingly duplicate an in-flight native action.
-        try {
-          await callTurnBroker(options.brokerSocketPath, { method: "release", bindingId });
-        } catch (releaseError) {
-          throw new AggregateError(
-            [error, releaseError],
-            "Codex Native invocation timed out after delivery and its broker binding could not be retired",
+        // A completion can race the transport timer by a few milliseconds. If the broker already
+        // has the terminal result, return it instead of inventing a timeout or requiring a poll.
+        if (abandoned.completed && abandoned.toolResult) {
+          console.error(
+            `[chatgpt-web-mcp] ${toolName} completed while its ${timeoutMs}ms transport deadline was being reconciled; returning retained result`,
           );
+          return asMcpResult(abandoned.toolResult);
         }
+
+        // Delivered calls may already be executing side effects. The 90-second budget belongs only
+        // to this MCP response transport; it is not permission to revoke the browser turn or kill
+        // the native operation. The broker marks the call detached, retains the eventual result,
+        // and completion fences remain blocked until ChatGPT consumes it through codex_tool_wait.
+        if (abandoned.delivered && abandoned.pending) {
+          console.error(
+            `[chatgpt-web-mcp] ${toolName} exceeded ${timeoutMs}ms after delivery; native operation remains active call=${callId.slice(0, 17)} bindingRetained=true`,
+          );
+          return result({
+            code: "codex_tool_in_progress",
+            tool: toolName,
+            call_id: callId,
+            timeout_ms: timeoutMs,
+            retryable: false,
+            turn_binding_retained: true,
+            operation_may_still_be_running: true,
+            poll_tool: "codex_tool_wait",
+            message: `Codex tool ${toolName} exceeded the MCP response deadline after it was already delivered. Do not retry the operation. The current turn remains valid and the native call continues; poll codex_tool_wait with call_id=${callId} until its terminal result is available.`,
+          }, true);
+        }
+
+        // If delivery state is neither pending nor safely cancelled, preserve fail-closed semantics
+        // without revoking an otherwise healthy turn. A later explicit user stop still owns turn
+        // cancellation.
         console.error(
-          `[chatgpt-web-mcp] ${toolName} did not complete within ${timeoutMs}ms after delivery; retired its turn binding`,
+          `[chatgpt-web-mcp] ${toolName} transport timeout had ambiguous delivery state call=${callId.slice(0, 17)} bindingRetained=true`,
         );
         return result({
-          code: "codex_tool_timeout",
+          code: "codex_tool_timeout_unknown_state",
           tool: toolName,
+          call_id: callId,
           timeout_ms: timeoutMs,
           retryable: false,
-          message: `Codex tool ${toolName} did not complete before the MCP transport deadline after it may have been delivered. The current turn binding was retired; do not retry it in this ChatGPT response.`,
+          turn_binding_retained: true,
+          message: `Codex tool ${toolName} reached the MCP response deadline with an ambiguous delivery state. Do not retry the operation automatically; the current turn binding remains valid.`,
         }, true);
       }
 
@@ -1282,6 +1321,72 @@ export async function runChatGptMcpServer(options: {
           next_offset: offset + page.length < total ? offset + page.length : null,
           ...(discoveryTools.length > 0 ? { discovery_tools: discoveryTools } : {}),
         });
+      },
+    ),
+  );
+
+  server.registerTool(
+    "codex_tool_wait",
+    {
+      title: "Poll a detached Codex Native tool result",
+      description: afterSafeStart(
+        contract,
+        "Poll the call_id returned by codex_tool_in_progress. This never starts or repeats the original operation. If it is still running, wait briefly before polling again; when complete, the original terminal tool result is returned and consumed.",
+      ),
+      inputSchema: {
+        ...turnReferenceInput(contract),
+        call_id: z.string().regex(/^call_[A-Za-z0-9_-]{16,128}$/),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input, extra) => withClaimedTurn(
+      "codex_tool_wait",
+      turnReference(contract, input),
+      extra,
+      async claimed => {
+        const response = await callTurnBroker<{
+          state?: unknown;
+          delivered?: unknown;
+          detached?: unknown;
+          toolResult?: BrokerToolResult;
+        }>(
+          options.brokerSocketPath,
+          {
+            method: "invoke_status",
+            bindingId: claimed.bindingId,
+            callId: input.call_id,
+          },
+          5_000,
+          extra.signal,
+        );
+        if (response.state === "completed" && response.toolResult) {
+          return asMcpResult(response.toolResult);
+        }
+        if (response.state === "running") {
+          return result({
+            code: "codex_tool_still_running",
+            call_id: input.call_id,
+            delivered: response.delivered === true,
+            detached: response.detached === true,
+            retryable: true,
+            retry_after_ms: 30_000,
+            message: "The original Codex Native operation is still running. Do not repeat it; poll codex_tool_wait with the same call_id again after about 30 seconds.",
+          });
+        }
+        if (response.state === "completed_elsewhere") {
+          return result({
+            code: "codex_tool_result_already_consumed",
+            call_id: input.call_id,
+            retryable: false,
+            message: "This Codex Native call already completed through its original response path; no detached result remains to consume.",
+          }, true);
+        }
+        return result({
+          code: "codex_tool_call_unknown",
+          call_id: input.call_id,
+          retryable: false,
+          message: "No pending or detached Codex Native result exists for this call_id in the current turn.",
+        }, true);
       },
     ),
   );
