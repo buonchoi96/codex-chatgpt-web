@@ -1381,6 +1381,9 @@ export function createChatGptWebAdapter(
                       if (handoffError.code === "compaction_source_stalled") {
                         return await runFreshCompaction("active_source_stalled_before_handoff");
                       }
+                      if (handoffError.code === "compaction_source_superseded") {
+                        return await runFreshCompaction("active_source_superseded_before_receipt");
+                      }
                     }
                     throw handoffError;
                   } finally {
