@@ -818,6 +818,42 @@ describe("trusted Codex task environment continuity", () => {
     });
   });
 
+  test("concurrent store instances merge persisted thread authority instead of overwriting peer snapshots", () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "codex-chatgpt-thread-environment-race-"));
+    temporaryRoots.push(stateRoot);
+    const statePath = join(stateRoot, "thread-environments.json");
+    const storeA = new ChatGptThreadEnvironmentStore(statePath);
+    const storeB = new ChatGptThreadEnvironmentStore(statePath);
+
+    const environmentless = (threadId: string, turnId: string): CodexParsedRequest => {
+      const request = currentWire({ threadId });
+      request._rawBody = {
+        client_metadata: {
+          "x-codex-turn-metadata": JSON.stringify({ thread_id: threadId, turn_id: turnId }),
+        },
+        input: [{
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Continue the task" }],
+        }],
+      };
+      return request;
+    };
+
+    // Prime both instances from the same empty on-disk snapshot. Before the merge-on-write fix,
+    // each instance later rewrote that stale snapshot and the second write deleted the first thread.
+    expect(() => storeA.resolve(environmentless("thread_prime_a", "turn_prime_a"))).toThrow("missing cwd");
+    expect(() => storeB.resolve(environmentless("thread_prime_b", "turn_prime_b"))).toThrow("missing cwd");
+
+    storeA.resolve(currentWire({ threadId: "thread_persist_a" }));
+    storeB.resolve(currentWire({ threadId: "thread_persist_b" }));
+
+    expect(new ChatGptThreadEnvironmentStore(statePath)
+      .resolve(environmentless("thread_persist_a", "turn_follow_a")).cwd).toBe(root);
+    expect(new ChatGptThreadEnvironmentStore(statePath)
+      .resolve(environmentless("thread_persist_b", "turn_follow_b")).cwd).toBe(root);
+  });
+
   test("does not borrow authority across threads or hide an invalid trusted update", () => {
     const store = new ChatGptThreadEnvironmentStore();
     store.resolve(currentWire());
