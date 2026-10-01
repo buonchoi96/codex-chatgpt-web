@@ -40,6 +40,7 @@ import {
   assertBuiltinModelProvider,
   assertPreservedPreviousAssignments,
   assertPreservedPreviousRealtimeAssignment,
+  installNativeFullAccess,
   installRoute,
   managedJournalIsActive,
   replacementBaseline,
@@ -53,7 +54,7 @@ import {
 function installConfiguredRoute(
   baseline: string,
   installedUrl: string,
-  config: Pick<AppConfig, "subagentProtocol"> & (
+  config: Pick<AppConfig, "subagentProtocol" | "nativeFullAccess"> & (
     Pick<AppConfig, "runtimeCommand"> | { interruptHookCommand: string }
   ),
   replaceExistingRoute: boolean,
@@ -66,6 +67,7 @@ function installConfiguredRoute(
   previousMultiAgentV2?: CodexIntegrationJournal["previousMultiAgentV2"];
   previousAgentMaxDepth?: CodexIntegrationJournal["previousAgentMaxDepth"];
   installedAgentMaxDepth?: number;
+  nativeFullAccess?: CodexIntegrationJournal["nativeFullAccess"];
   interruptHook: CodexIntegrationJournal["interruptHook"];
 } {
   const route = installRoute(
@@ -88,10 +90,18 @@ function installConfiguredRoute(
         };
       })()
     : route;
+  const nativeAccess = config.nativeFullAccess
+    ? installNativeFullAccess(configured.text)
+    : { text: configured.text, nativeFullAccess: undefined };
   const hook = "interruptHookCommand" in config
-    ? installCodexInterruptHookCommand(configured.text, getCodexConfigPath(), config.interruptHookCommand)
-    : installCodexInterruptHook(configured.text, getCodexConfigPath(), config);
-  return { ...configured, text: hook.text, interruptHook: hook.installed };
+    ? installCodexInterruptHookCommand(nativeAccess.text, getCodexConfigPath(), config.interruptHookCommand)
+    : installCodexInterruptHook(nativeAccess.text, getCodexConfigPath(), config);
+  return {
+    ...configured,
+    text: hook.text,
+    ...(nativeAccess.nativeFullAccess ? { nativeFullAccess: nativeAccess.nativeFullAccess } : {}),
+    interruptHook: hook.installed,
+  };
 }
 
 function journalProtocol(journal: Exclude<AnyCodexIntegrationJournal, { version: 2 }>): AppConfig["subagentProtocol"] {
@@ -299,6 +309,7 @@ export function installCodexIntegration(
       previousRealtimeWebrtcCallBaseUrl: preservePrevious && (existing.version === 9 || existing.version === 10)
         ? existing.previousRealtimeWebrtcCallBaseUrl
         : patched.previousRealtimeWebrtcCallBaseUrl,
+      ...(patched.nativeFullAccess ? { nativeFullAccess: patched.nativeFullAccess } : {}),
       interruptHook: patched.interruptHook,
       ...(config.subagentProtocol === "compatibility-v1" ? {
         previousMultiAgent: patched.previousMultiAgent,
@@ -346,6 +357,7 @@ export function installCodexIntegration(
     },
     previous: patched.previous,
     previousRealtimeWebrtcCallBaseUrl: patched.previousRealtimeWebrtcCallBaseUrl,
+    ...(patched.nativeFullAccess ? { nativeFullAccess: patched.nativeFullAccess } : {}),
     interruptHook: patched.interruptHook,
     ...(config.subagentProtocol === "compatibility-v1" ? {
       previousMultiAgent: patched.previousMultiAgent,
@@ -416,7 +428,11 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
   const route = installConfiguredRoute(
     baseline,
     existing.installed.openai_base_url,
-    { subagentProtocol: protocol, ...hookConfig },
+    {
+      subagentProtocol: protocol,
+      nativeFullAccess: existing.version === 10 && existing.nativeFullAccess !== undefined,
+      ...hookConfig,
+    },
     true,
     existing.version === 9 || existing.version === 10,
   );
@@ -443,6 +459,9 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
     previousRealtimeWebrtcCallBaseUrl: existing.version === 9 || existing.version === 10
       ? existing.previousRealtimeWebrtcCallBaseUrl
       : route.previousRealtimeWebrtcCallBaseUrl,
+    ...(existing.version === 10 && existing.nativeFullAccess
+      ? { nativeFullAccess: existing.nativeFullAccess }
+      : {}),
     interruptHook: route.interruptHook,
     ...(protocol === "compatibility-v1" ? {
       previousMultiAgent: route.previousMultiAgent,
