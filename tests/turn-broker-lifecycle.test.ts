@@ -577,7 +577,7 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
   }
 });
 
-test("a delivered invocation cannot be marked safe-to-retry by timeout cleanup", async () => {
+test("a delivered invocation detaches at transport timeout and its result remains consumable", async () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-broker-delivered-"));
   const socketPath = defaultBrokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
@@ -601,14 +601,50 @@ test("a delivered invocation cannot be marked safe-to-retry by timeout cleanup",
 
     const batch = await broker.nextToolBatch(token);
     expect(batch.map(item => item.callId)).toEqual([callId]);
-    expect(await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(socketPath, {
+    expect(await callTurnBroker<{
+      cancelled: boolean;
+      delivered: boolean;
+      pending: boolean;
+      completed: boolean;
+    }>(socketPath, {
       method: "cancel_invoke",
       bindingId: claimed.bindingId,
       callId,
-    })).toEqual({ cancelled: false, delivered: true, pending: true });
+    })).toEqual({ cancelled: false, delivered: true, pending: true, completed: false });
+
+    expect(await callTurnBroker(socketPath, {
+      method: "invoke_status",
+      bindingId: claimed.bindingId,
+      callId,
+    })).toEqual({ state: "running", delivered: true, detached: true });
 
     broker.completeTool(token, callId, { content: [{ type: "text", text: "ok" }] });
     expect(await pending).toEqual({ content: [{ type: "text", text: "ok" }] });
+
+    // A completed detached result is still unfinished turn work until ChatGPT consumes it.
+    expect(broker.beginCompletionFence(token)).toBeUndefined();
+    expect(await callTurnBroker(socketPath, {
+      method: "invoke_status",
+      bindingId: claimed.bindingId,
+      callId,
+    })).toEqual({
+      state: "completed",
+      toolResult: { content: [{ type: "text", text: "ok" }] },
+    });
+    expect(broker.beginCompletionFence(token)).toEqual(expect.any(Number));
+
+    // Retrieval is one-shot; a repeated poll cannot replay a tool result into model context.
+    expect(await callTurnBroker(socketPath, {
+      method: "invoke_status",
+      bindingId: claimed.bindingId,
+      callId,
+    })).toEqual({ state: "completed_elsewhere" });
+
+    // The binding itself remains valid after the long tool finishes.
+    expect(await callTurnBroker<{ environment: { cwd: string } }>(socketPath, {
+      method: "resolve",
+      bindingId: claimed.bindingId,
+    })).toMatchObject({ environment: { cwd: root } });
   } finally {
     await broker.close();
     rmSync(root, { recursive: true, force: true });
