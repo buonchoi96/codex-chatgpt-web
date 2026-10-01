@@ -53,6 +53,8 @@ interface PendingInvocation {
   request: BrokerToolRequest;
   resolve: (result: BrokerToolResult) => void;
   reject: (error: Error) => void;
+  /** The MCP response deadline elapsed after Codex had already received this call. */
+  detached?: boolean;
 }
 
 interface ToolWaiter {
@@ -98,6 +100,10 @@ interface TurnChannel {
   queuedCallIds: string[];
   deliveredCallIds: Set<string>;
   invocations: Map<string, PendingInvocation>;
+  /** Completed results whose original MCP response timed out after delivery; must be explicitly consumed. */
+  detachedResults: Map<string, BrokerToolResult>;
+  /** Small replay window closes the race where completion lands exactly as the transport deadline fires. */
+  recentToolResults: Map<string, BrokerToolResult>;
   waiters: Set<ToolWaiter>;
   toolCallsQueued: number;
   toolCallsCompleted: number;
@@ -137,6 +143,7 @@ interface BrokerRequest {
     | "release"
     | "invoke"
     | "cancel_invoke"
+    | "invoke_status"
     | "owner_status"
     | "owner_register"
     | "owner_register_safe"
@@ -205,6 +212,7 @@ interface BrokerResponse {
 const brokers = new Map<string, TurnBroker>();
 const MAX_BROKER_LINE_CHARS = 67_108_864;
 const MAX_RETIRED_TURN_HANDLES = 64;
+const MAX_RETAINED_TOOL_RESULTS = 64;
 
 export async function closeTurnBrokers(): Promise<void> {
   const active = [...brokers.values()];
@@ -473,6 +481,8 @@ export class TurnBroker implements TurnBrokerOwner {
       queuedCallIds: [],
       deliveredCallIds: new Set(),
       invocations: new Map(),
+      detachedResults: new Map(),
+      recentToolResults: new Map(),
       waiters: new Set(),
       toolCallsQueued: 0,
       toolCallsCompleted: 0,
@@ -627,6 +637,22 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     channel.invocations.delete(callId);
     channel.toolCallsCompleted += 1;
+    const retainedResult = structuredClone(result);
+    channel.recentToolResults.delete(callId);
+    channel.recentToolResults.set(callId, retainedResult);
+    while (channel.recentToolResults.size > MAX_RETAINED_TOOL_RESULTS) {
+      const oldest = channel.recentToolResults.keys().next();
+      if (oldest.done) break;
+      channel.recentToolResults.delete(oldest.value);
+    }
+    if (invocation.detached) {
+      channel.detachedResults.delete(callId);
+      channel.detachedResults.set(callId, structuredClone(retainedResult));
+      channel.activityRevision += 1;
+      console.info(
+        `[chatgpt-web] broker trace=${channel.traceId} retained detached tool result call=${callId.slice(0, 17)} pendingResults=${channel.detachedResults.size}`,
+      );
+    }
     console.info(
       `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
     );
@@ -672,8 +698,12 @@ export class TurnBroker implements TurnBrokerOwner {
         : "Codex Native output arrived after the final answer");
     }
     if (channel.completionCommitted) throw new Error("Codex Native output arrived after turn completion");
-    if (kind === "final" && (channel.activities.size > 0 || channel.invocations.size > 0)) {
-      throw new Error("Codex Native final output cannot be accepted while work tools are still active");
+    if (kind === "final" && (
+      channel.activities.size > 0
+      || channel.invocations.size > 0
+      || channel.detachedResults.size > 0
+    )) {
+      throw new Error("Codex Native final output cannot be accepted while work tools or detached results are still active");
     }
     if (channel.outputEvents.length >= 10_000 || channel.outputChars + text.length > 5_000_000) {
       throw new Error("Codex Native output exceeds the per-turn limit");
@@ -749,7 +779,9 @@ export class TurnBroker implements TurnBrokerOwner {
     const latest = channel.outputEvents.at(-1)?.sequence ?? 0;
     if (latest !== afterSequence) return false;
     if (channel.activityRevision !== expectedRevision
-      || channel.activities.size > 0 || channel.invocations.size > 0) return false;
+      || channel.activities.size > 0
+      || channel.invocations.size > 0
+      || channel.detachedResults.size > 0) return false;
     channel.outputSealed = true;
     channel.activityRevision += 1;
     return true;
@@ -782,8 +814,8 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!channel.activities.has(activityId)) {
       throw new Error("Native completion receipt must be submitted from the active MCP completion call");
     }
-    if (channel.invocations.size > 0 || channel.deliveredCallIds.size > 0) {
-      throw new Error("Completion rejected: Codex tool invocations are still pending");
+    if (channel.invocations.size > 0 || channel.deliveredCallIds.size > 0 || channel.detachedResults.size > 0) {
+      throw new Error("Completion rejected: Codex tool invocations or detached results are still pending");
     }
     if (receipt.remainingActionableRequirements.length > 0) {
       throw new Error(
@@ -814,7 +846,7 @@ export class TurnBroker implements TurnBrokerOwner {
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
     if (channel.completionCommitted) return channel.completionRevision;
-    if (channel.activities.size > 0 || channel.invocations.size > 0) return undefined;
+    if (channel.activities.size > 0 || channel.invocations.size > 0 || channel.detachedResults.size > 0) return undefined;
     if (channel.requireNativeCompletionReceipt && !channel.nativeCompletionReceipt) return undefined;
     return channel.activityRevision;
   }
@@ -830,7 +862,8 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.requireNativeCompletionReceipt && !channel.nativeCompletionReceipt) return false;
     if (channel.activityRevision !== revision
       || channel.activities.size > 0
-      || channel.invocations.size > 0) return false;
+      || channel.invocations.size > 0
+      || channel.detachedResults.size > 0) return false;
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
@@ -853,6 +886,9 @@ export class TurnBroker implements TurnBrokerOwner {
     this.assertSafeHarnessRunning(channel);
     if (channel.compactionRequested) {
       throw new Error("Codex context compaction was already requested for this turn");
+    }
+    if (channel.detachedResults.size > 0) {
+      throw new Error("Codex context compaction cannot start while detached tool results are awaiting consumption");
     }
     channel.compactionRequested = true;
     channel.compactionResult = structuredClone(queuedResult);
@@ -938,6 +974,9 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.invocations.size > 0) {
       throw new Error(`Zero Risk turn cannot complete with ${channel.invocations.size} pending Codex tool invocation(s)`);
     }
+    if (channel.detachedResults.size > 0) {
+      throw new Error(`Zero Risk turn cannot complete with ${channel.detachedResults.size} unconsumed detached Codex tool result(s)`);
+    }
     if (channel.activities.size > 0) {
       throw new Error(`Zero Risk turn cannot complete with ${channel.activities.size} active Codex MCP request(s)`);
     }
@@ -990,6 +1029,7 @@ export class TurnBroker implements TurnBrokerOwner {
       queuedTools: channel.queuedCallIds.length,
       deliveredTools: channel.deliveredCallIds.size,
       activeMcpRequests: channel.activities.size,
+      detachedToolResults: channel.detachedResults.size,
       completionCommitted: channel.completionCommitted,
     })}`);
     this.channels.delete(token);
@@ -1312,7 +1352,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "cancel_trace", "resolve", "release", "invoke", "cancel_invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
+    if (!["claim", "cancel_trace", "resolve", "release", "invoke", "cancel_invoke", "invoke_status", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1639,12 +1679,27 @@ export class TurnBroker implements TurnBrokerOwner {
       }
       const invocation = binding.channel.invocations.get(callId);
       if (!invocation) {
-        return { cancelled: false, delivered: false, pending: false };
+        const completed = binding.channel.recentToolResults.get(callId);
+        if (completed) {
+          return {
+            cancelled: false,
+            delivered: true,
+            pending: false,
+            completed: true,
+            toolResult: structuredClone(completed),
+          };
+        }
+        return { cancelled: false, delivered: false, pending: false, completed: false };
       }
       if (binding.channel.deliveredCallIds.has(callId)) {
-        // Once Codex has received the call it may already be executing a side effect. The caller
-        // must fail closed rather than making a retry look safe.
-        return { cancelled: false, delivered: true, pending: true };
+        // Once Codex has received the call it may already be executing a side effect. Detach only
+        // the expired MCP response; keep the turn and native operation alive so its result can be
+        // consumed later by invoke_status without duplicating the operation.
+        if (!invocation.detached) {
+          invocation.detached = true;
+          binding.channel.activityRevision += 1;
+        }
+        return { cancelled: false, delivered: true, pending: true, completed: false };
       }
       binding.channel.invocations.delete(callId);
       binding.channel.queuedCallIds = binding.channel.queuedCallIds.filter(id => id !== callId);
@@ -1653,7 +1708,31 @@ export class TurnBroker implements TurnBrokerOwner {
       console.info(
         `[chatgpt-web] broker trace=${binding.channel.traceId} abandoned queued call=${callId.slice(0, 17)} bindingRetained=true`,
       );
-      return { cancelled: true, delivered: false, pending: false };
+      return { cancelled: true, delivered: false, pending: false, completed: false };
+    }
+    if (request.method === "invoke_status") {
+      const callId = request.callId?.trim();
+      if (!callId || !/^call_[A-Za-z0-9_-]{16,128}$/.test(callId)) {
+        throw new Error("turn broker invocation call id is invalid");
+      }
+      const pending = binding.channel.invocations.get(callId);
+      if (pending) {
+        return {
+          state: "running",
+          delivered: binding.channel.deliveredCallIds.has(callId),
+          detached: pending.detached === true,
+        };
+      }
+      const completed = binding.channel.detachedResults.get(callId);
+      if (completed) {
+        binding.channel.detachedResults.delete(callId);
+        binding.channel.activityRevision += 1;
+        return { state: "completed", toolResult: structuredClone(completed) };
+      }
+      if (binding.channel.recentToolResults.has(callId)) {
+        return { state: "completed_elsewhere" };
+      }
+      return { state: "unknown" };
     }
     if (request.method === "release") {
       this.revoke(binding.token);
@@ -1761,6 +1840,8 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.waiters.clear();
     for (const invocation of channel.invocations.values()) invocation.reject(error);
     channel.invocations.clear();
+    channel.detachedResults.clear();
+    channel.recentToolResults.clear();
     channel.queuedCallIds = [];
     channel.deliveredCallIds.clear();
   }
