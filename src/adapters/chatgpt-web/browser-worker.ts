@@ -4329,6 +4329,7 @@ export class ChatGptBrowserWorker {
       CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
     );
     const responseDomCache: ChatGptResponseDomCache = {};
+    const deliveryTimeoutTracker = new ChatGptMessageDeliveryTimeoutTracker();
     let responseTurn = initialResponseTurn;
     for (;;) {
       if (page.isClosed()) throw chatGptBrowserTabClosedError();
@@ -4360,7 +4361,6 @@ export class ChatGptBrowserWorker {
           snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
         }
       }
-      if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
       const externalProgressSnapshot = externalProgress?.snapshot();
       if (externalProgress
         && externalProgressSnapshot
@@ -4376,9 +4376,30 @@ export class ChatGptBrowserWorker {
         Date.now(),
       );
       const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-      if (!snapshot.responsePresent && externalProgressLive) {
-        // Proven MCP activity outranks a momentarily unavailable staging DOM, exactly as it does
-        // in the main turn loop.
+      const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
+      if (!deliveryTimeoutProtectsActiveTool && snapshot.stoppedThinkingVisible) {
+        throw chatGptStoppedThinkingError();
+      }
+      if (deliveryTimeoutTracker.update({
+        alertVisible: deliveryTimeoutVisible,
+        visibleText: snapshot.visibleText,
+        traceBlocks: snapshot.traceBlocks,
+        externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+        externalToolCallsInFlight,
+      })) {
+        throw new ChatGptWebAdapterError(
+          "ChatGPT still displayed 'Message delivery timed out' after five minutes without backend or Codex Native progress, and no native command remained in flight.",
+          {
+            status: 504,
+            errorType: "server_error",
+            code: "browser_response_stalled",
+            retryable: true,
+          },
+        );
+      }
+      if (!snapshot.responsePresent && (externalProgressLive || deliveryTimeoutProtectsActiveTool)) {
+        // Proven MCP activity outranks a momentarily unavailable staging DOM. The exact delivery
+        // timeout condition additionally cannot retire a still-running native command.
         domHealthTracker.clearMissingResponse();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
@@ -4393,7 +4414,7 @@ export class ChatGptBrowserWorker {
         currentText: snapshot.visibleText,
         completionActionVisible: snapshot.completionActionVisible,
         composerReady,
-        externalProgressLive,
+        externalProgressLive: externalProgressLive || deliveryTimeoutProtectsActiveTool,
       });
       if (domError) throw new Error(domError);
       if (completionTracker.update({
@@ -6167,6 +6188,7 @@ export class ChatGptBrowserWorker {
           ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
           : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
       );
+      const deliveryTimeoutTracker = new ChatGptMessageDeliveryTimeoutTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -6195,8 +6217,8 @@ export class ChatGptBrowserWorker {
           throw new Error("ChatGPT web turn timed out");
         }
         await throwIfChatGptSessionFailureAlert(page);
-        await throwIfChatGptMessageDeliveryTimeoutAlert(page);
-        await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
+        const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
+        if (!deliveryTimeoutVisible) await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
 
         if (mode.localTools && await resolveChatGptToolConfirmation(
           page,
@@ -6254,26 +6276,11 @@ export class ChatGptBrowserWorker {
             continue;
           }
         }
-        if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
-        if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
-          await diagnostics.capture(page, "stream-recovery-polling-timeout").catch(() => {});
-          throw new ChatGptWebAdapterError(
-            "ChatGPT stream recovery polling timed out after the browser response stopped advancing. Retry the active Codex turn.",
-            {
-              status: 502,
-              errorType: "server_error",
-              code: "upstream_server_error",
-              retryable: true,
-            },
-          );
-        }
         if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
         // The page was read successfully, so the fault budget is genuinely consecutive even when
         // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
         internalObservationFaults = 0;
         observedThisIteration = true;
-        // Liveness may postpone a verdict, never waive it: once activity goes stale the DOM alone
-        // decides, so a tool call that never returns cannot hold a turn with no explicit deadline open forever.
         const externalProgressSnapshot = turn.externalProgress?.snapshot();
         if (turn.externalProgress
           && externalProgressSnapshot
@@ -6289,10 +6296,51 @@ export class ChatGptBrowserWorker {
           Date.now(),
         );
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-        if (!snapshot.responsePresent && externalProgressLive) {
-          // Current-turn MCP activity proves that ChatGPT is still executing even if its renderer
-          // temporarily cannot expose the response subtree. DOM remains authoritative for text and
-          // completion; this only prevents a live turn from being misclassified as vanished.
+        const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
+
+        // A delivery-timeout banner is a frontend transport symptom, not proof that the backend or
+        // Codex bridge stopped. While any native command remains in flight, response-level error UI
+        // cannot retire the turn. Once all commands finish, only five minutes without subsequent
+        // semantic/tool progress can do so.
+        if (!deliveryTimeoutProtectsActiveTool) {
+          if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
+          if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
+            await diagnostics.capture(page, "stream-recovery-polling-timeout").catch(() => {});
+            throw new ChatGptWebAdapterError(
+              "ChatGPT stream recovery polling timed out after the browser response stopped advancing. Retry the active Codex turn.",
+              {
+                status: 502,
+                errorType: "server_error",
+                code: "upstream_server_error",
+                retryable: true,
+              },
+            );
+          }
+        }
+
+        if (deliveryTimeoutTracker.update({
+          alertVisible: deliveryTimeoutVisible,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          externalToolCallsInFlight,
+        })) {
+          await diagnostics.capture(page, "message-delivery-timeout-semantic-stall").catch(() => {});
+          throw new ChatGptWebAdapterError(
+            "ChatGPT still displayed 'Message delivery timed out' after five minutes with no backend reasoning, ChatGPT activity, or Codex Native tool progress, and no native command remained in flight.",
+            {
+              status: 504,
+              errorType: "server_error",
+              code: "browser_response_stalled",
+              retryable: true,
+            },
+          );
+        }
+
+        if (!snapshot.responsePresent && (externalProgressLive || deliveryTimeoutProtectsActiveTool)) {
+          // Proven MCP activity outranks a momentarily unavailable response DOM. The delivery-timeout
+          // path additionally trusts an actually in-flight command even after the ordinary DOM-health
+          // liveness horizon, because the command itself is authoritative bridge activity.
           domHealthTracker.clearMissingResponse();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
@@ -6609,7 +6657,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: "",
             completionActionVisible: false,
-            externalProgressLive,
+            externalProgressLive: externalProgressLive || deliveryTimeoutProtectsActiveTool,
           });
           if (domError) throw new Error(domError);
         }
