@@ -38,10 +38,13 @@ test("a suspension re-baselines running leases and restores an unfinished bootst
   assert.equal(retained.lastHeartbeatAt, 5);
 });
 
-test("sleep is blocked exactly while a turn is running", () => {
-  assert.equal(shouldBlockSleepForTurns([]), false);
-  assert.equal(shouldBlockSleepForTurns([{ status: "ready" }, { status: "error" }]), false);
-  assert.equal(shouldBlockSleepForTurns([{ status: "ready" }, { status: "running" }]), true);
+test("sleep blocker never holds Windows DISPLAY while macOS still protects running turns", () => {
+  const running = [{ status: "ready" }, { status: "running" }];
+  assert.equal(shouldBlockSleepForTurns([], "darwin"), false);
+  assert.equal(shouldBlockSleepForTurns([{ status: "ready" }, { status: "error" }], "darwin"), false);
+  assert.equal(shouldBlockSleepForTurns(running, "darwin"), true);
+  assert.equal(shouldBlockSleepForTurns(running, "linux"), true);
+  assert.equal(shouldBlockSleepForTurns(running, "win32"), false);
 });
 
 test("the first sweep after a suspension refreshes stale leases instead of reaping them", () => {
