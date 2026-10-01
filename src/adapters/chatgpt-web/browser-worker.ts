@@ -4362,6 +4362,11 @@ export class ChatGptBrowserWorker {
         }
       }
       const externalProgressSnapshot = externalProgress?.snapshot();
+      const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
+      const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
+      if (!deliveryTimeoutProtectsActiveTool && snapshot.stoppedThinkingVisible) {
+        throw chatGptStoppedThinkingError();
+      }
       if (externalProgress
         && externalProgressSnapshot
         && completionTracker.needsToolBatchObservation(externalProgressSnapshot.lastToolBatchRevision)) {
@@ -4375,11 +4380,6 @@ export class ChatGptBrowserWorker {
         externalProgressSnapshot,
         Date.now(),
       );
-      const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-      const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
-      if (!deliveryTimeoutProtectsActiveTool && snapshot.stoppedThinkingVisible) {
-        throw chatGptStoppedThinkingError();
-      }
       if (deliveryTimeoutTracker.update({
         alertVisible: deliveryTimeoutVisible,
         visibleText: snapshot.visibleText,
@@ -6276,32 +6276,12 @@ export class ChatGptBrowserWorker {
             continue;
           }
         }
-        if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
-        // The page was read successfully, so the fault budget is genuinely consecutive even when
-        // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
-        internalObservationFaults = 0;
-        observedThisIteration = true;
         const externalProgressSnapshot = turn.externalProgress?.snapshot();
-        if (turn.externalProgress
-          && externalProgressSnapshot
-          && completionTracker.needsToolBatchObservation(externalProgressSnapshot.lastToolBatchRevision)) {
-          completionTracker.observeToolBatch(
-            externalProgressSnapshot.lastToolBatchRevision,
-            snapshot.visibleText,
-          );
-          await turn.externalProgress.acknowledgeToolBatch(externalProgressSnapshot.lastToolBatchRevision);
-        }
-        const externalProgressLive = chatGptExternalProgressSuppressesDomHealth(
-          externalProgressSnapshot,
-          Date.now(),
-        );
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
         const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
 
-        // A delivery-timeout banner is a frontend transport symptom, not proof that the backend or
-        // Codex bridge stopped. While any native command remains in flight, response-level error UI
-        // cannot retire the turn. Once all commands finish, only five minutes without subsequent
-        // semantic/tool progress can do so.
+        // Outside the exact delivery-timeout + active-tool exception, preserve the original
+        // response-error ordering: terminal UI wins before we acknowledge more MCP work.
         if (!deliveryTimeoutProtectsActiveTool) {
           if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
           if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
@@ -6317,6 +6297,30 @@ export class ChatGptBrowserWorker {
             );
           }
         }
+
+        if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
+        // The page was read successfully, so the fault budget is genuinely consecutive even when
+        // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
+        internalObservationFaults = 0;
+        observedThisIteration = true;
+        if (turn.externalProgress
+          && externalProgressSnapshot
+          && completionTracker.needsToolBatchObservation(externalProgressSnapshot.lastToolBatchRevision)) {
+          completionTracker.observeToolBatch(
+            externalProgressSnapshot.lastToolBatchRevision,
+            snapshot.visibleText,
+          );
+          await turn.externalProgress.acknowledgeToolBatch(externalProgressSnapshot.lastToolBatchRevision);
+        }
+        const externalProgressLive = chatGptExternalProgressSuppressesDomHealth(
+          externalProgressSnapshot,
+          Date.now(),
+        );
+
+        // A delivery-timeout banner is a frontend transport symptom, not proof that the backend or
+        // Codex bridge stopped. While any native command remains in flight, response-level error UI
+        // cannot retire the turn. Once all commands finish, only five minutes without subsequent
+        // semantic/tool progress can do so.
 
         if (deliveryTimeoutTracker.update({
           alertVisible: deliveryTimeoutVisible,
