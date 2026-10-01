@@ -34,6 +34,7 @@ const DEFAULT_STATE = Object.freeze({
   showBrowserDuringTurns: true,
   browserInteractionMode: "automatic",
   experimentalBiggerContext: false,
+  nativeFullAccess: false,
   autoCompactPercent: 26,
   experimentalSkillAttachments: false,
   experimentalFreshConversationPerTurn: false,
@@ -134,6 +135,7 @@ function readState(filePath) {
     "keepRunningOnClose",
     "showBrowserDuringTurns",
     "experimentalBiggerContext",
+    "nativeFullAccess",
     "experimentalSkillAttachments",
     "experimentalFreshConversationPerTurn",
     "useSavedChats",
@@ -154,6 +156,7 @@ function readState(filePath) {
   if (state.coreSetupComplete !== true) {
     if (state.onboardingComplete !== true) state.browserInteractionMode = "automatic";
     state.zeroRiskProEnabled = false;
+    state.nativeFullAccess = false;
   }
   if (state.browserSmokeVersion !== null
     && (typeof state.browserSmokeVersion !== "string" || state.browserSmokeVersion.length > 128)) {
