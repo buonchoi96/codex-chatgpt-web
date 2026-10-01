@@ -857,16 +857,25 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
-const chatGptMessageDeliveryTimeoutAlert = (page: Page): Locator => page
-  .locator('[role="alert"]')
-  .filter({ hasText: /Message delivery timed out\. Please try again\./i })
-  .last();
+const CHATGPT_MESSAGE_DELIVERY_TIMEOUT = /Message delivery timed out\. Please try again\./i;
+
+const chatGptMessageDeliveryTimeoutAlerts = (page: Page): Locator[] => [
+  page.locator('[role="alert"]').filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT }).last(),
+  // Some current ChatGPT Web builds render the same red delivery failure container without an
+  // ARIA alert role. Keep this fallback exact-text scoped so unrelated transcript text mentioning
+  // delivery timeouts can never terminate the turn.
+  page.getByText(CHATGPT_MESSAGE_DELIVERY_TIMEOUT, { exact: true }).last(),
+];
 
 export async function throwIfChatGptMessageDeliveryTimeoutAlert(page: Page): Promise<void> {
-  if (!await chatGptMessageDeliveryTimeoutAlert(page).isVisible().catch(() => false)) return;
-  // The Web app renders this failure as a page-level aside, outside the owned assistant turn.
+  const visible = await Promise.all(
+    chatGptMessageDeliveryTimeoutAlerts(page)
+      .map(locator => locator.isVisible().catch(() => false)),
+  );
+  if (!visible.some(Boolean)) return;
   // Never click Retry automatically: this turn may already have completed side-effectful Codex
-  // Native calls. Surface the same bounded transport failure used by terminal response errors.
+  // Native calls. Fail the physical response immediately and let bounded retained recovery decide
+  // whether the same conversation can continue safely.
   throw new ChatGptWebAdapterError(
     "ChatGPT reported that message delivery timed out. Retry the active Codex turn.",
     { status: 502, errorType: "server_error", code: "upstream_server_error", retryable: true },
