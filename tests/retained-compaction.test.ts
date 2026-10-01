@@ -49,6 +49,7 @@ import {
   CODEX_ACTIVE_COMPACTION_REQUEST_MARKER,
   structuredCompactionHandoffInstruction,
 } from "../src/adapters/chatgpt-web/native-compaction-control";
+import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
 import type { AdapterEvent, CodexParsedRequest, CodexProviderConfig } from "../src/types";
 
 const openLauncherAutomationSecurity = {
