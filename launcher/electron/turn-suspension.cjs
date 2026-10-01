@@ -33,11 +33,16 @@ function refreshTurnLeasesAfterSuspension(tabs, now, bootstrapTimeoutMs) {
 }
 
 /**
- * A power-save blocker belongs up exactly while at least one browser turn is running: an idle Mac
- * otherwise sleeps mid-turn, and no amount of wake-side tolerance recovers the minutes ChatGPT
- * spent frozen.
+ * A power-save blocker belongs up exactly while at least one browser turn is running on platforms
+ * where the Electron app-suspension blocker does not interfere with the user's display timeout.
+ *
+ * On Windows, real systems can expose Electron's prevent-app-suspension request under DISPLAY in
+ * powercfg /requests, preventing the monitor from turning off even though Electron documents the
+ * mode as display-safe. Do not install a Launcher power request on Windows. The existing
+ * suspension/resume lease re-baselining keeps browser turns recoverable if Windows later sleeps.
  */
-function shouldBlockSleepForTurns(tabs) {
+function shouldBlockSleepForTurns(tabs, platform = process.platform) {
+  if (platform === "win32") return false;
   for (const tab of tabs) {
     if (tab.status === "running") return true;
   }
