@@ -168,7 +168,7 @@ test("developer MCP capability loss is classified separately from ordinary missi
 });
 
 test("missing native completion receipt gets a progress-aware bounded same-turn continuation prompt", () => {
-  expect(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES).toBe(64);
+  expect(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES).toBe(8);
   expect(MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES).toBe(2);
   const turnToken = "turn_12345678901234567890123456789012";
   const prompt = chatGptCompletionReceiptRecoveryPrompt(
