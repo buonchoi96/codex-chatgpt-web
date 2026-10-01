@@ -674,7 +674,7 @@ test("a delivered invocation detaches at transport timeout and its result remain
 
 
 test("a later work-tool boundary drains an unpolled detached result before dispatch", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cgw-broker-detached-drain-"));
+  const root = mkdtempSync(join(tmpdir(), "cgd-"));
   const socketPath = defaultBrokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   try {
@@ -751,7 +751,7 @@ test("a later work-tool boundary drains an unpolled detached result before dispa
 });
 
 test("active compaction carries completed detached results instead of aborting the source turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cgw-broker-detached-compact-"));
+  const root = mkdtempSync(join(tmpdir(), "cgc-"));
   const socketPath = defaultBrokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   try {
