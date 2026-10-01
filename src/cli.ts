@@ -77,6 +77,8 @@ Setup options:
   --restart-service            Explicitly restart this project's daemon after an update
   --login                      Refresh the stored ChatGPT login even if one exists
   --auto-approve-tool-calls    Opt in to per-call browser clicks on "Allow once" prompts
+  --native-full-access             Set Codex sandbox_mode=danger-full-access and approval_policy=never
+  --native-default-access          Restore the Codex approval/sandbox policy that existed before Full Access
   --auto-compact-percent N     Auto-compact all ChatGPT Web models at 5-95% (default: 26)
   --bigger-context             Enable experimental adaptive 1/2/6-message context
   --fresh-conversation         Start each automatic turn in a fresh browser chat
@@ -308,6 +310,12 @@ async function setupCommand(args: string[]): Promise<void> {
   if (runtimeKeyFile) options.runtimeKeyFile = runtimeKeyFile;
   options.forceLogin = takeFlag(args, "--login");
   options.autoApproveToolCalls = takeFlag(args, "--auto-approve-tool-calls");
+  const nativeFullAccess = takeFlag(args, "--native-full-access");
+  const nativeDefaultAccess = takeFlag(args, "--native-default-access");
+  if (nativeFullAccess && nativeDefaultAccess) {
+    throw new Error("Choose at most one native access mode: --native-full-access or --native-default-access");
+  }
+  if (nativeFullAccess || nativeDefaultAccess) options.nativeFullAccess = nativeFullAccess;
   const skillAttachments = takeFlag(args, "--skill-attachments");
   const inlineSkills = takeFlag(args, "--inline-skills");
   if (skillAttachments && inlineSkills) throw new Error("Choose --skill-attachments or --inline-skills");
