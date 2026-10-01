@@ -270,29 +270,54 @@ export class ChatGptThreadEnvironmentStore {
     this.persist();
   }
 
-  private load(): void {
-    if (this.loaded) return;
-    this.loaded = true;
-    if (!this.path || !existsSync(this.path)) return;
+  private persistedEntries(now = this.now()): Array<readonly [string, StoredThreadEnvironment]> {
+    if (!this.path || !existsSync(this.path)) return [];
     const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<StoredThreadEnvironmentFile>;
     const rawThreads = record(parsed.threads);
     if (parsed.version !== 1 || !rawThreads) {
       throw new Error(`Invalid ChatGPT thread environment store: ${this.path}`);
     }
-    const cutoff = this.now() - THREAD_ENVIRONMENT_TTL_MS;
-    const entries = Object.entries(rawThreads)
+    const cutoff = now - THREAD_ENVIRONMENT_TTL_MS;
+    return Object.entries(rawThreads)
       .map(([threadId, value]) => [threadId, validateStoredEnvironment(value)] as const)
       .filter(([, environment]) => environment.updatedAt >= cutoff)
       .sort((left, right) => left[1].updatedAt - right[1].updatedAt)
       .slice(-MAX_THREAD_ENVIRONMENTS);
-    for (const [threadId, environment] of entries) this.threads.set(threadId, environment);
+  }
+
+  private load(): void {
+    if (this.loaded) return;
+    this.loaded = true;
+    for (const [threadId, environment] of this.persistedEntries()) {
+      this.threads.set(threadId, environment);
+    }
   }
 
   private persist(): void {
     if (!this.path) return;
+    // responseRequest constructs an adapter per HTTP request, so multiple environment-store
+    // instances can legitimately share this state file. Each instance loads once; blindly writing
+    // its stale in-memory snapshot here would let a concurrent turn delete authority persisted by
+    // another request. Re-read the latest atomic file immediately before every synchronous write
+    // and merge by authority timestamp. JavaScript cannot interleave another in-process persist
+    // between this read and atomicWriteFile, so peer-thread entries survive concurrent turns.
+    const now = this.now();
+    const merged = new Map<string, StoredThreadEnvironment>(this.persistedEntries(now));
+    for (const [threadId, environment] of this.threads) {
+      const existing = merged.get(threadId);
+      if (!existing || environment.updatedAt >= existing.updatedAt) {
+        merged.set(threadId, environment);
+      }
+    }
+    const entries = [...merged]
+      .filter(([, environment]) => environment.updatedAt >= now - THREAD_ENVIRONMENT_TTL_MS)
+      .sort((left, right) => left[1].updatedAt - right[1].updatedAt)
+      .slice(-MAX_THREAD_ENVIRONMENTS);
+    this.threads.clear();
+    for (const [threadId, environment] of entries) this.threads.set(threadId, environment);
     const payload: StoredThreadEnvironmentFile = {
       version: 1,
-      threads: Object.fromEntries(this.threads),
+      threads: Object.fromEntries(entries),
     };
     atomicWriteFile(this.path, `${JSON.stringify(payload, null, 2)}\n`);
   }
