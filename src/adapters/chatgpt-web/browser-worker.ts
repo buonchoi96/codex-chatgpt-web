@@ -857,6 +857,22 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
+const chatGptMessageDeliveryTimeoutAlert = (page: Page): Locator => page
+  .locator('[role="alert"]')
+  .filter({ hasText: /Message delivery timed out\. Please try again\./i })
+  .last();
+
+export async function throwIfChatGptMessageDeliveryTimeoutAlert(page: Page): Promise<void> {
+  if (!await chatGptMessageDeliveryTimeoutAlert(page).isVisible().catch(() => false)) return;
+  // The Web app renders this failure as a page-level aside, outside the owned assistant turn.
+  // Never click Retry automatically: this turn may already have completed side-effectful Codex
+  // Native calls. Surface the same bounded transport failure used by terminal response errors.
+  throw new ChatGptWebAdapterError(
+    "ChatGPT reported that message delivery timed out. Retry the active Codex turn.",
+    { status: 502, errorType: "server_error", code: "upstream_server_error", retryable: true },
+  );
+}
+
 // The current UI renders message_length_exceeds_limit as an ordinary response error.
 // Observe only browser-issued submissions from this owned page after Send is activated;
 // an old response, another tab, or a background endpoint cannot classify this turn.
@@ -4240,6 +4256,7 @@ export class ChatGptBrowserWorker {
         throw new Error("ChatGPT Bigger Context transaction timed out while awaiting a stage acknowledgement");
       }
       await throwIfChatGptSessionFailureAlert(page);
+      await throwIfChatGptMessageDeliveryTimeoutAlert(page);
       await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
       let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
       if (!snapshot.responsePresent && await responseTurn.locator.count() !== 1) {
@@ -6091,6 +6108,7 @@ export class ChatGptBrowserWorker {
           throw new Error("ChatGPT web turn timed out");
         }
         await throwIfChatGptSessionFailureAlert(page);
+        await throwIfChatGptMessageDeliveryTimeoutAlert(page);
         await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
 
         if (mode.localTools && await resolveChatGptToolConfirmation(
