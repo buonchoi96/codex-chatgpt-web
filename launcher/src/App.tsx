@@ -1744,6 +1744,17 @@ function SettingsSurface({
       setBusy(false);
     }
   };
+  const setNativeFullAccess = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      updateState(await api!.setNativeFullAccess(enabled));
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   const commitAutoCompactPercent = async (percent: number) => {
     if (percent === snapshot.state.autoCompactPercent) return;
     setBusy(true);
@@ -1879,6 +1890,15 @@ function SettingsSurface({
               .catch((cause) => setError(messageOf(cause)))}
           />
         </SettingRow>
+        {!devProfile ? (
+          <SettingRow body={copy.nativeFullAccessBody} label={copy.nativeFullAccess}>
+            <Switch
+              checked={snapshot.state.nativeFullAccess}
+              disabled={busy || snapshot.state.coreSetupComplete !== true}
+              onChange={(checked) => void setNativeFullAccess(checked)}
+            />
+          </SettingRow>
+        ) : null}
         <SettingRow body={copy.autoCompactContextBody} label={copy.autoCompactContext}>
           <div className="auto-compact-slider">
             <output aria-live="polite">
