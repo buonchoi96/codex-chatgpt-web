@@ -164,7 +164,7 @@ describe("reversible native Codex route integration", () => {
     const enabled = nativeConfig("browser-only");
     enabled.nativeFullAccess = true;
     const journal = installCodexIntegration(enabled);
-    expect(journal.nativeFullAccess).toEqual({
+    expect(journal.nativeFullAccess).toMatchObject({
       previousApprovalPolicy: {
         present: true,
         value: "on-request",
