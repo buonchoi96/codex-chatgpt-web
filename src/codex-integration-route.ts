@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
+  CODEX_FULL_ACCESS_APPROVAL_POLICY,
+  CODEX_FULL_ACCESS_SANDBOX_MODE,
   MANAGED_COMMENT,
   MANAGED_ROUTE_COMMENT,
   MANAGED_MULTI_AGENT_LINE,
@@ -240,6 +242,93 @@ export function replacementBaseline(
   return baseline;
 }
 
+const MANAGED_APPROVAL_POLICY_LINE =
+  `approval_policy = "${CODEX_FULL_ACCESS_APPROVAL_POLICY}" # Managed by codex-chatgpt-web: Launcher Full Access disables approval prompts.`;
+const MANAGED_SANDBOX_MODE_LINE =
+  `sandbox_mode = "${CODEX_FULL_ACCESS_SANDBOX_MODE}" # Managed by codex-chatgpt-web: Launcher Full Access removes Codex sandbox limits.`;
+
+function setTopLevelManagedAssignment(
+  document: ReturnType<typeof parseDocument>,
+  key: string,
+  line: string,
+): void {
+  const current = findTopLevelAssignment(document.lines, key);
+  if (current.index !== undefined) {
+    document.lines[current.index] = line;
+    return;
+  }
+  insertDocumentLine(document, firstTableIndex(document.lines), line);
+}
+
+export function installNativeFullAccess(text: string): {
+  text: string;
+  nativeFullAccess: NonNullable<CodexIntegrationJournal["nativeFullAccess"]>;
+} {
+  const document = parseDocument(text);
+  const previousApprovalPolicy = findTopLevelAssignment(document.lines, "approval_policy");
+  const previousSandboxMode = findTopLevelAssignment(document.lines, "sandbox_mode");
+  setTopLevelManagedAssignment(document, "approval_policy", MANAGED_APPROVAL_POLICY_LINE);
+  setTopLevelManagedAssignment(document, "sandbox_mode", MANAGED_SANDBOX_MODE_LINE);
+  return {
+    text: renderDocument(document),
+    nativeFullAccess: { previousApprovalPolicy, previousSandboxMode },
+  };
+}
+
+function verifyNativeFullAccess(text: string, journal: CodexIntegrationJournal): void {
+  if (!journal.nativeFullAccess) return;
+  const lines = splitLines(text);
+  const approval = findTopLevelAssignment(lines, "approval_policy");
+  const sandbox = findTopLevelAssignment(lines, "sandbox_mode");
+  if (approval.value !== CODEX_FULL_ACCESS_APPROVAL_POLICY || approval.rawLine !== MANAGED_APPROVAL_POLICY_LINE) {
+    throw new Error("Codex approval_policy changed after Launcher Full Access was enabled");
+  }
+  if (sandbox.value !== CODEX_FULL_ACCESS_SANDBOX_MODE || sandbox.rawLine !== MANAGED_SANDBOX_MODE_LINE) {
+    throw new Error("Codex sandbox_mode changed after Launcher Full Access was enabled");
+  }
+}
+
+function previousNativeAssignmentMatches(
+  current: PreviousAssignment,
+  previous: PreviousAssignment,
+): boolean {
+  return current.present === previous.present
+    && (!current.present || (current.value === previous.value && current.rawLine === previous.rawLine));
+}
+
+function verifyNativeFullAccessRestored(text: string, journal: CodexIntegrationJournal): void {
+  if (!journal.nativeFullAccess) return;
+  const lines = splitLines(text);
+  const approval = findTopLevelAssignment(lines, "approval_policy");
+  const sandbox = findTopLevelAssignment(lines, "sandbox_mode");
+  if (!previousNativeAssignmentMatches(approval, journal.nativeFullAccess.previousApprovalPolicy)) {
+    throw new Error("Codex approval_policy changed while Launcher Full Access was disconnected");
+  }
+  if (!previousNativeAssignmentMatches(sandbox, journal.nativeFullAccess.previousSandboxMode)) {
+    throw new Error("Codex sandbox_mode changed while Launcher Full Access was disconnected");
+  }
+}
+
+function restoreNativeFullAccess(text: string, journal: CodexIntegrationJournal): string {
+  if (!journal.nativeFullAccess) return text;
+  verifyNativeFullAccess(text, journal);
+  const document = parseDocument(text);
+  for (const [key, previous] of [
+    ["approval_policy", journal.nativeFullAccess.previousApprovalPolicy],
+    ["sandbox_mode", journal.nativeFullAccess.previousSandboxMode],
+  ] as const) {
+    const current = findTopLevelAssignment(document.lines, key);
+    if (current.index === undefined) throw new Error(`Managed Codex ${key} is missing`);
+    if (previous.present) {
+      if (!previous.rawLine) throw new Error(`Codex Full Access journal is missing the prior ${key} line`);
+      document.lines[current.index] = previous.rawLine;
+    } else {
+      removeDocumentLine(document, current.index);
+    }
+  }
+  return renderDocument(document);
+}
+
 export function installRoute(
   text: string,
   installedUrl: string,
@@ -319,7 +408,10 @@ function verifyOwnedInstalledRoute(text: string, journal: ManagedRouteJournal): 
       throw new Error("Codex realtime WebRTC call route changed after setup; refusing to overwrite the user's newer value");
     }
   }
-  if (journal.version === 10) verifyCodexInterruptHook(text, journal.interruptHook);
+  if (journal.version === 10) {
+    verifyCodexInterruptHook(text, journal.interruptHook);
+    verifyNativeFullAccess(text, journal);
+  }
   if (journal.version === 8 || journal.version === 9 || journal.version === 10) {
     const evidence = compatibilityV1Evidence(journal);
     if (evidence) {
@@ -373,7 +465,10 @@ export function verifyRestoredRoute(
       );
     }
   }
-  if (journal.version === 10) verifyCodexInterruptHookRestored(text);
+  if (journal.version === 10) {
+    verifyCodexInterruptHookRestored(text);
+    verifyNativeFullAccessRestored(text, journal);
+  }
   if (journal.version === 5 || journal.version === 6) {
     const previousFeatures: Array<readonly [string, PreviousFeatureAssignment]> = [
       ["remote_compaction_v2", journal.previousRemoteCompactionV2],
@@ -489,9 +584,10 @@ export function restoreManagedRoute(text: string, journal: ManagedRouteJournal):
     }
   }
   const restoredRoute = renderDocument(document);
+  let restoredFeatures = restoredRoute;
   if (journal.version === 8 || journal.version === 9 || journal.version === 10) {
     const evidence = compatibilityV1Evidence(journal);
-    return evidence
+    restoredFeatures = evidence
       ? restoreCompatibilityV1Features(
           restoredRoute,
           evidence.previousMultiAgent,
@@ -500,10 +596,12 @@ export function restoreManagedRoute(text: string, journal: ManagedRouteJournal):
           evidence.installedAgentMaxDepth,
         )
       : restoredRoute;
+  } else if (journal.version === 5 || journal.version === 6) {
+    restoredFeatures = restoreManagedFeatures(restoredRoute, journal);
   }
-  return journal.version === 5 || journal.version === 6
-    ? restoreManagedFeatures(restoredRoute, journal)
-    : restoredRoute;
+  return journal.version === 10
+    ? restoreNativeFullAccess(restoredFeatures, journal)
+    : restoredFeatures;
 }
 
 export function restoreLegacyV2(text: string, journal: LegacyCodexIntegrationJournal): string {
