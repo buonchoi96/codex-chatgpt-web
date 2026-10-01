@@ -739,7 +739,7 @@ test("a later work-tool boundary drains an unpolled detached result before dispa
     setTimeout(() => noDispatch.abort(), 20);
     await expect(batch).rejects.toMatchObject({ name: "AbortError" });
 
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<{ state: string }>(socketPath, {
       method: "invoke_status",
       bindingId: claimed.bindingId,
       callId: originalCallId,
@@ -813,7 +813,7 @@ test("active compaction carries completed detached results instead of aborting t
       detached_results: [{ call_id: originalCallId }],
     });
     expect(broker.compactionDeliveryCount(token)).toBe(1);
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<{ state: string }>(socketPath, {
       method: "invoke_status",
       bindingId: claimed.bindingId,
       callId: originalCallId,
