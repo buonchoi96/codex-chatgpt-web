@@ -9,6 +9,8 @@ export const MANAGED_COMMENT = "# Managed by codex-chatgpt-web; `codex-chatgpt-w
 export const MANAGED_ROUTE_COMMENT =
   "# Managed by codex-chatgpt-web: Responses use the local bridge; Voice stays on ChatGPT.";
 export const CODEX_REALTIME_WEBRTC_CALL_BASE_URL = "https://chatgpt.com/backend-api/codex";
+export const CODEX_FULL_ACCESS_APPROVAL_POLICY = "never";
+export const CODEX_FULL_ACCESS_SANDBOX_MODE = "danger-full-access";
 export const MANAGED_REMOTE_COMPACTION_LINE =
   "remote_compaction_v2 = false # Managed by codex-chatgpt-web: bounds retained Web image history.";
 export const MANAGED_MULTI_AGENT_LINE =
@@ -62,6 +64,14 @@ export interface CodexIntegrationJournal {
   };
   previous: Record<ManagedAssignmentKey, PreviousAssignment>;
   previousRealtimeWebrtcCallBaseUrl: PreviousAssignment;
+  /**
+   * Present only while Launcher Full Access owns the native Codex execution policy.
+   * The exact previous lines are restored when the option is disabled, disconnected, or uninstalled.
+   */
+  nativeFullAccess?: {
+    previousApprovalPolicy: PreviousAssignment;
+    previousSandboxMode: PreviousAssignment;
+  };
   interruptHook: InstalledCodexInterruptHook;
   previousMultiAgent?: PreviousFeatureAssignment;
   previousMultiAgentV2?: PreviousFeatureAssignment;
