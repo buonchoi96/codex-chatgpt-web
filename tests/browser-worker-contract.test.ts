@@ -3545,6 +3545,28 @@ test("page-level ChatGPT message delivery timeout fails promptly without clickin
   expect(workerSource.match(/await throwIfChatGptMessageDeliveryTimeoutAlert\(page\);/g)?.length).toBe(2);
 });
 
+test("message delivery timeout fallback does not depend on role=alert", async () => {
+  const visible = {
+    last() { return this; },
+    isVisible: async () => true,
+  };
+  const hidden = {
+    filter() { return this; },
+    last() { return this; },
+    isVisible: async () => false,
+  };
+  const page = {
+    locator: () => hidden,
+    getByText: () => visible,
+  } as unknown as Page;
+
+  await expect(throwIfChatGptMessageDeliveryTimeoutAlert(page)).rejects.toMatchObject({
+    status: 502,
+    code: "upstream_server_error",
+    retryable: true,
+  });
+});
+
 test("the known terminal ChatGPT error alert returns a structured retryable failure", async () => {
   const fixture = dialogPage(
     "Something went wrong. If this issue persists please contact us through our help center at help.openai.com.",
