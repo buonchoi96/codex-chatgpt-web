@@ -37,6 +37,10 @@ const builderArgs = [
   "never",
 ];
 if (target === "--mac" && !env.CSC_LINK && !env.CSC_NAME) {
+  // electron-builder skips all signing for pull-request builds unless this flag is set. CI still
+  // verifies the staged macOS ZIP with codesign, so force only the credential-free ad-hoc identity
+  // used by ordinary unsigned builds. Real certificate-backed PR signing remains untouched.
+  env.CSC_FOR_PULL_REQUEST = "true";
   builderArgs.push("--config.mac.identity=-");
 }
 if (target === "--linux") {
