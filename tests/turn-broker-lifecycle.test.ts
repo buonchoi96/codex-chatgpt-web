@@ -673,6 +673,158 @@ test("a delivered invocation detaches at transport timeout and its result remain
 });
 
 
+test("a later work-tool boundary drains an unpolled detached result before dispatch", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-detached-drain-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "detached-drain");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+
+    const originalCallId = "call_detached_original_12345678";
+    const original = callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+      wireName: "mcp__research__corpus_search",
+      arguments: { query: "large corpus" },
+    }, null);
+    expect((await broker.nextToolBatch(token)).map(item => item.callId)).toEqual([originalCallId]);
+    expect(await callTurnBroker(socketPath, {
+      method: "cancel_invoke",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+    })).toMatchObject({ delivered: true, pending: true, completed: false });
+
+    broker.completeTool(token, originalCallId, {
+      content: [{ type: "text", text: "AUTHORITATIVE_RESEARCH_RESULT" }],
+      structuredContent: { rows: 1280 },
+    });
+    await original;
+
+    const nextCallId = "call_detached_followup_12345678";
+    const replay = await callTurnBroker<{
+      content: Array<{ type?: string; text?: string }>;
+      structuredContent?: {
+        code?: string;
+        original_call_id?: string;
+        requested_tool?: string;
+        requested_tool_executed?: boolean;
+      };
+    }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: nextCallId,
+      wireName: "tool_search",
+      arguments: { query: "next operation" },
+    }, null);
+
+    expect(replay.structuredContent).toMatchObject({
+      code: "codex_detached_tool_result_replayed",
+      original_call_id: originalCallId,
+      requested_tool: "tool_search",
+      requested_tool_executed: false,
+    });
+    expect(replay.content.map(item => item?.text ?? "").join("\n")).toContain("AUTHORITATIVE_RESEARCH_RESULT");
+    expect(replay.content.map(item => item?.text ?? "").join("\n")).toContain(originalCallId);
+
+    const noDispatch = new AbortController();
+    const batch = broker.nextToolBatch(token, noDispatch.signal);
+    setTimeout(() => noDispatch.abort(), 20);
+    await expect(batch).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(await callTurnBroker(socketPath, {
+      method: "invoke_status",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+    })).toEqual({ state: "completed_elsewhere" });
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("active compaction carries completed detached results instead of aborting the source turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-broker-detached-compact-"));
+  const socketPath = defaultBrokerEndpoint(root);
+  const broker = TurnBroker.forSocket(socketPath);
+  try {
+    const token = await broker.register({
+      cwd: root,
+      roots: [root],
+      writableRoots: [root],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [],
+    }, undefined, "detached-compaction");
+    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+
+    const originalCallId = "call_detached_compact_123456789";
+    const original = callTurnBroker(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+      wireName: "mcp__research__corpus_status",
+      arguments: {},
+    }, null);
+    expect((await broker.nextToolBatch(token)).map(item => item.callId)).toEqual([originalCallId]);
+    expect(await callTurnBroker(socketPath, {
+      method: "cancel_invoke",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+    })).toMatchObject({ delivered: true, pending: true, completed: false });
+
+    broker.completeTool(token, originalCallId, {
+      content: [{ type: "text", text: "DETACHED_RESULT_MUST_SURVIVE_COMPACTION" }],
+      structuredContent: { status: "complete" },
+    });
+    await original;
+
+    expect(() => broker.requestCompaction(token, {
+      content: [{ type: "text", text: "ACTIVE_COMPACTION_CONTROL" }],
+      structuredContent: { code: "active_compaction" },
+    })).not.toThrow();
+
+    const compactResult = await callTurnBroker<{
+      content: Array<{ type?: string; text?: string }>;
+      structuredContent?: {
+        code?: string;
+        detached_results?: Array<{ call_id?: string }>;
+      };
+    }>(socketPath, {
+      method: "invoke",
+      bindingId: claimed.bindingId,
+      callId: "call_post_compaction_123456789",
+      wireName: "tool_search",
+      arguments: { query: "should be intercepted" },
+    }, null);
+
+    const text = compactResult.content.map(item => item?.text ?? "").join("\n");
+    expect(text).toContain("ACTIVE_COMPACTION_CONTROL");
+    expect(text).toContain("DETACHED_RESULT_MUST_SURVIVE_COMPACTION");
+    expect(text).toContain(originalCallId);
+    expect(compactResult.structuredContent).toMatchObject({
+      code: "codex_compaction_carries_detached_results",
+      detached_results: [{ call_id: originalCallId }],
+    });
+    expect(broker.compactionDeliveryCount(token)).toBe(1);
+    expect(await callTurnBroker(socketPath, {
+      method: "invoke_status",
+      bindingId: claimed.bindingId,
+      callId: originalCallId,
+    })).toEqual({ state: "completed_elsewhere" });
+  } finally {
+    await broker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
 test("Computer Use telemetry measures result-to-next-tool decision latency without payload logging", async () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-cu-latency-"));
   const socketPath = defaultBrokerEndpoint(root);
