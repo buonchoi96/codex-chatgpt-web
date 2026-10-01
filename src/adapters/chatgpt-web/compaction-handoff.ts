@@ -240,7 +240,9 @@ export async function settleActiveCompactionSource(
     try {
       token = await source.runtime.token;
       broker.requestCompaction(token, interruptedByActiveCompaction());
-      source.runtime.externalProgress.markCompactionRequested();
+      // Production tool runtimes use ChatGptExternalTurnProgress. Keep this guarded for
+      // narrow test/compatibility doubles while preserving the production supersession signal.
+      source.runtime.externalProgress.markCompactionRequested?.();
       for (const request of outstanding) {
         const result = results.get(request.callId)!;
         await broker.completeTool(
