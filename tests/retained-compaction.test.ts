@@ -866,11 +866,11 @@ test("active compaction fails over a source that does not settle after compactio
   expect(cancellations).toBe(1);
 });
 
-test("active compaction gives the source a full settle grace after the interrupt is actually delivered", async () => {
-  let finishBrowser!: (answer: string) => void;
-  const browser = new Promise<string>(resolve => { finishBrowser = resolve; });
+test("post-compaction interrupt deliveries do not extend the source settle deadline", async () => {
+  const browser = new Promise<string>(() => {});
   let deliveries = 0;
   let cancellations = 0;
+  const progress = new ChatGptExternalTurnProgress();
   const broker = {
     requestCompaction: () => 0,
     compactionDeliveryCount: () => deliveries,
@@ -878,22 +878,24 @@ test("active compaction gives the source a full settle grace after the interrupt
     revoke() {},
   } as unknown as TurnBroker;
   const source = new ChatGptTurnSession({
-    mode: "tools", token: Promise.resolve("turn_active_delivery_reset"),
-    externalProgress: { recordToolResult() {} } as never,
+    mode: "tools", token: Promise.resolve("turn_active_delivery_absolute"),
+    externalProgress: progress,
     browser, physicalSettlement: browser.then(() => undefined),
     trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(),
     cancel: () => { cancellations += 1; },
   });
   setTimeout(() => { deliveries = 1; }, 40);
-  setTimeout(() => finishBrowser("Settled after receiving the compaction interrupt."), 100);
 
+  const startedAt = performance.now();
   await expect(settleActiveCompactionSource(
     request(true), source, broker, undefined, 80,
-  )).resolves.toEqual({
-    answer: "Settled after receiving the compaction interrupt.",
-    compactionInstructionDelivered: true,
+  )).rejects.toMatchObject({
+    code: "compaction_source_stalled",
+    retryable: true,
   });
-  expect(cancellations).toBe(0);
+  expect(performance.now() - startedAt).toBeLessThan(500);
+  expect(cancellations).toBe(1);
+  expect(progress.snapshot().compactionRequested).toBeTrue();
 });
 
 test("active compaction aborts its source when the shared handoff deadline expires", async () => {
