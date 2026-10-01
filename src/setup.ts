@@ -53,6 +53,7 @@ export interface SetupOptions {
   refreshAccountCapabilities?: boolean;
   forceLogin?: boolean;
   autoApproveToolCalls?: boolean;
+  nativeFullAccess?: boolean;
   experimentalBiggerContext?: boolean;
   autoCompactPercent?: number;
   experimentalSkillAttachments?: boolean;
@@ -155,6 +156,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     useSavedChats: before.useSavedChats,
     zeroRiskProEnabled: before.zeroRiskProEnabled,
     autoApproveToolCalls: before.autoApproveToolCalls,
+    nativeFullAccess: before.nativeFullAccess,
     controlToken: before.controlToken,
     runtimeCommand: before.runtimeCommand,
     tunnel: before.tunnel,
@@ -187,6 +189,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     useSavedChats: after.useSavedChats,
     zeroRiskProEnabled: after.zeroRiskProEnabled,
     autoApproveToolCalls: after.autoApproveToolCalls,
+    nativeFullAccess: after.nativeFullAccess,
     controlToken: after.controlToken,
     runtimeCommand: after.runtimeCommand,
     tunnel: after.tunnel,
@@ -282,6 +285,7 @@ function baseConfig(
     delete config.browserHostDescriptorPath;
   }
   if (options.autoApproveToolCalls !== undefined) config.autoApproveToolCalls = options.autoApproveToolCalls;
+  if (options.nativeFullAccess !== undefined) config.nativeFullAccess = options.nativeFullAccess;
   if (options.experimentalSkillAttachments !== undefined) {
     config.experimentalSkillAttachments = options.experimentalSkillAttachments;
   }
