@@ -31,6 +31,14 @@ function isPreviousAssignment(value: unknown): boolean {
     || (typeof assignment.rawLine === "string" && typeof assignment.value === "string");
 }
 
+function isNativeFullAccessBaseline(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const baseline = value as Record<string, unknown>;
+  return isPreviousAssignment(baseline.previousApprovalPolicy)
+    && isPreviousAssignment(baseline.previousSandboxMode);
+}
+
 function isInstalledInterruptHook(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const hook = value as Record<string, unknown>;
@@ -58,6 +66,7 @@ function parseJournal(path: string): AnyCodexIntegrationJournal {
         && installed.agent_max_depth >= 2))
     && value.previous
     && isPreviousAssignment(value.previousRealtimeWebrtcCallBaseUrl)
+    && isNativeFullAccessBaseline(value.nativeFullAccess)
     && isInstalledInterruptHook(value.interruptHook)
     && typeof value.configPath === "string") {
     return value as unknown as CodexIntegrationJournal;
