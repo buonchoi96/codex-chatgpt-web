@@ -864,7 +864,7 @@ const chatGptMessageDeliveryTimeoutAlerts = (page: Page): Locator[] => [
   // Some current ChatGPT Web builds render the same red delivery failure container without an
   // ARIA alert role. Keep this fallback exact-text scoped so unrelated transcript text mentioning
   // delivery timeouts can never terminate the turn.
-  page.getByText(CHATGPT_MESSAGE_DELIVERY_TIMEOUT, { exact: true }).last(),
+  page.locator('text="Message delivery timed out. Please try again."').last(),
 ];
 
 export async function throwIfChatGptMessageDeliveryTimeoutAlert(page: Page): Promise<void> {
