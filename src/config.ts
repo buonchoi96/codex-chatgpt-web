@@ -130,6 +130,8 @@ export interface AppConfig {
   /** Optional adapter-silence budget for the Responses watchdog. */
   stallTimeoutSec?: number;
   autoApproveToolCalls: boolean;
+  /** Explicit opt-in to the unrestricted native execution profile. */
+  nativeFullAccess: boolean;
   controlToken: string;
   runtimeCommand: string[];
   acknowledgedUnofficialAt?: string;
@@ -260,6 +262,7 @@ export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
     useSavedChats: false,
     zeroRiskProEnabled: false,
     autoApproveToolCalls: false,
+    nativeFullAccess: false,
     controlToken: randomBytes(32).toString("base64url"),
     runtimeCommand: currentRuntimeCommand(),
   };
@@ -451,6 +454,10 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (typeof parsed.autoApproveToolCalls !== "boolean") {
     throw new Error(`Invalid autoApproveToolCalls in ${path}`);
   }
+  if (parsed.nativeFullAccess !== undefined && typeof parsed.nativeFullAccess !== "boolean") {
+    throw new Error(`Invalid nativeFullAccess in ${path}`);
+  }
+  const nativeFullAccess = parsed.nativeFullAccess === true;
   const requiredStrings: Array<keyof AppConfig> = [
     "appName", "chromeExecutablePath", "storageStatePath", "brokerSocketPath", "controlToken",
   ];
@@ -596,6 +603,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
     experimentalFreshConversationPerTurn,
     useSavedChats,
     zeroRiskProEnabled,
+    nativeFullAccess,
   } as AppConfig;
 }
 
