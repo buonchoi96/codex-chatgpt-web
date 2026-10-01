@@ -32,6 +32,7 @@ export interface LauncherState {
   showBrowserDuringTurns: boolean;
   browserInteractionMode: BrowserInteractionMode;
   experimentalBiggerContext: boolean;
+  nativeFullAccess: boolean;
   autoCompactPercent: number;
   experimentalSkillAttachments: boolean;
   experimentalFreshConversationPerTurn: boolean;
@@ -182,6 +183,7 @@ export interface LauncherApi {
   setMcpStep(step: number): Promise<LauncherState>;
   setAutostart(enabled: boolean): Promise<{ state: LauncherState; supported: boolean; enabled: boolean }>;
   setBiggerContext(enabled: boolean): Promise<LauncherState>;
+  setNativeFullAccess(enabled: boolean): Promise<LauncherState>;
   setAutoCompactPercent(percent: number): Promise<LauncherState>;
   setSkillAttachments(enabled: boolean): Promise<LauncherState>;
   setFreshConversationPerTurn(enabled: boolean): Promise<LauncherState>;
