@@ -57,6 +57,11 @@ jobs:
         run: bun run launcher/scripts/prepare-linux-appimage-tools.cjs
       - run: bun run verify
       - run: bun run app:package
+        env:
+          # electron-builder decides whether PR signing is allowed before the child packager's
+          # mutated environment is reliably observed under Bun. This only enables the package
+          # script's credential-free ad-hoc macOS identity; release certificate handling is unchanged.
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || 'false' }}
       - name: Verify Linux AppImage ABI on current Arch
         if: runner.os == 'Linux'
         run: |

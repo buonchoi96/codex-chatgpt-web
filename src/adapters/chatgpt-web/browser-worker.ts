@@ -1364,7 +1364,7 @@ export function chatGptRetryableFailureCanRetainConversation(
   return (progress?.revision ?? 0) > 0;
 }
 
-export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 64;
+export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 8;
 export const MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES = 2;
 export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 10_000;
 const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
@@ -1847,10 +1847,11 @@ export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
  * Once a turn has demonstrated real Codex Native progress, allow a longer quiet reasoning phase.
  *
  * A long tool-capable task can legitimately spend several minutes synthesizing results after its
- * last command. Retrying that proven-live turn at the same five-minute threshold used for a turn
- * that never did any work discards useful browser state and is especially harmful to subagents.
+ * last command, but once no native tool remains in flight a fifteen-minute silence masks a wedged
+ * backend. Keep the post-tool semantic-silence budget at five minutes; in-flight tools continue to
+ * suppress this watchdog independently, and near-1M compaction keeps its longer dedicated budget.
  */
-export const CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
+export const CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS = 5 * 60_000;
 /** Near-1M compaction can spend materially longer in backend reasoning than an ordinary turn. */
 export const CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 
@@ -6205,7 +6206,7 @@ export class ChatGptBrowserWorker {
           externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
           externalToolCallsInFlight,
         })) {
-          await diagnostics.capture(page, "response-no-progress-5m").catch(() => {});
+          await diagnostics.capture(page, "response-semantic-stall").catch(() => {});
           await stop.press("Enter").catch(() => {});
           throw new ChatGptWebAdapterError(
             `ChatGPT remained in a running state for ${(runningProgressTracker.currentStallMs() / 60_000).toFixed(1)} minutes without visible response, reasoning, ChatGPT activity, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,

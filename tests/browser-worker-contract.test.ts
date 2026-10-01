@@ -168,7 +168,7 @@ test("developer MCP capability loss is classified separately from ordinary missi
 });
 
 test("missing native completion receipt gets a progress-aware bounded same-turn continuation prompt", () => {
-  expect(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES).toBe(64);
+  expect(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES).toBe(8);
   expect(MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES).toBe(2);
   const turnToken = "turn_12345678901234567890123456789012";
   const prompt = chatGptCompletionReceiptRecoveryPrompt(
@@ -191,7 +191,7 @@ test("missing native completion receipt gets a progress-aware bounded same-turn 
   expect(prompt).toContain("safety-blocked required tool");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
   expect(prompt).toContain("remaining_actionable_requirements=[]");
-  expect(prompt).toContain("recovery 1/64");
+  expect(prompt).toContain("recovery 1/8");
   expect(prompt).toContain(JSON.stringify({ turn_token: turnToken }));
   expect(prompt).toContain("Do not reconstruct it, alter it, or reuse a token from earlier task history");
 });
@@ -222,6 +222,24 @@ test("completion receipt recovery resets its stalled budget whenever Codex Nativ
   next = advanceChatGptCompletionReceiptRecovery(next, 7);
   expect(next.allowed).toBeFalse();
   expect(next.noProgressRecoveries).toBe(3);
+});
+
+test("completion receipt recovery has a bounded hard cap even when every recovery makes progress", () => {
+  let state = { recoveries: 0, noProgressRecoveries: 0, progressRevision: 0 };
+
+  for (let revision = 1; revision <= MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES; revision += 1) {
+    const next = advanceChatGptCompletionReceiptRecovery(state, revision);
+    expect(next.allowed).toBeTrue();
+    expect(next.progressed).toBeTrue();
+    state = next;
+  }
+
+  const overflow = advanceChatGptCompletionReceiptRecovery(
+    state,
+    MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES + 1,
+  );
+  expect(overflow.allowed).toBeFalse();
+  expect(overflow.recoveries).toBe(MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES + 1);
 });
 
 test("conversation turn identity survives ChatGPT DOM virtualization", () => {
@@ -4731,7 +4749,7 @@ test("silent running turns become retryable stalls while real progress resets th
 
   expect(tracker.update({ ...base, running: false }, 20_000)).toBeFalse();
   expect(CHATGPT_RUNNING_NO_PROGRESS_STALL_MS).toBe(5 * 60_000);
-  expect(CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS).toBe(15 * 60_000);
+  expect(CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS).toBe(5 * 60_000);
   expect(CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS).toBe(15 * 60_000);
 });
 

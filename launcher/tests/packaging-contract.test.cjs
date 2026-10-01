@@ -72,6 +72,7 @@ test("release installers resolve checksummed native launcher assets", () => {
   assert.doesNotMatch(packager, /process\.execPath/);
   assert.match(packager, /electron-builder\/out\/cli\/cli\.js/);
   assert.match(packager, /target === "--mac" && !env\.CSC_LINK && !env\.CSC_NAME/);
+  assert.match(packager, /CSC_FOR_PULL_REQUEST = "true"/);
   assert.match(packager, /--config\.mac\.identity=-/);
   assert.match(packager, /verifySignedMacArchive\(\)/);
   assert.match(packager, /codesign[\s\S]*--verify[\s\S]*--deep[\s\S]*--strict/);
@@ -207,6 +208,7 @@ test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   const release = fs.readFileSync(path.join(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
   assert.match(ci, /macos-15, ubuntu-latest, windows-latest/);
   assert.match(ci, /bun run app:package/);
+  assert.match(ci, /bun run app:package[\s\S]*CSC_FOR_PULL_REQUEST/);
   assert.match(ci, /bun run app:smoke/);
   assert.match(ci, /prepare-linux-libnotify\.sh/);
   assert.match(ci, /prepare-linux-appimage-tools\.cjs/);
