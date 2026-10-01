@@ -554,11 +554,16 @@ test("an undelivered timed-out invocation can be abandoned without retiring its 
     );
 
     await Bun.sleep(25);
-    expect(await callTurnBroker<{ cancelled: boolean; delivered: boolean; pending: boolean }>(socketPath, {
+    expect(await callTurnBroker<{
+      cancelled: boolean;
+      delivered: boolean;
+      pending: boolean;
+      completed: boolean;
+    }>(socketPath, {
       method: "cancel_invoke",
       bindingId: claimed.bindingId,
       callId,
-    })).toEqual({ cancelled: true, delivered: false, pending: false });
+    })).toEqual({ cancelled: true, delivered: false, pending: false, completed: false });
     expect(await pendingOutcome).toEqual({
       type: "error",
       message: "Codex Native invocation was abandoned before delivery",
@@ -589,7 +594,10 @@ test("a delivered invocation detaches at transport timeout and its result remain
       sandboxPolicy: { type: "dangerFullAccess" },
       tools: [],
     }, undefined, "delivered-timeout");
-    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+    const claimed = await callTurnBroker<{ bindingId: string; activityId: string }>(
+      socketPath,
+      { method: "claim", token },
+    );
     const callId = "call_delivered_timeout_1234567";
     const pending = callTurnBroker(socketPath, {
       method: "invoke",
@@ -637,6 +645,13 @@ test("a delivered invocation detaches at transport timeout and its result remain
       state: "completed",
       toolResult: { content: [{ type: "text", text: "ok" }] },
     });
+    // The synthetic low-level claim used by this test is still active. Real MCP requests settle it
+    // in withClaimedTurn.finally before the browser completion fence can commit.
+    expect(await callTurnBroker<{ completed: boolean }>(socketPath, {
+      method: "activity_complete",
+      token,
+      activityId: claimed.activityId,
+    })).toEqual({ completed: true });
     expect(broker.beginCompletionFence(token)).toEqual(expect.any(Number));
 
     // Retrieval is one-shot; a repeated poll cannot replay a tool result into model context.
