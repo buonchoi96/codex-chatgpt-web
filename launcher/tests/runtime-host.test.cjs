@@ -192,6 +192,36 @@ test("Bigger Context uses the setup transaction and refreshes the production Cod
   });
 });
 
+test("Native Full Access uses a production setup transaction and is unavailable in DEV", async () => {
+  const enabled = hostFor({ mode: "full", appName: "Codex Native2", autoApproveToolCalls: true });
+  const result = await enabled.host.setNativeFullAccess(true);
+  assert.equal(result.enabled, true);
+  assert.deepEqual(enabled.invocation(), {
+    name: "native-full-access",
+    args: [
+      "setup",
+      "--full",
+      "--browser-host-descriptor",
+      "/runtime/launcher-browser.json",
+      "--automatic-browser-interaction",
+      "--replace-codex-route",
+      "--acknowledge-unofficial",
+      "--restart-service",
+      "--native-full-access",
+      "--auto-approve-tool-calls",
+    ],
+  });
+
+  const disabled = hostFor({ mode: "browser-only", appName: "Codex Native2" });
+  await disabled.host.setNativeFullAccess(false);
+  assert.equal(disabled.invocation().args.includes("--native-default-access"), true);
+
+  await assert.rejects(
+    devHostFor({ mode: "browser-only" }).host.setNativeFullAccess(true),
+    /unavailable in the isolated DEV launcher/,
+  );
+});
+
 test("Bigger Context updates the isolated DEV config without installing a Codex route", async () => {
   const fixture = devHostFor({ mode: "browser-only" });
   const result = await fixture.host.setBiggerContext(false);
