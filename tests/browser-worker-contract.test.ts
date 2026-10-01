@@ -3547,6 +3547,7 @@ test("page-level ChatGPT message delivery timeout fails promptly without clickin
 
 test("message delivery timeout fallback does not depend on role=alert", async () => {
   const visible = {
+    filter() { return this; },
     last() { return this; },
     isVisible: async () => true,
   };
