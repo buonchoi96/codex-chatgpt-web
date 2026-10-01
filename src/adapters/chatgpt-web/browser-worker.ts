@@ -857,16 +857,27 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
-const chatGptMessageDeliveryTimeoutAlert = (page: Page): Locator => page
-  .locator('[role="alert"]')
-  .filter({ hasText: /Message delivery timed out\. Please try again\./i })
-  .last();
+const CHATGPT_MESSAGE_DELIVERY_TIMEOUT = /Message delivery timed out\. Please try again\./i;
+
+const chatGptMessageDeliveryTimeoutAlerts = (page: Page): Locator[] => [
+  page.locator('[role="alert"]').filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT }).last(),
+  // Some current ChatGPT Web builds render the same red delivery failure container without an
+  // ARIA alert role. Keep this fallback exact-text scoped so unrelated transcript text mentioning
+  // delivery timeouts can never terminate the turn.
+  page.locator('text="Message delivery timed out. Please try again."')
+    .filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT })
+    .last(),
+];
 
 export async function throwIfChatGptMessageDeliveryTimeoutAlert(page: Page): Promise<void> {
-  if (!await chatGptMessageDeliveryTimeoutAlert(page).isVisible().catch(() => false)) return;
-  // The Web app renders this failure as a page-level aside, outside the owned assistant turn.
+  const visible = await Promise.all(
+    chatGptMessageDeliveryTimeoutAlerts(page)
+      .map(locator => locator.isVisible().catch(() => false)),
+  );
+  if (!visible.some(Boolean)) return;
   // Never click Retry automatically: this turn may already have completed side-effectful Codex
-  // Native calls. Surface the same bounded transport failure used by terminal response errors.
+  // Native calls. Fail the physical response immediately and let bounded retained recovery decide
+  // whether the same conversation can continue safely.
   throw new ChatGptWebAdapterError(
     "ChatGPT reported that message delivery timed out. Retry the active Codex turn.",
     { status: 502, errorType: "server_error", code: "upstream_server_error", retryable: true },
@@ -1384,6 +1395,24 @@ export const MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES = 8;
 export const MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES = 2;
 export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 10_000;
 const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
+
+export function chatGptCompactionSupersedesCompletionRecovery(
+  snapshot: ChatGptExternalTurnProgressSnapshot | undefined,
+): boolean {
+  return snapshot?.compactionRequested === true;
+}
+
+function chatGptCompactionSourceSupersededError(): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    "Automatic context compaction superseded this ChatGPT response before it produced a native completion receipt.",
+    {
+      status: 409,
+      errorType: "invalid_request_error",
+      code: "compaction_source_superseded",
+      retryable: true,
+    },
+  );
+}
 
 export interface ChatGptCompletionReceiptRecoveryState {
   recoveries: number;
@@ -6276,9 +6305,26 @@ export class ChatGptBrowserWorker {
           });
           if (!completionReady) completionFenceRevision = undefined;
           if (completionReady) {
-            const completionReceiptReady = turn.completionFence?.receiptReady
-              ? await waitForChatGptCompletionReceipt(turn.completionFence.receiptReady)
-              : true;
+            let completionReceiptReady = true;
+            if (turn.completionFence?.receiptReady) {
+              // A source response that native /compact already superseded must never spend another
+              // connector-selection/send cycle trying to manufacture a completion receipt. Check
+              // once before the normal settle grace and once after it to cover progress-mirror lag.
+              completionReceiptReady = await turn.completionFence.receiptReady();
+              if (!completionReceiptReady
+                && chatGptCompactionSupersedesCompletionRecovery(turn.externalProgress?.snapshot())) {
+                throw chatGptCompactionSourceSupersededError();
+              }
+              if (!completionReceiptReady) {
+                completionReceiptReady = await waitForChatGptCompletionReceipt(
+                  turn.completionFence.receiptReady,
+                );
+              }
+              if (!completionReceiptReady
+                && chatGptCompactionSupersedesCompletionRecovery(turn.externalProgress?.snapshot())) {
+                throw chatGptCompactionSourceSupersededError();
+              }
+            }
             if (!completionReceiptReady) {
               if (chatGptFinalIndicatesDeveloperMcpUnavailable(snapshot.visibleText)) {
                 await diagnostics.capture(page, "developer-mcp-conversation-unavailable").catch(() => {});

@@ -3,6 +3,8 @@ export interface ChatGptExternalTurnProgressSnapshot {
   lastToolBatchRevision: number;
   activeToolCalls: number;
   lastProgressAt?: number;
+  /** The active browser response has been superseded by native context compaction. */
+  compactionRequested?: boolean;
 }
 
 interface ProgressWaiter {
@@ -88,6 +90,7 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
   private observedToolBatchRevision = 0;
   private activeToolCalls = 0;
   private lastProgressAt?: number;
+  private compactionRequested = false;
   private retirementError?: Error;
   private readonly toolBatchObservationWaiters = new Set<ToolBatchObservationWaiter>();
 
@@ -97,6 +100,7 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
       lastToolBatchRevision: this.lastToolBatchRevision,
       activeToolCalls: this.activeToolCalls,
       ...(this.lastProgressAt !== undefined ? { lastProgressAt: this.lastProgressAt } : {}),
+      ...(this.compactionRequested ? { compactionRequested: true } : {}),
     };
   }
 
@@ -150,6 +154,21 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
     }
     this.activeToolCalls -= 1;
     this.advance(now, "tool_result");
+  }
+
+  /**
+   * Mark the current browser response as superseded by native context compaction.
+   *
+   * This advances only the transport revision so the launcher helper receives the state change;
+   * it deliberately does not stamp lastProgressAt because compaction is not model/tool progress.
+   */
+  markCompactionRequested(): boolean {
+    this.assertNotRetired();
+    if (this.compactionRequested) return false;
+    this.compactionRequested = true;
+    this.revision += 1;
+    this.notify(this.snapshot());
+    return true;
   }
 
   /** Retire every unresolved batch when the broker capability can no longer accept its result. */
@@ -242,6 +261,7 @@ export class ChatGptMirroredTurnProgress extends ChatGptTurnProgressBroadcaster 
     // recorder only ever moves these forward, so a regression means a corrupt or forged frame
     // rather than an ordering artefact, and accepting it would desynchronise observed liveness.
     if (next.lastToolBatchRevision < this.current.lastToolBatchRevision
+      || (this.current.compactionRequested === true && next.compactionRequested !== true)
       || (next.lastProgressAt === undefined && this.current.lastProgressAt !== undefined)
       || (next.lastProgressAt !== undefined
         && this.current.lastProgressAt !== undefined
@@ -264,9 +284,10 @@ export function assertChatGptTurnProgressSnapshot(
     || !finiteIndex(value.activeToolCalls)
     || value.lastToolBatchRevision > value.revision
     || (value.lastProgressAt !== undefined && !Number.isFinite(value.lastProgressAt))
-    // Any recorded activity stamps a timestamp, so a frame claiming progress without one is
-    // malformed and would otherwise report liveness the daemon never observed.
-    || (value.revision > 0 && value.lastProgressAt === undefined)) {
+    || (value.compactionRequested !== undefined && typeof value.compactionRequested !== "boolean")
+    // Any recorded activity stamps a timestamp. The sole exception is a compaction supersession
+    // revision, which is a control-state transition rather than model/tool progress.
+    || (value.revision > 0 && value.lastProgressAt === undefined && value.compactionRequested !== true)) {
     throw new Error("ChatGPT external progress snapshot is invalid");
   }
 }

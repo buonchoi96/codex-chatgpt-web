@@ -240,6 +240,9 @@ export async function settleActiveCompactionSource(
     try {
       token = await source.runtime.token;
       broker.requestCompaction(token, interruptedByActiveCompaction());
+      // Production tool runtimes use ChatGptExternalTurnProgress. Keep this guarded for
+      // narrow test/compatibility doubles while preserving the production supersession signal.
+      source.runtime.externalProgress.markCompactionRequested?.();
       for (const request of outstanding) {
         const result = results.get(request.callId)!;
         await broker.completeTool(
@@ -259,15 +262,17 @@ export async function settleActiveCompactionSource(
       // Codex history on a fresh browser surface.
       const sourceStalled = new Promise<never>((_resolve, reject) => {
         let deliveries = broker.compactionDeliveryCount(token!);
-        let deadline = Date.now() + sourceSettleGraceMs;
+        // This is an absolute retirement deadline. Post-compaction MCP calls are intercepted with
+        // a synthetic result and therefore cannot justify extending the lifetime of a response
+        // that native compaction has already superseded.
+        const deadline = Date.now() + sourceSettleGraceMs;
         const poll = () => {
           const now = Date.now();
           const currentDeliveries = broker.compactionDeliveryCount(token!);
           if (currentDeliveries > deliveries) {
             deliveries = currentDeliveries;
-            deadline = now + sourceSettleGraceMs;
             console.info(
-              `[chatgpt-web] active compaction source received interrupt delivery; reset settle grace (${sourceSettleGraceMs}ms)`,
+              `[chatgpt-web] active compaction source received interrupt delivery; absolute settle deadline unchanged (${sourceSettleGraceMs}ms)`,
             );
           }
           const remaining = deadline - now;
