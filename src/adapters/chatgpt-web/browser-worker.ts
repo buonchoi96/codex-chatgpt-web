@@ -1385,6 +1385,24 @@ export const MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES = 2;
 export const CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS = 10_000;
 const CHATGPT_COMPLETION_RECEIPT_POLL_MS = 50;
 
+export function chatGptCompactionSupersedesCompletionRecovery(
+  snapshot: ChatGptExternalTurnProgressSnapshot | undefined,
+): boolean {
+  return snapshot?.compactionRequested === true;
+}
+
+function chatGptCompactionSourceSupersededError(): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    "Automatic context compaction superseded this ChatGPT response before it produced a native completion receipt.",
+    {
+      status: 409,
+      errorType: "invalid_request_error",
+      code: "compaction_source_superseded",
+      retryable: true,
+    },
+  );
+}
+
 export interface ChatGptCompletionReceiptRecoveryState {
   recoveries: number;
   noProgressRecoveries: number;
@@ -6276,9 +6294,26 @@ export class ChatGptBrowserWorker {
           });
           if (!completionReady) completionFenceRevision = undefined;
           if (completionReady) {
-            const completionReceiptReady = turn.completionFence?.receiptReady
-              ? await waitForChatGptCompletionReceipt(turn.completionFence.receiptReady)
-              : true;
+            let completionReceiptReady = true;
+            if (turn.completionFence?.receiptReady) {
+              // A source response that native /compact already superseded must never spend another
+              // connector-selection/send cycle trying to manufacture a completion receipt. Check
+              // once before the normal settle grace and once after it to cover progress-mirror lag.
+              completionReceiptReady = await turn.completionFence.receiptReady();
+              if (!completionReceiptReady
+                && chatGptCompactionSupersedesCompletionRecovery(turn.externalProgress?.snapshot())) {
+                throw chatGptCompactionSourceSupersededError();
+              }
+              if (!completionReceiptReady) {
+                completionReceiptReady = await waitForChatGptCompletionReceipt(
+                  turn.completionFence.receiptReady,
+                );
+              }
+              if (!completionReceiptReady
+                && chatGptCompactionSupersedesCompletionRecovery(turn.externalProgress?.snapshot())) {
+                throw chatGptCompactionSourceSupersededError();
+              }
+            }
             if (!completionReceiptReady) {
               if (chatGptFinalIndicatesDeveloperMcpUnavailable(snapshot.visibleText)) {
                 await diagnostics.capture(page, "developer-mcp-conversation-unavailable").catch(() => {});
