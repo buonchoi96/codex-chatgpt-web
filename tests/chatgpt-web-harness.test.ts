@@ -3140,7 +3140,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }));
       // The explicit name, schema and annotation assertions below are the connector ABI contract.
       // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
-      expect(publicConnectorAbi).toHaveLength(12);
+      expect(publicConnectorAbi).toHaveLength(13);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
