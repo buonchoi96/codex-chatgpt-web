@@ -612,7 +612,13 @@ test("a delivered invocation detaches at transport timeout and its result remain
       callId,
     })).toEqual({ cancelled: false, delivered: true, pending: true, completed: false });
 
-    expect(await callTurnBroker(socketPath, {
+    type InvocationStatus = {
+      state: string;
+      delivered?: boolean;
+      detached?: boolean;
+      toolResult?: unknown;
+    };
+    expect(await callTurnBroker<InvocationStatus>(socketPath, {
       method: "invoke_status",
       bindingId: claimed.bindingId,
       callId,
@@ -623,7 +629,7 @@ test("a delivered invocation detaches at transport timeout and its result remain
 
     // A completed detached result is still unfinished turn work until ChatGPT consumes it.
     expect(broker.beginCompletionFence(token)).toBeUndefined();
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<InvocationStatus>(socketPath, {
       method: "invoke_status",
       bindingId: claimed.bindingId,
       callId,
@@ -634,7 +640,7 @@ test("a delivered invocation detaches at transport timeout and its result remain
     expect(broker.beginCompletionFence(token)).toEqual(expect.any(Number));
 
     // Retrieval is one-shot; a repeated poll cannot replay a tool result into model context.
-    expect(await callTurnBroker(socketPath, {
+    expect(await callTurnBroker<InvocationStatus>(socketPath, {
       method: "invoke_status",
       bindingId: claimed.bindingId,
       callId,
