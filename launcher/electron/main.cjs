@@ -790,6 +790,7 @@ function registerIpc({ logger, stateStore }) {
       codexRestartRequired: true,
       browserInteractionMode: "automatic",
       experimentalBiggerContext: false,
+      nativeFullAccess: false,
       experimentalSkillAttachments: false,
       experimentalFreshConversationPerTurn: false,
       useSavedChats: false,
@@ -827,6 +828,7 @@ function registerIpc({ logger, stateStore }) {
       codexCatalogVerified: IS_DEV_PROFILE ? true : false,
       codexRestartRequired: IS_DEV_PROFILE ? false : true,
       zeroRiskProEnabled: runtimeHost.runtimeConfigSnapshot().config?.zeroRiskProEnabled === true,
+      nativeFullAccess: runtimeHost.runtimeConfigSnapshot().config?.nativeFullAccess === true,
       experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
       useSavedChats: runtimeHost.runtimeConfigSnapshot().config?.useSavedChats === true,
       ...(result.mode === "full" ? {
@@ -870,6 +872,7 @@ function registerIpc({ logger, stateStore }) {
       browserInteractionMode: interactionMode,
       ...(interactionMode === "manual" ? { experimentalBiggerContext: false, experimentalSkillAttachments: false } : {}),
       zeroRiskProEnabled: runtimeHost.runtimeConfigSnapshot().config?.zeroRiskProEnabled === true,
+      nativeFullAccess: runtimeHost.runtimeConfigSnapshot().config?.nativeFullAccess === true,
       experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
       useSavedChats: runtimeHost.runtimeConfigSnapshot().config?.useSavedChats === true,
       coreSetupComplete: true,
@@ -921,6 +924,23 @@ function registerIpc({ logger, stateStore }) {
     });
     send("launcher:state-changed", state);
     if (!IS_DEV_PROFILE) startCatalogVerificationMonitor({ logger, stateStore });
+    return state;
+  });
+  handle("launcher:native-full-access", async (_event, enabled) => {
+    if (IS_DEV_PROFILE) {
+      throw new Error("Native Full Access changes the real Codex policy and is unavailable in the isolated DEV launcher");
+    }
+    if (browserHost.activeTraceId || browserHost.currentOperation()) {
+      throw new Error("Finish or cancel active ChatGPT turns before changing Native Full Access");
+    }
+    const result = await runtimeHost.setNativeFullAccess(enabled === true);
+    const state = stateStore.update({
+      nativeFullAccess: result.enabled,
+      codexCatalogVerified: false,
+      codexRestartRequired: true,
+    });
+    send("launcher:state-changed", state);
+    startCatalogVerificationMonitor({ logger, stateStore });
     return state;
   });
   handle("launcher:auto-compact-percent", async (_event, rawPercent) => {
@@ -1361,6 +1381,7 @@ async function start() {
       codexRestartRequired: false,
       autoStart: false,
       experimentalBiggerContext: config?.experimentalBiggerContext === true,
+      nativeFullAccess: false,
       autoCompactPercent: Number.isInteger(config?.autoCompactPercent) ? config.autoCompactPercent : 26,
       experimentalSkillAttachments: config?.experimentalSkillAttachments === true,
       experimentalFreshConversationPerTurn: config?.experimentalFreshConversationPerTurn === true,
@@ -1391,6 +1412,7 @@ async function start() {
         codexCatalogVerified: false,
         codexRestartRequired: true,
         experimentalBiggerContext: runtimeHost.runtimeConfigSnapshot().config?.experimentalBiggerContext === true,
+        nativeFullAccess: runtimeHost.runtimeConfigSnapshot().config?.nativeFullAccess === true,
         autoCompactPercent: Number.isInteger(runtimeHost.runtimeConfigSnapshot().config?.autoCompactPercent)
           ? runtimeHost.runtimeConfigSnapshot().config.autoCompactPercent : 26,
         experimentalSkillAttachments: runtimeHost.runtimeConfigSnapshot().config?.experimentalSkillAttachments === true,
@@ -1418,6 +1440,7 @@ async function start() {
     const configuredRuntime = runtimeHost.runtimeConfigSnapshot();
     if (configuredRuntime.configured) {
       const enabled = configuredRuntime.config?.experimentalBiggerContext === true;
+      const nativeFullAccess = configuredRuntime.config?.nativeFullAccess === true;
       const autoCompactPercent = Number.isInteger(configuredRuntime.config?.autoCompactPercent)
         ? configuredRuntime.config.autoCompactPercent : 26;
       const experimentalSkillAttachments = configuredRuntime.config?.experimentalSkillAttachments === true;
@@ -1429,10 +1452,12 @@ async function start() {
         || saved.experimentalFreshConversationPerTurn !== experimentalFreshConversationPerTurn
         || saved.useSavedChats !== useSavedChats
         || saved.experimentalBiggerContext !== enabled
+        || saved.nativeFullAccess !== nativeFullAccess
         || saved.autoCompactPercent !== autoCompactPercent
         || saved.zeroRiskProEnabled !== zeroRiskProEnabled) {
         const state = stateStore.update({
           experimentalBiggerContext: enabled,
+          nativeFullAccess,
           autoCompactPercent,
           experimentalSkillAttachments,
           experimentalFreshConversationPerTurn,
@@ -1454,6 +1479,7 @@ async function start() {
         coreSetupComplete: true,
         mcpRuntimeInstalled: config.mode === "full",
         experimentalBiggerContext: config.experimentalBiggerContext === true,
+        nativeFullAccess: config.nativeFullAccess === true,
         autoCompactPercent: Number.isInteger(config.autoCompactPercent) ? config.autoCompactPercent : 26,
         experimentalSkillAttachments: config.experimentalSkillAttachments === true,
         experimentalFreshConversationPerTurn: config.experimentalFreshConversationPerTurn === true,
@@ -1485,6 +1511,7 @@ async function start() {
         const state = stateStore.update({
           coreSetupComplete: false,
           codexCatalogVerified: false,
+          nativeFullAccess: false,
           mcpRuntimeInstalled: false,
           mcpSetupComplete: false,
           mcpGuideStep: 0,
