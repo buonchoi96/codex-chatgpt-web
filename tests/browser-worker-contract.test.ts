@@ -3556,8 +3556,9 @@ test("message delivery timeout fallback does not depend on role=alert", async ()
     isVisible: async () => false,
   };
   const page = {
-    locator: () => hidden,
-    getByText: () => visible,
+    locator: (selector: string) => selector.startsWith('text="Message delivery timed out.')
+      ? visible
+      : hidden,
   } as unknown as Page;
 
   await expect(throwIfChatGptMessageDeliveryTimeoutAlert(page)).rejects.toMatchObject({
