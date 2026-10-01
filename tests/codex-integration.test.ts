@@ -150,6 +150,58 @@ describe("reversible native Codex route integration", () => {
     });
   });
 
+  test("Native Full Access owns danger-full-access plus never and restores the exact prior policy", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = [
+      'model = "gpt-5.6-sol"',
+      'approval_policy = "on-request" # user approval baseline',
+      'sandbox_mode = "workspace-write" # user sandbox baseline',
+      "",
+    ].join("\n");
+    writeFileSync(configPath, original);
+
+    const enabled = nativeConfig("browser-only");
+    enabled.nativeFullAccess = true;
+    const journal = installCodexIntegration(enabled);
+    expect(journal.nativeFullAccess).toEqual({
+      previousApprovalPolicy: {
+        present: true,
+        value: "on-request",
+        rawLine: 'approval_policy = "on-request" # user approval baseline',
+      },
+      previousSandboxMode: {
+        present: true,
+        value: "workspace-write",
+        rawLine: 'sandbox_mode = "workspace-write" # user sandbox baseline',
+      },
+    });
+    let installed = readFileSync(configPath, "utf8");
+    expect(installed).toContain('approval_policy = "never" # Managed by codex-chatgpt-web: Launcher Full Access disables approval prompts.');
+    expect(installed).toContain('sandbox_mode = "danger-full-access" # Managed by codex-chatgpt-web: Launcher Full Access removes Codex sandbox limits.');
+    expect(inspectCodexIntegration()).toMatchObject({ installed: true, active: true, errors: [] });
+
+    deactivateCodexIntegration();
+    const inactive = readFileSync(configPath, "utf8");
+    expect(inactive).toContain('approval_policy = "on-request" # user approval baseline');
+    expect(inactive).toContain('sandbox_mode = "workspace-write" # user sandbox baseline');
+    activateCodexIntegration();
+    installed = readFileSync(configPath, "utf8");
+    expect(installed).toContain('approval_policy = "never"');
+    expect(installed).toContain('sandbox_mode = "danger-full-access"');
+
+    const disabled = nativeConfig("browser-only");
+    disabled.nativeFullAccess = false;
+    const disabledJournal = installCodexIntegration(disabled);
+    expect(disabledJournal.nativeFullAccess).toBeUndefined();
+    const restoredWhileInstalled = readFileSync(configPath, "utf8");
+    expect(restoredWhileInstalled).toContain('approval_policy = "on-request" # user approval baseline');
+    expect(restoredWhileInstalled).toContain('sandbox_mode = "workspace-write" # user sandbox baseline');
+
+    uninstallCodexIntegration();
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+  });
+
   test("keeps the built-in openai provider without changing native feature defaults", () => {
     const { codexHome } = fixture();
     const configPath = join(codexHome, "config.toml");
