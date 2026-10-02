@@ -19,6 +19,7 @@ const {
   isChatGptCloudflareChallengeResponse,
   isTemporaryChatUrl,
   loadCommittedBrowserSurface,
+  loadCommittedTurnSurface,
   MANUAL_COMPACTION_SUBMIT_TIMEOUT_MS,
   MANUAL_SUBMIT_TIMEOUT_MS,
   automationSecuritySignalForPage,
@@ -144,6 +145,38 @@ test("primary browser bootstrap accepts only the exact committed idle document",
   assert.equal(contents.listenerCount("did-fail-load"), 0);
   assert.equal(contents.listenerCount("render-process-gone"), 0);
   assert.equal(contents.listenerCount("destroyed"), 0);
+});
+
+test("turn-tab bootstrap retries idle commit timeouts inside one browser lease", async () => {
+  const contents = new EventEmitter();
+  const calls = [];
+  let currentUrl = "about:blank";
+  let attempts = 0;
+  contents.isDestroyed = () => false;
+  contents.getURL = () => currentUrl;
+  contents.stop = () => calls.push("stop");
+  contents.loadURL = (url) => {
+    attempts += 1;
+    calls.push(["load", attempts, url]);
+    if (attempts < 3) return new Promise(() => {});
+    currentUrl = url;
+    return Promise.resolve();
+  };
+  const retries = [];
+  await loadCommittedTurnSurface(
+    contents,
+    Date.now() + 100,
+    undefined,
+    retry => retries.push(retry.attempt),
+    5,
+  );
+  assert.deepEqual(retries, [1, 2]);
+  assert.equal(calls.filter(call => call === "stop").length, 2);
+  assert.deepEqual(calls.filter(Array.isArray), [
+    ["load", 1, IDLE_BROWSER_URL],
+    ["load", 2, IDLE_BROWSER_URL],
+    ["load", 3, IDLE_BROWSER_URL],
+  ]);
 });
 
 test("primary browser bootstrap fails closed on navigation, renderer, and timeout boundaries", async () => {
