@@ -880,8 +880,12 @@ export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<
 const CHATGPT_NETWORK_ERROR = /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
 
 function chatGptNetworkErrorLabel(page: Page): Locator {
-  return page
-    .getByText(CHATGPT_NETWORK_ERROR, { exact: true })
+  const getByText = (page as Page & {
+    getByText?: Page["getByText"];
+  }).getByText;
+  return (typeof getByText === "function"
+    ? getByText.call(page, CHATGPT_NETWORK_ERROR, { exact: true })
+    : page.locator('text=/^(?:network error|a network error occurred\\.?\\s*please check your connection and try again\\.?)$/i'))
     .filter({ visible: true })
     .last();
 }
