@@ -877,6 +877,60 @@ export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<
   return visible.some(Boolean);
 }
 
+const CHATGPT_NETWORK_ERROR = /^network error$/i;
+
+/**
+ * ChatGPT currently renders some backend/network failures outside the assistant turn subtree.
+ * Bind the exact error label to its nearest Retry action so transcript prose containing the words
+ * "network error" cannot be mistaken for page-level failure UI.
+ */
+export async function chatGptNetworkErrorRetryButton(page: Page): Promise<Locator | undefined> {
+  const label = page
+    .getByText(CHATGPT_NETWORK_ERROR, { exact: true })
+    .filter({ visible: true })
+    .last();
+  if (!await label.isVisible().catch(() => false)) return undefined;
+  const container = label.locator('xpath=ancestor::*[.//button[normalize-space()="Retry"]][1]');
+  const retry = container
+    .getByRole("button", { name: "Retry", exact: true })
+    .last();
+  return await retry.isVisible().catch(() => false) ? retry : undefined;
+}
+
+export type ChatGptNetworkErrorRecoveryDecision = "none" | "wait" | "retry" | "fail";
+
+export class ChatGptNetworkErrorRecoveryTracker {
+  private retries = 0;
+
+  constructor(private readonly maxSafeRetries = 1) {}
+
+  update(state: {
+    visible: boolean;
+    externalProgressRevision: number;
+    externalToolCallsInFlight: boolean;
+    semanticOutputObserved: boolean;
+  }): ChatGptNetworkErrorRecoveryDecision {
+    if (!state.visible) return "none";
+    // An already-delivered native command may still finish successfully even after ChatGPT Web's
+    // response transport fails. Never regenerate the model turn while that side effect is live.
+    if (state.externalToolCallsInFlight) return "wait";
+    // The page Retry action can safely regenerate only before this response emitted semantic
+    // content or crossed a Codex Native boundary. Keep it one-shot so a persistent outage cannot
+    // become an unattended regeneration loop.
+    if (state.externalProgressRevision === 0
+      && !state.semanticOutputObserved
+      && this.retries < this.maxSafeRetries) {
+      this.retries += 1;
+      return "retry";
+    }
+    return "fail";
+  }
+
+  retryCount(): number {
+    return this.retries;
+  }
+}
+
 // The current UI renders message_length_exceeds_limit as an ordinary response error.
 // Observe only browser-issued submissions from this owned page after Send is activated;
 // an old response, another tab, or a background endpoint cannot classify this turn.
@@ -1371,6 +1425,7 @@ export function chatGptRetryableFailureCanRetainConversation(
   if (!turn.conversationKey) return false;
   if (!(error instanceof ChatGptWebAdapterError) || error.retryable !== true) return false;
   if (error.code !== "upstream_server_error"
+    && error.code !== "chatgpt_network_error"
     && error.code !== "chatgpt_response_page_rebind_failed"
     && error.code !== "browser_response_stalled"
     && error.code !== "browser_first_response_stalled") return false;
@@ -4345,7 +4400,12 @@ export class ChatGptBrowserWorker {
       }
       await throwIfChatGptSessionFailureAlert(page);
       const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-      if (!deliveryTimeoutVisible) await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
+      const networkErrorRetry = deliveryTimeoutVisible
+        ? undefined
+        : await chatGptNetworkErrorRetryButton(page);
+      if (!deliveryTimeoutVisible && !networkErrorRetry) {
+        await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
+      }
       let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
       if (!snapshot.responsePresent && await responseTurn.locator.count() !== 1) {
         const rebound = await this.reconcileAssistantTurnBinding(
@@ -4364,7 +4424,10 @@ export class ChatGptBrowserWorker {
       const externalProgressSnapshot = externalProgress?.snapshot();
       const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
       const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
-      if (!deliveryTimeoutProtectsActiveTool && snapshot.stoppedThinkingVisible) {
+      const networkErrorProtectsActiveTool = Boolean(networkErrorRetry) && externalToolCallsInFlight;
+      if (!deliveryTimeoutProtectsActiveTool
+        && !networkErrorProtectsActiveTool
+        && snapshot.stoppedThinkingVisible) {
         throw chatGptStoppedThinkingError();
       }
       if (externalProgress
@@ -4380,6 +4443,22 @@ export class ChatGptBrowserWorker {
         externalProgressSnapshot,
         Date.now(),
       );
+      if (networkErrorRetry) {
+        if (externalToolCallsInFlight) {
+          domHealthTracker.clearMissingResponse();
+          await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
+          continue;
+        }
+        throw new ChatGptWebAdapterError(
+          "ChatGPT Web reported a network error while waiting for a Bigger Context acknowledgement. Retry the active Codex turn.",
+          {
+            status: 502,
+            errorType: "server_error",
+            code: "chatgpt_network_error",
+            retryable: true,
+          },
+        );
+      }
       if (deliveryTimeoutTracker.update({
         alertVisible: deliveryTimeoutVisible,
         visibleText: snapshot.visibleText,
@@ -6189,6 +6268,7 @@ export class ChatGptBrowserWorker {
           : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
       );
       const deliveryTimeoutTracker = new ChatGptMessageDeliveryTimeoutTracker();
+      const networkErrorRecovery = new ChatGptNetworkErrorRecoveryTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -6218,7 +6298,12 @@ export class ChatGptBrowserWorker {
         }
         await throwIfChatGptSessionFailureAlert(page);
         const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-        if (!deliveryTimeoutVisible) await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
+        const networkErrorRetry = deliveryTimeoutVisible
+          ? undefined
+          : await chatGptNetworkErrorRetryButton(page);
+        if (!deliveryTimeoutVisible && !networkErrorRetry) {
+          await throwIfChatGptTerminalErrorAlert(responseTurn.locator);
+        }
 
         if (mode.localTools && await resolveChatGptToolConfirmation(
           page,
@@ -6279,10 +6364,11 @@ export class ChatGptBrowserWorker {
         const externalProgressSnapshot = turn.externalProgress?.snapshot();
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
         const deliveryTimeoutProtectsActiveTool = deliveryTimeoutVisible && externalToolCallsInFlight;
+        const networkErrorProtectsActiveTool = Boolean(networkErrorRetry) && externalToolCallsInFlight;
 
-        // Outside the exact delivery-timeout + active-tool exception, preserve the original
+        // Outside the exact frontend-error + active-tool exceptions, preserve the original
         // response-error ordering: terminal UI wins before we acknowledge more MCP work.
-        if (!deliveryTimeoutProtectsActiveTool) {
+        if (!deliveryTimeoutProtectsActiveTool && !networkErrorProtectsActiveTool) {
           if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
           if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
             await diagnostics.capture(page, "stream-recovery-polling-timeout").catch(() => {});
@@ -6317,6 +6403,73 @@ export class ChatGptBrowserWorker {
           Date.now(),
         );
 
+        const networkErrorDecision = networkErrorRecovery.update({
+          visible: Boolean(networkErrorRetry),
+          externalProgressRevision: externalProgressSnapshot?.revision ?? 0,
+          externalToolCallsInFlight,
+          semanticOutputObserved: snapshot.visibleText.trim().length > 0
+            || snapshot.traceBlocks.some(block => block.text.trim().length > 0),
+        });
+        if (networkErrorDecision === "wait") {
+          // The browser transport failed, but the native operation is authoritative live work.
+          // Let its result reach the broker before deciding whether this response must be resumed.
+          domHealthTracker.clearMissingResponse();
+          await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
+          continue;
+        }
+        if (networkErrorDecision === "retry") {
+          await diagnostics.capture(page, "network-error-safe-retry").catch(() => {});
+          try {
+            await networkErrorRetry!.press("Enter", { noWaitAfter: true, timeout: 5_000 });
+          } catch (cause) {
+            throw new ChatGptWebAdapterError(
+              "ChatGPT Web reported a network error and its one safe Retry action could not be activated.",
+              {
+                status: 502,
+                errorType: "server_error",
+                code: "chatgpt_network_error",
+                retryable: true,
+                cause,
+              },
+            );
+          }
+          // This retry is allowed only before semantic/native progress, so no user-visible result
+          // or side effect is being replayed. Reset response-local monotonic observers to the new
+          // generation without resubmitting the original prompt.
+          completionTracker = new ChatGptCompletionTracker();
+          domHealthTracker = new ChatGptTurnDomHealthTracker();
+          runningProgressTracker = new ChatGptRunningProgressTracker(
+            turn.compaction
+              ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
+              : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
+          );
+          responseDomCache.key = undefined;
+          responseDomCache.snapshot = undefined;
+          completionFenceRevision = undefined;
+          completionReceiptRecoveryState = {
+            recoveries: 0,
+            noProgressRecoveries: 0,
+            progressRevision: 0,
+          };
+          markdownBuffer = new ChatGptMarkdownBuffer();
+          visibleTrace = new ChatGptVisibleTraceTracker();
+          bufferedFinalDeltas = [];
+          await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
+          continue;
+        }
+        if (networkErrorDecision === "fail") {
+          await diagnostics.capture(page, "network-error-after-progress").catch(() => {});
+          throw new ChatGptWebAdapterError(
+            "ChatGPT Web reported a network error after this response had already made semantic or Codex Native progress. The bridge will not click Retry because that could repeat side-effectful tool work; resume this retained turn instead.",
+            {
+              status: 502,
+              errorType: "server_error",
+              code: "chatgpt_network_error",
+              retryable: true,
+            },
+          );
+        }
+
         // A delivery-timeout banner is a frontend transport symptom, not proof that the backend or
         // Codex bridge stopped. While any native command remains in flight, response-level error UI
         // cannot retire the turn. Once all commands finish, only five minutes without subsequent
@@ -6341,7 +6494,11 @@ export class ChatGptBrowserWorker {
           );
         }
 
-        if (!snapshot.responsePresent && (externalProgressLive || deliveryTimeoutProtectsActiveTool)) {
+        if (!snapshot.responsePresent && (
+          externalProgressLive
+          || deliveryTimeoutProtectsActiveTool
+          || networkErrorProtectsActiveTool
+        )) {
           // Proven MCP activity outranks a momentarily unavailable response DOM. The delivery-timeout
           // path additionally trusts an actually in-flight command even after the ordinary DOM-health
           // liveness horizon, because the command itself is authoritative bridge activity.
