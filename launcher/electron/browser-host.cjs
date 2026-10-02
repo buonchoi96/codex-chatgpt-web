@@ -442,7 +442,11 @@ async function loadCommittedTurnSurface(
       // Keep a short yield between retries so Electron can finish renderer/process handoff after a
       // completed compaction. The retry stays inside one browser turn: Codex never sees a failed
       // observer merely because the new WebContents took >10s to commit its harmless idle page.
-      await sleep(Math.min(250, Math.max(1, deadlineAt - Date.now())));
+      await sleep(Math.min(
+        250,
+        Math.max(1, attemptTimeoutMs),
+        Math.max(1, deadlineAt - Date.now()),
+      ));
       signal?.throwIfAborted();
     }
   }
