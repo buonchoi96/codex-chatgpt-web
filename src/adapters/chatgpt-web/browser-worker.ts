@@ -1003,6 +1003,19 @@ type SelectedChatGptWebModelMode = ChatGptWebModelMode & {
   usageModel?: ChatGptUsageModel;
 };
 
+/**
+ * Some ChatGPT Web builds expose a transient backend failure only as a page-level red ARIA alert
+ * with a Retry action. Bind the fallback to that alert-owned button so ordinary transcript text or
+ * unrelated Retry controls cannot arm recovery. This detector never clicks the action itself.
+ */
+export async function chatGptPageRetryErrorVisible(page: Page): Promise<boolean> {
+  const retry = page
+    .locator('[role="alert"]')
+    .getByRole("button", { name: "Retry", exact: true })
+    .last();
+  return retry.isVisible().catch(() => false);
+}
+
 export async function chatGptTerminalErrorVisible(scope: ChatGptTextScope): Promise<boolean> {
   if (await scope.getByTestId("regenerate-thread-error-button").last().isVisible().catch(() => false)) {
     return true;
@@ -4429,11 +4442,15 @@ export class ChatGptBrowserWorker {
       const networkErrorRetry = networkErrorVisible
         ? await chatGptNetworkErrorRetryButton(page)
         : undefined;
-      const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+      const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+        ? await chatGptPageRetryErrorVisible(page)
+        : false;
+      const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible && !pageRetryErrorVisible
         ? await chatGptTerminalErrorVisible(responseTurn.locator)
         : false;
       const frontendErrorVisible = deliveryTimeoutVisible
         || networkErrorVisible
+        || pageRetryErrorVisible
         || terminalErrorVisible;
       let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
       if (!snapshot.responsePresent && await responseTurn.locator.count() !== 1) {
@@ -6354,11 +6371,15 @@ export class ChatGptBrowserWorker {
         const networkErrorRetry = networkErrorVisible
           ? await chatGptNetworkErrorRetryButton(page)
           : undefined;
-        const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+        const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+          ? await chatGptPageRetryErrorVisible(page)
+          : false;
+        const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible && !pageRetryErrorVisible
           ? await chatGptTerminalErrorVisible(responseTurn.locator)
           : false;
         const frontendErrorVisible = deliveryTimeoutVisible
           || networkErrorVisible
+          || pageRetryErrorVisible
           || terminalErrorVisible;
 
         if (mode.localTools && await resolveChatGptToolConfirmation(

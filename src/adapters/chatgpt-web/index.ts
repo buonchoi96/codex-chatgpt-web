@@ -699,6 +699,36 @@ export function createChatGptWebAdapter(
           : {}),
       };
     };
+    const compilePreparedInput = (
+      input: CodexParsedRequest,
+      turnToken?: string,
+      activeTurnRecovery = false,
+    ) => {
+      let compiled = compileChatGptWebPrompt(
+        input,
+        turnCapabilities,
+        turnToken,
+        compileOptionsFor(input, activeTurnRecovery),
+      );
+      // Recovery summaries may reduce retransmission cost, but they must never change the physical
+      // transport chosen for canonical archive-scale history. A fresh surface must receive the same
+      // complete context.txt and historical images that the original Codex context requires.
+      if (checkpointInput.applied && input === checkpointInput.parsed && !activeTurnRecovery) {
+        const canonicalCompiled = compileChatGptWebPrompt(
+          parsed,
+          turnCapabilities,
+          turnToken,
+          compileOptionsFor(parsed),
+        );
+        if (canonicalCompiled.archive) {
+          compiled = canonicalCompiled;
+          console.info(
+            `[chatgpt-web] passive recovery checkpoint kept canonical archive transport trace=${traceId}`,
+          );
+        }
+      }
+      return compiled;
+    };
     if (captureLunaCheckpoint) {
       console.info(
         `[chatgpt-web] Luna rolling checkpoint applied=${checkpointInput.applied}${checkpointInput.reason ? ` reason=${checkpointInput.reason}` : ""}`,
@@ -946,12 +976,7 @@ export function createChatGptWebAdapter(
           ? { nativeConnector: true }
           : {}),
         prepare: async () => ({
-          ...compileChatGptWebPrompt(
-            checkpointInput.parsed,
-            turnCapabilities,
-            undefined,
-            compileOptionsFor(checkpointInput.parsed),
-          ),
+          ...compilePreparedInput(checkpointInput.parsed, undefined),
           release: () => {},
         }),
         abortSignal: browserAbort.signal,
@@ -999,30 +1024,7 @@ export function createChatGptWebAdapter(
         activeToken = turnToken;
       }
       try {
-        let compiled = compileChatGptWebPrompt(
-          input,
-          turnCapabilities,
-          turnToken,
-          compileOptionsFor(input, activeTurnRecovery),
-        );
-        if (checkpointInput.applied
-          && input === checkpointInput.parsed
-          && !activeTurnRecovery
-          && !compiled.archive
-          && !compiled.multipart) {
-          const canonicalCompiled = compileChatGptWebPrompt(
-            parsed,
-            turnCapabilities,
-            turnToken,
-            compileOptionsFor(parsed),
-          );
-          if (canonicalCompiled.archive) {
-            compiled = canonicalCompiled;
-            console.info(
-              `[chatgpt-web] passive recovery checkpoint kept canonical archive transport trace=${traceId}`,
-            );
-          }
-        }
+        const compiled = compilePreparedInput(input, turnToken, activeTurnRecovery);
         // Publish only after preparation succeeds: otherwise its failure revokes the token
         // before the response observer uses it and masks the cause as an expired capability.
         observeCapabilityRetirement(turnToken, externalProgress);

@@ -130,9 +130,13 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
   expect(reduced.archive).toBeUndefined();
 
   const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
+  expect(adapterSource).toContain("const compilePreparedInput = (");
   expect(adapterSource).toContain("checkpointInput.applied");
   expect(adapterSource).toContain("const canonicalCompiled = compileChatGptWebPrompt(");
   expect(adapterSource).toContain("if (canonicalCompiled.archive)");
+  expect(adapterSource).not.toContain("&& !compiled.archive");
+  expect(adapterSource).toContain("...compilePreparedInput(checkpointInput.parsed, undefined)");
+  expect(adapterSource).toContain("const compiled = compilePreparedInput(input, turnToken, activeTurnRecovery)");
   expect(adapterSource).toContain("passive recovery checkpoint kept canonical archive transport");
 });
 
