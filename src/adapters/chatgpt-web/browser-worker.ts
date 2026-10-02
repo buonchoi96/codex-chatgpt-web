@@ -1009,10 +1009,12 @@ type SelectedChatGptWebModelMode = ChatGptWebModelMode & {
  * unrelated Retry controls cannot arm recovery. This detector never clicks the action itself.
  */
 export async function chatGptPageRetryErrorVisible(page: Page): Promise<boolean> {
-  const retry = page
-    .locator('[role="alert"]')
-    .getByRole("button", { name: "Retry", exact: true })
-    .last();
+  const alert = page.locator('[role="alert"]');
+  const getByRole = (alert as Locator & {
+    getByRole?: Locator["getByRole"];
+  }).getByRole;
+  if (typeof getByRole !== "function") return false;
+  const retry = getByRole.call(alert, "button", { name: "Retry", exact: true }).last();
   return retry.isVisible().catch(() => false);
 }
 
