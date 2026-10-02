@@ -1029,7 +1029,7 @@ export function createChatGptWebAdapter(
       ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput, lunaActiveTurnRecovery) } : {}),
       ...(conversationKey ? { conversationKey } : {}),
       ...(retainConversation ? { retainConversation: true } : {}),
-      ...(lunaActiveTurnRecovery ? { retainConversationOnRetry: true } : {}),
+      ...(conversationKey ? { retainConversationOnRetry: true } : {}),
       abortSignal: browserAbort.signal,
       ...(parsed._compactionRequest ? { compaction: true } : {}),
       ...submissionLifecycle,
