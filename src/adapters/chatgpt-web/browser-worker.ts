@@ -4492,7 +4492,7 @@ export class ChatGptBrowserWorker {
         currentText: snapshot.visibleText,
         completionActionVisible: snapshot.completionActionVisible,
         composerReady,
-        externalProgressLive: externalProgressLive || deliveryTimeoutProtectsActiveTool,
+        externalProgressLive: externalProgressLive || frontendErrorVisible,
       });
       if (domError) throw new Error(domError);
       if (completionTracker.update({
@@ -6839,7 +6839,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: "",
             completionActionVisible: false,
-            externalProgressLive: externalProgressLive || deliveryTimeoutProtectsActiveTool,
+            externalProgressLive: externalProgressLive || frontendErrorVisible,
           });
           if (domError) throw new Error(domError);
         }
