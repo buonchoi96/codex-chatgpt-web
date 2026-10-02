@@ -387,7 +387,9 @@ function loadCommittedBrowserSurface(
       finish(browserIdleDocumentTimeoutError(timeoutMs));
       if (!contents.isDestroyed()) contents.stop();
     }, timeoutMs);
-    timeout.unref?.();
+    // This timer is the correctness boundary for a navigation promise that may never settle.
+    // Keep it referenced: otherwise a pending bootstrap can outlive its only deadline in tests or
+    // during launcher shutdown races, leaving the turn promise unresolved.
     contents.on("did-stop-loading", onReady);
     contents.on("did-finish-load", onReady);
     contents.on("did-fail-load", onFailed);
