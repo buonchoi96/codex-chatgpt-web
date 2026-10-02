@@ -877,22 +877,31 @@ export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<
   return visible.some(Boolean);
 }
 
-const CHATGPT_NETWORK_ERROR = /^network error$/i;
+const CHATGPT_NETWORK_ERROR = /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
+
+function chatGptNetworkErrorLabel(page: Page): Locator {
+  return page
+    .getByText(CHATGPT_NETWORK_ERROR, { exact: true })
+    .filter({ visible: true })
+    .last();
+}
 
 /**
  * ChatGPT currently renders some backend/network failures outside the assistant turn subtree.
- * Bind the exact error label to its nearest Retry action so transcript prose containing the words
- * "network error" cannot be mistaken for page-level failure UI.
+ * Observe the exact page-level failure text even when the current Web build exposes no Retry
+ * button. This visibility signal owns the five-minute frontend-error watchdog.
+ */
+export async function chatGptNetworkErrorVisible(page: Page): Promise<boolean> {
+  return chatGptNetworkErrorLabel(page).isVisible().catch(() => false);
+}
+
+/**
+ * Bind a visible network failure to its nearest Retry action so transcript prose containing the
+ * words "network error" cannot be mistaken for page-level failure. The Retry action is optional:
+ * progressed turns never require it, and some current Web builds render only the red alert.
  */
 export async function chatGptNetworkErrorRetryButton(page: Page): Promise<Locator | undefined> {
-  const getByText = (page as Page & {
-    getByText?: Page["getByText"];
-  }).getByText;
-  const label = (typeof getByText === "function"
-    ? getByText.call(page, CHATGPT_NETWORK_ERROR, { exact: true })
-    : page.locator('text=/^network error$/i'))
-    .filter({ visible: true })
-    .last();
+  const label = chatGptNetworkErrorLabel(page);
   if (!await label.isVisible().catch(() => false)) return undefined;
   const container = label.locator('xpath=ancestor::*[.//button[normalize-space()="Retry"]][1]');
   const retry = container
@@ -4410,14 +4419,17 @@ export class ChatGptBrowserWorker {
       }
       await throwIfChatGptSessionFailureAlert(page);
       const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-      const networkErrorRetry = deliveryTimeoutVisible
-        ? undefined
-        : await chatGptNetworkErrorRetryButton(page);
-      const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorRetry
+      const networkErrorVisible = deliveryTimeoutVisible
+        ? false
+        : await chatGptNetworkErrorVisible(page);
+      const networkErrorRetry = networkErrorVisible
+        ? await chatGptNetworkErrorRetryButton(page)
+        : undefined;
+      const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
         ? await chatGptTerminalErrorVisible(responseTurn.locator)
         : false;
       const frontendErrorVisible = deliveryTimeoutVisible
-        || Boolean(networkErrorRetry)
+        || networkErrorVisible
         || terminalErrorVisible;
       let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
       if (!snapshot.responsePresent && await responseTurn.locator.count() !== 1) {
@@ -6332,14 +6344,17 @@ export class ChatGptBrowserWorker {
         }
         await throwIfChatGptSessionFailureAlert(page);
         const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-        const networkErrorRetry = deliveryTimeoutVisible
-          ? undefined
-          : await chatGptNetworkErrorRetryButton(page);
-        const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorRetry
+        const networkErrorVisible = deliveryTimeoutVisible
+          ? false
+          : await chatGptNetworkErrorVisible(page);
+        const networkErrorRetry = networkErrorVisible
+          ? await chatGptNetworkErrorRetryButton(page)
+          : undefined;
+        const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
           ? await chatGptTerminalErrorVisible(responseTurn.locator)
           : false;
         const frontendErrorVisible = deliveryTimeoutVisible
-          || Boolean(networkErrorRetry)
+          || networkErrorVisible
           || terminalErrorVisible;
 
         if (mode.localTools && await resolveChatGptToolConfirmation(

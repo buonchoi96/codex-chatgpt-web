@@ -7,6 +7,7 @@ import {
   EnhancedRecoveryCheckpointStore,
 } from "../src/adapters/chatgpt-web/enhanced-recovery-checkpoint";
 import { CompactionTransactionStore } from "../src/adapters/chatgpt-web/compaction-transaction";
+import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -89,6 +90,50 @@ test("durable recovery checkpoint applies only to its exact canonical prefix", (
   const modelRejected = new EnhancedRecoveryCheckpointStore(path).apply(wrongModel);
   expect(modelRejected.applied).toBe(false);
   expect(modelRejected.reason).toContain("model identity mismatch");
+});
+
+test("large canonical history cannot be downgraded from ZIP transport by passive recovery checkpointing", () => {
+  const root = mkdtempSync(join(tmpdir(), "enhanced-recovery-archive-"));
+  roots.push(root);
+  const store = new EnhancedRecoveryCheckpointStore(join(root, "checkpoints.json"));
+  const source = parsed([
+    { role: "developer", content: "Keep the complete canonical evidence.", timestamp: 1 },
+    { role: "user", content: "Continue the current long-running task.", timestamp: 2 },
+    {
+      role: "assistant",
+      timestamp: 3,
+      content: [{ type: "toolCall", id: "call-large", name: "inspect", arguments: { path: "repo" } }],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-large",
+      toolName: "inspect",
+      content: "x".repeat(180_000),
+      isError: false,
+      timestamp: 4,
+    },
+  ]);
+  store.commit(source, "Objective: continue.\nState: verified large evidence.\nPending: continue.");
+  const checkpointed = store.apply(source);
+  expect(checkpointed.applied).toBeTrue();
+
+  const capabilities = {
+    localToolsEnabled: true,
+    solAvailable: true,
+    extraHighAvailable: true,
+    proAvailable: true,
+  };
+  const turnToken = "turn_12345678901234567890123456789012";
+  const canonical = compileChatGptWebPrompt(source, capabilities, turnToken);
+  const reduced = compileChatGptWebPrompt(checkpointed.parsed, capabilities, turnToken);
+  expect(canonical.archive).toBeDefined();
+  expect(reduced.archive).toBeUndefined();
+
+  const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
+  expect(adapterSource).toContain("checkpointInput.applied");
+  expect(adapterSource).toContain("const canonicalCompiled = compileChatGptWebPrompt(");
+  expect(adapterSource).toContain("if (canonicalCompiled.archive)");
+  expect(adapterSource).toContain("passive recovery checkpoint kept canonical archive transport");
 });
 
 test("recovery checkpoint is never created across an incomplete tool boundary", () => {

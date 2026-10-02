@@ -999,12 +999,30 @@ export function createChatGptWebAdapter(
         activeToken = turnToken;
       }
       try {
-        const compiled = compileChatGptWebPrompt(
+        let compiled = compileChatGptWebPrompt(
           input,
           turnCapabilities,
           turnToken,
           compileOptionsFor(input, activeTurnRecovery),
         );
+        if (checkpointInput.applied
+          && input === checkpointInput.parsed
+          && !activeTurnRecovery
+          && !compiled.archive
+          && !compiled.multipart) {
+          const canonicalCompiled = compileChatGptWebPrompt(
+            parsed,
+            turnCapabilities,
+            turnToken,
+            compileOptionsFor(parsed),
+          );
+          if (canonicalCompiled.archive) {
+            compiled = canonicalCompiled;
+            console.info(
+              `[chatgpt-web] passive recovery checkpoint kept canonical archive transport trace=${traceId}`,
+            );
+          }
+        }
         // Publish only after preparation succeeds: otherwise its failure revokes the token
         // before the response observer uses it and masks the cause as an expired capability.
         observeCapabilityRetirement(turnToken, externalProgress);
