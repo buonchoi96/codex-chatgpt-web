@@ -885,8 +885,12 @@ const CHATGPT_NETWORK_ERROR = /^network error$/i;
  * "network error" cannot be mistaken for page-level failure UI.
  */
 export async function chatGptNetworkErrorRetryButton(page: Page): Promise<Locator | undefined> {
-  const label = page
-    .getByText(CHATGPT_NETWORK_ERROR, { exact: true })
+  const getByText = (page as Page & {
+    getByText?: Page["getByText"];
+  }).getByText;
+  const label = (typeof getByText === "function"
+    ? getByText.call(page, CHATGPT_NETWORK_ERROR, { exact: true })
+    : page.locator('text=/^network error$/i'))
     .filter({ visible: true })
     .last();
   if (!await label.isVisible().catch(() => false)) return undefined;
