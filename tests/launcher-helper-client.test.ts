@@ -438,6 +438,8 @@ test("helper exit releases launcher ownership before surfacing a retryable fresh
       });
     },
   });
+  const helperScript = join(root, "unused-helper.cjs");
+  writeFileSync(helperScript, "", { mode: 0o700 });
   const descriptorPath = join(root, "launcher.json");
   writeFileSync(descriptorPath, JSON.stringify({
     version: 3,
@@ -449,7 +451,7 @@ test("helper exit releases launcher ownership before surfacing a retryable fresh
       endpoint: `http://127.0.0.1:${server.port}`,
       token: "launcher-control-token-0123456789abcdefghijklmnop",
     },
-    helper: { executable: process.execPath, script: join(root, "unused-helper.cjs") },
+    helper: { executable: process.execPath, script: helperScript },
     partition: "persist:codex-web-gpt-chatgpt",
     idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "launcher_surface_id_0123456789AB",

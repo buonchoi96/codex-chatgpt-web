@@ -3990,8 +3990,8 @@ test("effort menu waiting stops when ChatGPT reports an expired session", async 
 
 test("terminal model errors are scoped to the new assistant turn instead of global page alerts", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
-  expect(workerSource).toContain("throwIfChatGptTerminalErrorAlert(responseTurn.locator)");
-  expect(workerSource).not.toContain("throwIfChatGptTerminalErrorAlert(page)");
+  expect(workerSource).toContain("chatGptTerminalErrorVisible(responseTurn.locator)");
+  expect(workerSource).not.toContain("chatGptTerminalErrorVisible(page)");
 });
 
 test("submission acceptance stops when its stage is aborted", async () => {
