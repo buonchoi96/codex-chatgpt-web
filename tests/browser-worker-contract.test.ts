@@ -3546,7 +3546,10 @@ test("page-level ChatGPT message delivery timeout is observed without clicking R
   );
   expect(workerSource.match(/await chatGptMessageDeliveryTimeoutVisible\(page\);/g)?.length).toBe(2);
   expect(workerSource).toContain(
-    "if (!deliveryTimeoutVisible) await throwIfChatGptTerminalErrorAlert(responseTurn.locator);",
+    "if (!deliveryTimeoutVisible && !networkErrorRetry) {",
+  );
+  expect(workerSource).toContain(
+    "await throwIfChatGptTerminalErrorAlert(responseTurn.locator);",
   );
 });
 
@@ -4792,7 +4795,8 @@ test("both response loops check explicit Stopped thinking before acknowledging f
     expect(failure).toBeGreaterThan(0);
     expect(acknowledgement).toBeGreaterThan(failure);
   }
-  expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(2);
+  // Two ordinary external-progress clears plus two explicit network-error protection paths.
+  expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(4);
 });
 
 test("a ready composer is terminal UI evidence when ChatGPT omits its completed-turn action", () => {
