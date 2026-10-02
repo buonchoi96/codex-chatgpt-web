@@ -332,6 +332,12 @@ class BrowserTurnCancelledError extends Error {
   }
 }
 
+function browserIdleDocumentTimeoutError(timeoutMs) {
+  const error = new Error(`Browser idle document did not commit within ${timeoutMs}ms`);
+  error.code = "browser_idle_document_timeout";
+  return error;
+}
+
 function loadCommittedBrowserSurface(
   contents,
   url,
@@ -378,7 +384,7 @@ function loadCommittedBrowserSurface(
     };
     const onDestroyed = () => finish(new Error("Browser closed during idle document bootstrap"));
     const timeout = setTimeout(() => {
-      finish(new Error(`Browser idle document did not commit within ${timeoutMs}ms`));
+      finish(browserIdleDocumentTimeoutError(timeoutMs));
       if (!contents.isDestroyed()) contents.stop();
     }, timeoutMs);
     timeout.unref?.();
@@ -395,6 +401,56 @@ function loadCommittedBrowserSurface(
       finish(error instanceof Error ? error : new Error(String(error)));
     }
   });
+}
+
+async function loadCommittedTurnSurface(
+  contents,
+  deadlineAt,
+  signal,
+  onRetry = () => {},
+  attemptTimeoutMs = PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS,
+) {
+  if (!Number.isFinite(deadlineAt)) throw new Error("Browser turn bootstrap deadline is invalid");
+  let attempt = 0;
+  for (;;) {
+    signal?.throwIfAborted();
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      throw browserIdleDocumentTimeoutError(TURN_TAB_BOOTSTRAP_TIMEOUT_MS);
+    }
+    try {
+      await loadCommittedBrowserSurface(
+        contents,
+        IDLE_BROWSER_URL,
+        Math.max(1, Math.min(attemptTimeoutMs, remainingMs)),
+      );
+      return;
+    } catch (error) {
+      const retryable = error && typeof error === "object"
+        && error.code === "browser_idle_document_timeout"
+        && !contents.isDestroyed()
+        && Date.now() < deadlineAt
+        && !signal?.aborted;
+      if (!retryable) throw error;
+      attempt += 1;
+      onRetry({
+        attempt,
+        remainingMs: Math.max(0, deadlineAt - Date.now()),
+      });
+      // Keep a short yield between retries so Electron can finish renderer/process handoff after a
+      // completed compaction. The retry stays inside one browser turn: Codex never sees a failed
+      // observer merely because the new WebContents took >10s to commit its harmless idle page.
+      await Promise.race([
+        sleep(Math.min(250, Math.max(1, deadlineAt - Date.now()))),
+        signal
+          ? new Promise((_, reject) => {
+              const onAbort = () => reject(signal.reason);
+              signal.addEventListener("abort", onAbort, { once: true });
+            })
+          : new Promise(() => {}),
+      ]);
+    }
+  }
 }
 
 class BrowserHost {
@@ -825,7 +881,19 @@ class BrowserHost {
     try {
       signal?.throwIfAborted();
       await Promise.race([(async () => {
-        await loadCommittedBrowserSurface(tab.view.webContents, IDLE_BROWSER_URL);
+        await loadCommittedTurnSurface(
+          tab.view.webContents,
+          tab.bootstrapDeadlineAt,
+          signal,
+          ({ attempt, remainingMs }) => {
+            this.logger.warn("browser.tab_bootstrap_retry", {
+              tabId: tab.id,
+              traceId: tab.traceId,
+              attempt,
+              remainingMs,
+            });
+          },
+        );
         signal?.throwIfAborted();
         await this.markTurnTabSurface(tab);
       })(), aborted]);
@@ -3386,6 +3454,7 @@ module.exports = {
   isSameOriginAuthenticationRedirect,
   isTemporaryChatUrl,
   loadCommittedBrowserSurface,
+  loadCommittedTurnSurface,
   MANUAL_SUBMIT_TIMEOUT_MS,
   MANUAL_COMPACTION_SUBMIT_TIMEOUT_MS,
   navigationErrorForLog,
