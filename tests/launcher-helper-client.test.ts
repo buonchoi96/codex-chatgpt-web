@@ -414,11 +414,53 @@ test("structured helper errors preserve the ChatGPT adapter failure contract", a
   });
 });
 
-test("helper exit settles the active turn immediately with a retryable fresh-transport error", async () => {
+test("helper exit releases launcher ownership before surfacing a retryable fresh-transport error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-helper-exit-release-"));
+  roots.push(root);
+  let releaseEnd!: () => void;
+  const endGate = new Promise<void>(resolve => { releaseEnd = resolve; });
+  let endObserved = false;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.json() as Record<string, unknown>;
+      if (body.phase === "end") {
+        endObserved = true;
+        await endGate;
+        return Response.json({ ok: true, cancelledByUser: false });
+      }
+      return Response.json({
+        ok: true,
+        surfaceId: "launcher_surface_id_0123456789AB",
+        reused: false,
+        connectorBound: false,
+      });
+    },
+  });
+  const descriptorPath = join(root, "launcher.json");
+  writeFileSync(descriptorPath, JSON.stringify({
+    version: 3,
+    kind: LAUNCHER_BROWSER_HOST_KIND,
+    profile: "production",
+    pid: process.pid,
+    endpoint: `http://127.0.0.1:${server.port}`,
+    control: {
+      endpoint: `http://127.0.0.1:${server.port}`,
+      token: "launcher-control-token-0123456789abcdefghijklmnop",
+    },
+    helper: { executable: process.execPath, script: join(root, "unused-helper.cjs") },
+    partition: "persist:codex-web-gpt-chatgpt",
+    idleUrl: LAUNCHER_BROWSER_IDLE_URL,
+    surfaceId: "launcher_surface_id_0123456789AB",
+    surfaceTargets: { launcher_surface_id_0123456789AB: "native-owned-target" },
+    createdAt: new Date().toISOString(),
+  }), { mode: 0o600 });
+
   const client = new LauncherBrowserHelperClient({
     appName: "Codex Native2",
     browserHost: "launcher",
-    browserHostDescriptorPath: "/missing/launcher.json",
+    browserHostDescriptorPath: descriptorPath,
     storageStatePath: "/durable/unused-state.json",
     chromeExecutablePath: "/durable/unused-chrome",
     turnTimeoutMs: 60_000,
@@ -437,6 +479,7 @@ test("helper exit settles the active turn immediately with a retryable fresh-tra
   };
   const child = { pid: process.pid };
   internal.child = child;
+  let settled = false;
   const result = new Promise<string>((resolveResult, rejectResult) => {
     internal.pending.set("helper-exit-123", {
       turn: {
@@ -451,9 +494,18 @@ test("helper exit settles the active turn immediately with a retryable fresh-tra
       reject: rejectResult,
     });
   });
+  void result.finally(() => { settled = true; }).catch(() => {});
   const logger = spyOn(console, "error").mockImplementation(() => {});
   try {
     internal.handleExit(child, new Error("helper transport exited"));
+    for (let attempt = 0; attempt < 20 && !endObserved; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(endObserved).toBeTrue();
+    expect(settled).toBeFalse();
+    expect(internal.pending.has("helper-exit-123")).toBeTrue();
+
+    releaseEnd();
     const error = await result.then(() => undefined, failure => failure);
     expect(error).toBeInstanceOf(ChatGptWebAdapterError);
     expect(error).toMatchObject({
@@ -463,9 +515,10 @@ test("helper exit settles the active turn immediately with a retryable fresh-tra
       retryable: true,
     });
     expect(internal.pending.has("helper-exit-123")).toBeFalse();
-    await new Promise(resolve => setImmediate(resolve));
   } finally {
+    releaseEnd();
     logger.mockRestore();
+    await server.stop(true);
   }
 });
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptCompactionSupersedesCompletionRecovery, chatGptStreamRecoveryPollingTimedOut, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSelectedConnectorSelector, CHATGPT_SELECTED_CONNECTOR_SELECTOR, CHATGPT_COMPOSER_NON_DRAFT_SELECTOR, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, chatGptMessageDeliveryTimeoutVisible, CHATGPT_MESSAGE_DELIVERY_TIMEOUT_STALL_MS, ChatGptMessageDeliveryTimeoutTracker, chatGptNetworkErrorRetryButton, ChatGptNetworkErrorRecoveryTracker, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_RECEIPT_SETTLE_GRACE_MS, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES, MAX_CHATGPT_COMPLETION_RECEIPT_NO_PROGRESS_RECOVERIES, advanceChatGptCompletionReceiptRecovery, chatGptCompletionReceiptRecoveryPrompt, chatGptCompactionSupersedesCompletionRecovery, chatGptStreamRecoveryPollingTimedOut, chatGptFinalIndicatesDeveloperMcpUnavailable, chatGptFinalIndicatesSafetyBlocked, chatGptRetryableFailureCanRetainConversation, waitForChatGptCompletionReceipt, chatGptTurnIsComplete, CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, CHATGPT_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS, CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS, ChatGptRunningProgressTracker, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSelectedConnectorSelector, CHATGPT_SELECTED_CONNECTOR_SELECTOR, CHATGPT_COMPOSER_NON_DRAFT_SELECTOR, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, chatGptMessageDeliveryTimeoutVisible, CHATGPT_MESSAGE_DELIVERY_TIMEOUT_STALL_MS, ChatGptMessageDeliveryTimeoutTracker, chatGptNetworkErrorRetryButton, ChatGptNetworkErrorRecoveryTracker, chatGptTerminalErrorVisible, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -3545,11 +3545,12 @@ test("page-level ChatGPT message delivery timeout is observed without clicking R
     "utf8",
   );
   expect(workerSource.match(/await chatGptMessageDeliveryTimeoutVisible\(page\);/g)?.length).toBe(2);
+  expect(workerSource.match(/await chatGptTerminalErrorVisible\(responseTurn\.locator\)/g)?.length).toBe(2);
   expect(workerSource).toContain(
-    "if (!deliveryTimeoutVisible && !networkErrorRetry) {",
+    "const frontendErrorVisible = deliveryTimeoutVisible",
   );
   expect(workerSource).toContain(
-    "await throwIfChatGptTerminalErrorAlert(responseTurn.locator);",
+    'diagnostics.capture(page, "frontend-error-semantic-stall")',
   );
 });
 
@@ -3591,6 +3592,16 @@ test("page-level network error is bound to its Retry action instead of response 
   );
   expect(workerSource.match(/await chatGptNetworkErrorRetryButton\(page\);/g)?.length).toBe(2);
   expect(workerSource).toContain('code: "chatgpt_network_error"');
+});
+
+test("post-model submission baseline is stage-bounded and can rebind a stalled launcher page", () => {
+  const workerSource = readFileSync(
+    new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url),
+    "utf8",
+  );
+  expect(workerSource).toContain("captureSubmissionBaselineWithRecovery");
+  expect(workerSource).toContain('"submission_baseline"');
+  expect(workerSource).toContain("await rebindLauncherPage(rebindAttempts, error, signal);");
 });
 
 test("network-error recovery retries only once before semantic or native progress", () => {
@@ -3723,6 +3734,7 @@ test("the known terminal ChatGPT error alert returns a structured retryable fail
     "Something went wrong. If this issue persists please contact us through our help center at help.openai.com.",
   );
 
+  expect(await chatGptTerminalErrorVisible(fixture.page)).toBeTrue();
   await expect(throwIfChatGptTerminalErrorAlert(fixture.page)).rejects.toMatchObject({
     name: "ChatGptWebAdapterError",
     status: 502,

@@ -734,24 +734,29 @@ export class LauncherBrowserHelperClient {
     for (const id of [...this.pending.keys()]) {
       const pending = this.pending.get(id);
       if (!pending) continue;
-      // Settle the outer Codex request immediately. Waiting for launcher cleanup here leaves the
-      // response stream open after the helper is already dead, which makes Codex burn reconnect
-      // attempts against an impossible transport. Cleanup remains best-effort and independently
-      // observable through the launcher logs.
+      // Keep the outer response stream alive until the launcher has released this exact browser
+      // owner. Rejecting first lets native Codex start its reconnect budget while the stale tab is
+      // still retiring, so several reconnect attempts can be consumed before a replacement surface
+      // is even allowed to open. The end request is already bounded by LAUNCHER_TURN_END_TIMEOUT_MS.
       const failure = pending.localFailure ?? chatGptBrowserHelperExitedError(error);
-      this.finishWithError(id, failure);
-      void notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
-        phase: "end",
-        traceId: id,
-        helperPid: child.pid!,
-        status: "failed",
-        message: "Launcher browser helper exited before completing the turn",
-      }).catch(controlError => {
-        console.error(
-          `[chatgpt-web-helper] exited helper could not release launcher turn ${id}: `
-          + `${controlError instanceof Error ? controlError.message : String(controlError)}`,
-        );
-      });
+      void (async () => {
+        try {
+          await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
+            phase: "end",
+            traceId: id,
+            helperPid: child.pid!,
+            status: "failed",
+            message: "Launcher browser helper exited before completing the turn",
+          });
+        } catch (controlError) {
+          console.error(
+            `[chatgpt-web-helper] exited helper could not release launcher turn ${id}: `
+            + `${controlError instanceof Error ? controlError.message : String(controlError)}`,
+          );
+        } finally {
+          this.finishWithError(id, failure);
+        }
+      })();
     }
   }
 
