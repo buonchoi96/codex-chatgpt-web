@@ -807,6 +807,37 @@ describe("reversible native Codex route integration", () => {
     expect(restored).toContain('model = "gpt-5.6-sol"');
   });
 
+  test("route connect recovers an active journal after another owner restored its exact baseline", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = 'model = "gpt-5.6-sol"\n';
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+
+    const active = installCodexIntegration(config);
+    const activeJournal = readFileSync(getCodexJournalPath(), "utf8");
+    const activeRecovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
+
+    const disconnected = deactivateCodexIntegration();
+    expect(disconnected).toEqual({ changed: true, active: false });
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+
+    // Simulate a crashed dev:live session whose journal still says active after a different
+    // codex-chatgpt-web owner cleanly restored the exact pre-live baseline.
+    writeFileSync(getCodexJournalPath(), activeJournal);
+    writeFileSync(getCodexJournalRecoveryPath(), activeRecovery);
+    expect(inspectCodexIntegration().journal).toMatchObject({ version: 10, active: true });
+
+    const reconnected = activateCodexIntegration();
+    expect(reconnected).toEqual({ changed: true, active: true });
+    const reconnectedText = readFileSync(configPath, "utf8");
+    expect(reconnectedText).toContain(active.interruptHook.command);
+    expect(inspectCodexIntegration()).toMatchObject({ installed: true, active: true, errors: [] });
+
+    deactivateCodexIntegration();
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+  });
+
   test("explicit setup restores a removed hook without discarding the current Codex config", () => {
     for (const ending of ["\n", "\r\n"]) {
       for (const keepRoute of [true, false]) {
