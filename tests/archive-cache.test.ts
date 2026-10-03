@@ -84,3 +84,12 @@ test("archive compression stores already compressed images and preserves skill t
   changed.skillFiles![0]!.name = "../invalid.md";
   expect(() => chatGptPromptFilePayloads(changed)).toThrow();
 });
+
+test("archive metadata keys distinguish lone UTF-16 surrogates preserved by JSON manifests", () => {
+  const prompt: CompiledChatGptWebPrompt = {text: "wrapper", images: [{ref: "ref-\uD800", imageUrl: "data:image/png;base64,YWJj"}],
+    archive: {name: "unicode-metadata.zip", contextText: "metadata fidelity"}};
+  chatGptPromptFilePayloads(prompt);
+  prompt.images[0]!.ref = "ref-\uD801";
+  const manifest = JSON.parse(strFromU8(unzipSync(chatGptPromptFilePayloads(prompt)[0]!.buffer)["manifest.json"]!));
+  expect(manifest.images[0].attachment_ref).toBe("ref-\uD801");
+});

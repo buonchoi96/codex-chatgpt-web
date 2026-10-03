@@ -2648,7 +2648,7 @@ function contextArchiveKey(prompt: CompiledChatGptWebPrompt): string {
   field(prompt.archive!.contextText);
   field(String(prompt.images.length));
   for (const image of prompt.images) {
-    field(image.ref); field(image.imageUrl); field(JSON.stringify(image.detail ?? null));
+    field(JSON.stringify(image.ref)); field(image.imageUrl); field(JSON.stringify(image.detail ?? null));
   }
   field(String(prompt.skillFiles?.length ?? 0));
   for (const file of prompt.skillFiles ?? []) { field(file.name); field(file.text); }

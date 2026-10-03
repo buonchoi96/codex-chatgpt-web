@@ -30,3 +30,12 @@ test('cached token chunks preserve surrogate pairs and tokenizer scope', () => {
   const other = new ChunkTokenEstimator(() => 99);
   expect(other.estimate('😀suffix')).toBe(99);
 });
+
+test('owned token keys preserve distinct unpaired UTF-16 code units', () => {
+  const counted: string[] = [];
+  const estimator = new ChunkTokenEstimator(text => { counted.push(text); return text.charCodeAt(0); });
+  expect(estimator.estimate('\uD800')).toBe(0xD800);
+  expect(estimator.estimate('\uD801')).toBe(0xD801);
+  expect(estimator.estimate('\uD800')).toBe(0xD800);
+  expect(counted).toEqual(['\uD800', '\uD801']);
+});

@@ -1,0 +1,91 @@
+# Backend performance execution report — 2026-10-04
+
+The implementation improves measured preparation and browser observation paths. The complete plan's acceptance criteria remain **partially met**: Windows Computer Use discovery is blocked by the external runtime safety classifier, and local verification requires Windows file-symlink privileges that this shell lacks. No classifier, test, account check, recovery fence, reasoning effort, or production failure deadline was weakened.
+
+## Revisions and environment
+
+- Original plan baseline: `62feff2a80e8b4fb689132f60880ff0e59530958`.
+- Preserved WIP and safely synchronized intervening user fixes through `61f441ac96c54a3266fc9609a8ee8323b7f6b0c2`; resolved Install Models/hook/BOM issues were not reopened.
+- Instrumentation: `9c950c9`; exact token cache: `9d2b8aa`; oversized-prefix admission: `e3ffc1b`; archive/browser hot paths: `3c1567a`; eviction/artifact coverage: `49fc25c`.
+- Windows, Intel Core i5-12450H, 12 logical processors. Microbenchmarks used installed Bun 1.4.2; verification/build used repository-pinned Bun 1.4.0 (baseline Windows executable).
+- Work stayed on `main`, pushed to the fork; no branch or worktree was created. Existing changes and captured artifacts were preserved.
+- Real workload: ordinary interactive `codex`, selected `chatgpt-web/gpt-5.6-sol`, reasoning `high`. Browser/Computer MCP surfaces attached through normal Codex configuration; no auxiliary runtime was manually launched for E2E.
+
+## Measured preparation improvements
+
+These are synthetic preparation/CDP microbenchmarks, **not model or full-task speedups**. Times include the exact operation under comparison. Quantiles use observed samples; ten-sample p95 includes the slowest sample. Archive measurements mix one initial build and nine retry calls, including prompt cloning; they must not be described as ten independent cold builds.
+
+| Scenario | Samples | Before p50 / p95 ms | After p50 / p95 ms | Meaning |
+|---|---:|---:|---:|---|
+| Exact tokens, repeated 200k-word context | 10 | 186.95 / 200.16 | 0.293 / 2.259 | Identical count, 200,196; repeated immutable chunks |
+| Unique JSON prefix + changed suffix, 429,121 tokens | 7 warm | 271.66 / 340.99 | 1.762 / 1.977 | Identical counts; owned prefix keys fit bounded cache |
+| Unique JSON prefix + changed suffix, 1,077,374 tokens | 7 warm | 637.96 / 658.39 | 259.24 / 269.62 | Identical counts; oversized suffix still tokenized |
+| ZIP/context retries, 200k words + four noise PNGs | 10 | 108.40 / 131.44 | 6.399 / 43.26 | Complete artifact reuse and mixed compression |
+| ZIP/context retries, 200k words + twenty noise PNGs | 10 | 507.06 / 636.48 | 24.70 / 108.88 | Includes hashing/copying all image content |
+| ZIP only, text + one already compressed PNG | 10 | 31.88 / 36.07 | 12.18 / 13.57 | All-level-6 versus text-6/image-store |
+| Two independent absent session-alert probes, real Chrome/CDP | 50 | 2.384 / 6.285 | 1.692 / 3.603 | Concurrent reads preserve expiry priority |
+| Response wakeup after controlled 20 ms DOM mutation | 20 | 251.06 / 251.62 | 38.16 / 39.02 | Event wakeup with unchanged 250 ms fallback |
+
+ZIP text/image fixture size: 924,309 → 924,119 bytes. Four-image complete archives: 3,692,810 → 3,692,050 bytes; twenty-image archives: 18,456,607 → 18,452,807 bytes. Context, manifest, skill text, image bytes and detail remain intact. Noise PNGs are deterministic valid files; they were never sent to a model.
+
+Cold tokenizer initialization remains material and variable: the final representative run observed about 950 ms baseline and 1,358 ms cached implementation for the first 429k-token call. Warm-cache figures do not imply faster cold initialization. A first large scan that exceeded the original LRU capacity exposed cache thrashing; admitting only the first 512 chunks repaired it without enlarging the cache. Remaining suffixes are counted exactly.
+
+A retained-substring experiment (32 five-million-character inputs, mock exact counter, forced GC) exposed **116,818,053 bytes** of additional heap despite small admitted chunks. Copying admitted UTF-16 keys and preserving those owned keys when updating LRU recency reduced additional heap to **350,290 bytes**; RSS growth was **198,782,976 → 39,571,456 bytes**. RSS includes allocator capacity, not just live cache entries. This establishes a concrete storage-retention correction rather than a theoretical memory claim. Reproduce with `bun run scripts/benchmark-backend-preparation.ts --retention`.
+
+Reproduce current synthetic token/archive/compression cases with `bun run scripts/benchmark-backend-preparation.ts`. Raw baseline/after JSON, real-CDP experiments, CLI summaries and verification logs are preserved locally under `output/backend-performance/` (ignored; no private user text is committed).
+
+## Real Browser and Computer Use
+
+The deterministic local fixture at `http://127.0.0.1:17849/` has a Marker field, Apply marker action, verified status, and dialog. Both runs request five separately verified rounds with GPT-5.6 Sol High web. The second uses the same CLI and prompt after source and Electron reloads.
+
+Before (`9d2b8aa`): 5/5 marker rounds and dialog open/close verified from semantic DOM; zero screenshots. Per-round elapsed times were `[12362.9, 12347.0, 11175.8, 10461.1, 11966.2]` ms: p50 **11,966.2 ms**, p95 **12,362.9 ms**. Fill+submit wall times were 608–669 ms, verification 22–36 ms. Full request completion, including discovery, safety failures, thinking and reporting, took **679,552 ms** (one sample). Playwright workload used 33 calls; three preceding CUA browser calls attempted capability discovery/selection.
+
+After (`49fc25c`, production code `3c1567a`): 5/5 rounds and dialog passed with zero screenshots. Per-round elapsed times were `[36952.8, 96629.8, 28036.9, 22486.0, 27389.1]` ms: p50 **28,036.9 ms**, p95 **96,629.8 ms**. The measured interaction intervals became slower, including an indeterminate-safety rejection and recovery on round two. Successful fill+submit p50/p95 improved modestly from **627.8 / 668.7 → 602.0 / 613.4 ms**; verification p50/p95 from **26.5 / 36.0 → 18.7 / 19.8 ms**. These five samples are insufficient to separate orchestration/model variation from source changes. Full request duration was **652,563 ms**, 4.0% below the single baseline sample, with different discovery/failure paths. It is not evidence of a repeatable full-task speedup. Successful Playwright calls: 29; two Playwright attempts and one bridge orchestration attempt were blocked before execution.
+
+Broker telemetry (all accepted tools in each task, not just browser actions): queue n=42 → 37, p50/p95 **16.079 / 16.664 → 15.898 / 16.489 ms**; native completion **766.85 / 1326.20 → 484.22 / 1115.42 ms**. Tool-result → next-invocation proxy n=39 → 36 worsened from **2521.80 / 28846.69 → 6598.50 / 69672.99 ms**. Tool mixes differ, so these are descriptive observations, not causal throughput claims. Submission acceptance boundaries were corrected between runs; the former 73.38 s and current 30.21 s cannot be presented as a like-for-like reduction. Current first visible reasoning/status was 27.99 s after acceptance, and first DOM text 607.22 s (both n=1).
+
+Before Windows: `node_repl` imported `@oai/sky`, but the runtime rejected both `sky.list_apps()` and `sky.list_windows()` because safety status could not be determined; no Notepad action followed. After reload, discovery succeeded (30.33 ms), confirmed Notepad was not running, and launched one new Notepad (861.08 ms). Bind/activate failed with `cannot confirm that the Windows desktop is unlocked because it has no foreground window`. The model stopped before typing, saving, closing, minimizing or screenshotting. These are recorded failures, not permission to bypass a safety barrier. Computer observation/action throughput and correctness comparisons remain unavailable. Browser also encountered runtime classification rejections: unavailable IAB/Chrome selection before, snapshot/fill indeterminate safety status afterward. Playwright semantic state was verified whenever execution was allowed.
+
+A single before/after task pair cannot establish a robust full-task p95 or causally attribute model-decision variability. The plan's 1.5× interaction target and Computer Use percentage targets are **not established**. Initial interrupted runs during external runtime/config changes were excluded rather than counted as benchmarks.
+
+## Architecture and invalidation
+
+- **Telemetry:** opt-in monotonic stage timings; hashed trace IDs, allowlisted timing/byte/count/boolean fields only. No prompt, file, screenshot, tool argument, response or account content is copied. The local log stops at 8 MiB. Enabling `runtime/backend-perf.enabled` requires reload; removing it stops marker-based writes immediately. Environment `CODEX_CHATGPT_WEB_PERF=1` is an explicit alternative. Sink failures cannot fail work.
+- **Timing meaning:** submission acceptance ends on semantic submission evidence, before assistant discovery/diagnostic capture. First reasoning means the first visible reasoning/status signal; first text means usable DOM text, including text buffered by recovery fences before client delivery. Broker cycle timers measure first native result availability → next broker invocation, including model/transport time. They are proxies, not direct native observe → action measurements; generic `node_repl` calls are not automatically classified as Computer Use. Parallel result completion no longer overwrites the first cycle timer. Archive timings include key/build/copy work, and byte counts are returned ZIP bytes.
+- **Exact token chunks:** tokenizer-scoped LRU, 512 entries/4 MiB UTF-16 keys, five-minute non-sliding validity. Admitted keys own their UTF-16 storage, and LRU access preserves that key rather than replacing it with a slice of a large request. Original 4,096-character chunk, paired and unpaired UTF-16 behavior is unchanged. Only the first 512 chunks are admitted; later chunks are still counted exactly. No approximate ratio or context trimming.
+- **Archive reuse:** SHA-256 over length-framed full context, image count/order/ref/full data URL/detail, skill count/order/name/text and format/compression version. Archive filename cannot authorize reuse. Four entries/32 MiB compressed bytes, two-minute non-sliding validity. Larger artifacts bypass retention. ZIP buffers are copied on retention/return, so a caller cannot corrupt cached content. Skills are validated before lookup; changed/invalid content cannot reuse a previous key. PNG/JPEG/GIF/WebP payloads are stored; text/manifest/skills retain level-6 compression and existing size limits.
+- **Read overlap:** expiry and subscription visibility reads overlap, but expiry is consumed first; a known 401 never waits behind a stalled subscription probe. Speculative synchronous failures retain original priority; existing rejected-visibility handling stays unchanged. No UI actions run concurrently.
+- **Event wakeup:** the normal response loop races DOM mutation against revision-based native progress. It retains the original 250 ms fallback for CSS-only changes/health checks, existing React-batch settling, and a bounded browser observation probe. Observer/timer cleanup and cancellation of losing progress listeners are covered. Recovery-specific waits and failure ceilings remain intact.
+- **MCP/Computer contract:** existing persistent structured-first Computer rules, direct/native parallel dispatch and revision-based progress remain. The measured broker batching queue was about 16 ms while decision intervals were seconds; its 15 ms parallel-coalescing window was retained. Static instructions and observations were not blindly removed, and no stale UI coordinate cache was introduced.
+
+## Tunnel continuity and discovered bugs
+
+Duplicate `dev:live` startup initially overwrote an active live lease before Electron singleton rejection. The ownership guard now rejects contenders without removing another owner's lease or disconnecting its route; regression tests cover the fix. It is integrated on `main` as `3c39f9b` (the earlier local commit was rewritten by concurrent integration).
+
+Fresh final controlled reload evidence:
+
+| Gate | Owner PID before → after | Daemon PID before → after | Result |
+|---|---|---|---|
+| Source | 119584 → 119584 | 99352 → 67684 | ready, 4.255 s |
+| Electron | 119584 → 59024 | 67684 → 72324 | ready, 5.926 s |
+| Source after metadata correction | 59024 → 59024 | 78712 → 17688 | ready, 3.952 s |
+| Source after key storage correction | 59024 → 59024 | 160264 → 114024 | ready, 3.037 s |
+
+All retained fingerprint `e5d543f0e3fcad7fd83f516e26a5c17047f7a0bc168c1003b8d68042a2e0b292` and the same hashed tunnel identity. PID-less tunnel manager verified by fingerprint. An initial gate request raced an already ongoing reload and got connection refusal before triggering a gate; fresh readiness-bounded runs above passed. Older controlled source/Electron gates also passed. Post-reload Browser Use ran in the same ordinary CLI without auxiliary repair.
+
+The oversized token-cache regression was reproduced with unique prefixes, protected by an operation-count test (620 cold counts, only 109 additional counts on repeat), fixed and rebenchmarked. Review also found late submission-timing boundaries and parallel cycle-timer overwrite; both were corrected. Two final reviewer-agent attempts failed due model capacity, so no completed final peer approval is claimed.
+
+Final cache review reproduced a Unicode metadata collision: distinct lone UTF-16 surrogate refs became the same UTF-8 hash bytes while JSON manifests retained distinct escaped values. Image-ref fields are now JSON-framed before hashing, and a regression test verifies the exact manifest ref. This final metadata correction follows the two full Browser runs; its focused tests and a post-reload Browser smoke verify the final state.
+
+The metadata smoke verified `PERF-FINAL` through the same ordinary web-model CLI after reload: 0 blocked Browser actions/0 Browser retries, no screenshots. Completion-receipt control had one indeterminate-safety rejection and accepted retry; the Browser action was not repeated. After the key-storage correction and final source gate, the same CLI verified textbox/status `PERF-OWNED`: 0 blocked Browser actions/0 Browser retries, no screenshots. DOM read/fill/click/verification were 21.1/33.4/577.3/23.5 ms; a tab check took 9855.3 ms. One non-test progress-output call was rejected. Full smoke duration was 137,825 ms; this is functional evidence, not a throughput benchmark.
+
+## Verification and remaining acceptance gaps
+
+- Focused instrumentation/browser/helper/broker: **215 pass, 1 platform skip, 0 fail**. Browser/wakeup contracts: **177 pass, 0 fail**. Cache/concurrency/wakeup/token-accounting set after key ownership: **25 pass, 0 fail**; final ownership/Unicode/eviction set after adding unpaired-code-unit coverage: **11 pass, 0 fail**.
+- Root and launcher typechecks, audits, renderer build, runtime bundle, third-party license generation (112 packages) and relocatable runtime smoke passed. Smoke emitted `RELOCATABLE_RUNTIME_SMOKE_OK`.
+- Latest pinned-Bun `bun run verify`: **965 pass, 22 skip, 2 fail**. Both failures are `EPERM` from file-symlink fixture creation in `codex-integration.test.ts`, before tested product behavior. Reproduced with installed Bun as well. Separate launcher suite: **425 pass, 4 skip, 1 fail**, also file-symlink fixture `EPERM` in `runtime-host.test.cjs`. No test was disabled and no Windows security setting changed. Consequently local full verify is **not green**.
+- GitHub CI/build/publish: all three passed for `49fc25c`, including verify/package/smoke on Windows, macOS and Linux. [CI](https://github.com/buonchoi96/codex-chatgpt-web/actions/runs/37146354603), [Windows build/smoke](https://github.com/buonchoi96/codex-chatgpt-web/actions/runs/37146354577), [installer publish](https://github.com/buonchoi96/codex-chatgpt-web/actions/runs/37146807667). All three also passed for `9d2b8aa`. Concurrency cancellations and initially skipped publish runs are not counted as passes. Final Unicode/report revision status is recorded separately in the task's final validation and local `output/backend-performance/` evidence, avoiding a self-referential report commit.
+- New transient network/page-rebind/tool-in-flight fault injection was not completed end-to-end. Existing recovery contracts passed; the early trivial real CLI turn recovered from one browser observation timeout. This does not establish every requested recovery scenario.
+- P0 passed; P1 instrumentation is implemented with the proxy limitations above; P2 remains blocked for measurement; P3/P4/P7 have measured changes; P5/P6 preserve existing paths where no benchmark justified more risk; P8 Browser/reload passes while Computer/full-local-verification requirements remain unmet.
+
+The report deliberately separates demonstrated preparation wins from unresolved user-visible targets. External safety classification and Windows symlink privilege require an environment change; repository patches cannot safely establish those missing acceptance results.

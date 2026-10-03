@@ -2,8 +2,19 @@ import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { strToU8, zipSync } from 'fflate';
 import { chatGptPromptFilePayloads } from '../src/adapters/chatgpt-web/browser-worker';
-import { estimateTokens } from '../src/lib/token-estimate';
+import { estimateTokens, ChunkTokenEstimator } from '../src/lib/token-estimate';
 import type { CompiledChatGptWebPrompt } from '../src/adapters/chatgpt-web/prompt';
+if (process.argv.includes('--retention')) {
+  const estimator = new ChunkTokenEstimator(text => text.length);
+  Bun.gc(true);
+  const before = process.memoryUsage();
+  for (let i = 0; i < 32; i++) estimator.estimate(String(i).padStart(8, '0') + 'x'.repeat(5_000_000));
+  Bun.gc(true);
+  const after = process.memoryUsage();
+  console.log(JSON.stringify({kind: 'substring retention benchmark; not throughput', before, after,
+    heap_delta_bytes: after.heapUsed - before.heapUsed, rss_delta_bytes: after.rss - before.rss}, null, 2));
+  process.exit(0);
+}
 // Deterministic valid PNG containing noise: models never see this synthetic microbenchmark.
 let seed=123456; const next=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed>>>24;};
 function crc32(b:Buffer){let c=0xffffffff;for(const x of b){c^=x;for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}

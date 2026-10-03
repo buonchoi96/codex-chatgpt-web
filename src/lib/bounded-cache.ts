@@ -1,6 +1,6 @@
 /** Process-local LRU with independent entry/weight limits and a non-sliding lifetime. */
 export class BoundedCache<K, V> {
-  private readonly entries = new Map<K, { value: V; weight: number; expiresAt: number }>();
+  private readonly entries = new Map<K, { key: K; value: V; weight: number; expiresAt: number }>();
   private weight = 0;
 
   constructor(
@@ -24,7 +24,9 @@ export class BoundedCache<K, V> {
       this.weight -= entry.weight;
       return undefined;
     }
-    this.entries.set(key, entry);
+    // Preserve the admitted key's storage. An equal string supplied for lookup may
+    // be a slice that retains an entire request buffer in the JavaScript engine.
+    this.entries.set(entry.key, entry);
     return entry.value;
   }
 
@@ -44,7 +46,7 @@ export class BoundedCache<K, V> {
         this.weight -= entry.weight;
       }
     }
-    this.entries.set(key, { value, weight, expiresAt: now + this.lifetimeMs });
+    this.entries.set(key, { key, value, weight, expiresAt: now + this.lifetimeMs });
     this.weight += weight;
     while (this.entries.size > this.maxEntries || this.weight > this.maxWeight) {
       const oldest = this.entries.entries().next().value;

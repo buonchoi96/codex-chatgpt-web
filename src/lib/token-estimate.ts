@@ -50,7 +50,9 @@ export class ChunkTokenEstimator {
       let tokens = cacheable ? this.cache.get(chunk) : undefined;
       if (tokens === undefined) {
         tokens = this.countChunk(chunk);
-        if (cacheable) this.cache.set(chunk, tokens, chunk.length * 2);
+        // Own the small UTF-16 key: substring storage can otherwise retain the full
+        // multi-megabyte request, defeating the cache's byte bound. Keep every code unit.
+        if (cacheable) this.cache.set(Buffer.from(chunk, "utf16le").toString("utf16le"), tokens, chunk.length * 2);
       }
       count += tokens;
       start = end;
