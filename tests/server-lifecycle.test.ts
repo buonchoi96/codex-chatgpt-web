@@ -773,7 +773,13 @@ test(`targeted cancellation preserves peer turns and its cause: ${reason ?? "use
     });
     expect(targetCancelled).toBe(1);
     expect(otherCancelled).toBe(0);
-    expect(target.settledOutcome()).toMatchObject({ type: "error", error: { code: reason ?? "client_cancelled", retryable: false } });
+    expect(target.settledOutcome()).toMatchObject({
+      type: "error",
+      error: {
+        code: reason ?? "client_cancelled",
+        retryable: reason === "helper_heartbeat_expired",
+      },
+    });
     expect(chatGptTurnSessions.getOrCreate("target-key", () => {
       throw new Error("cancelled trace must remain terminal");
     }, "trace_target")).toBe(target);
