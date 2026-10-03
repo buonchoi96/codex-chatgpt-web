@@ -77,7 +77,7 @@ test("the first sweep after a suspension refreshes stale leases instead of reapi
 test("a helper that is genuinely gone is still reaped on the ordinary cadence", () => {
   const reaped = [];
   const tab = {
-    id: "t1", traceId: "trace-1", helperPid: 42, status: "running",
+    id: "t1", traceId: "trace-1", helperPid: 2_000_000_000, status: "running",
     bootstrapReady: true, lastHeartbeatAt: 1_000,
   };
   const host = {
