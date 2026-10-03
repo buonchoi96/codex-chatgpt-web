@@ -55,6 +55,22 @@ test("removes only the owned element of a native inline hook array", () => {
   expect(Bun.TOML.parse(again)).toEqual(Bun.TOML.parse(restored));
 });
 
+test("exact managed hook restoration takes the semantic fast path before AST fallback", () => {
+  const original = [
+    'model = "gpt-5.6-sol"',
+    "",
+    "[features]",
+    "goals = true",
+    "",
+  ].join("\n");
+  const installed = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", {
+    runtimeCommand: ["/opt/runtime"],
+  });
+  expect(installed.text).toContain(installed.installed.fragment);
+  expect(() => verifyCodexInterruptHook(installed.text, installed.installed)).not.toThrow();
+  expect(restoreCodexInterruptHook(installed.text, installed.installed)).toBe(original);
+});
+
 test("accepts and preserves a UTF-8 BOM in Codex config", () => {
   for (const ending of ["\n", "\r\n"]) {
     const original = "\uFEFF" + ['model = "gpt-5.6-sol"', "", "[features]", "goals = true", ""].join(ending);
