@@ -80,6 +80,16 @@ function canonicalConfigPath(configPath: string): string {
   }
 }
 
+function interruptStateKeyParts(stateKey: string): { prefix: string; suffix: string } | undefined {
+  const match = /^(.*:interrupt:)\d+(:0)$/.exec(stateKey);
+  return match ? { prefix: match[1]!, suffix: match[2]! } : undefined;
+}
+
+function interruptStateKeyForGroup(stateKey: string, groupIndex: number): string | undefined {
+  const parts = interruptStateKeyParts(stateKey);
+  return parts ? `${parts.prefix}${groupIndex}${parts.suffix}` : undefined;
+}
+
 export function installCodexInterruptHook(
   text: string,
   configPath: string,
@@ -310,13 +320,44 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
     throw changed();
   }
   const groups = document.hooks?.Interrupt;
-  if (!Array.isArray(groups) || !equal(groups[installed.groupIndex], expectedGroup)) {
-    if (Array.isArray(groups) && groups.some(group => equal(group, expectedGroup))) {
-      throw new Error("Codex interrupt lifecycle hook order changed after setup; refusing to overwrite it");
+  const state = document.hooks?.state;
+  if (!Array.isArray(groups) || !state || typeof state !== "object" || Array.isArray(state)) throw changed();
+
+  let effectiveGroupIndex = installed.groupIndex;
+  let effectiveStateKey = installed.stateKey;
+  const installedPositionStillMatches = equal(groups[installed.groupIndex], expectedGroup)
+    && equal(state[installed.stateKey], expectedState);
+  if (!installedPositionStillMatches) {
+    const stateKeyParts = interruptStateKeyParts(installed.stateKey);
+    if (!stateKeyParts) throw changed();
+
+    const matchingGroupIndices = groups
+      .map((group, index) => equal(group, expectedGroup) ? index : -1)
+      .filter(index => index >= 0);
+    const matchingStateKeys = Object.entries(state)
+      .filter(([key, value]) => {
+        if (!key.startsWith(stateKeyParts.prefix) || !key.endsWith(stateKeyParts.suffix)) return false;
+        const indexText = key.slice(stateKeyParts.prefix.length, key.length - stateKeyParts.suffix.length);
+        return /^\d+$/.test(indexText) && equal(value, expectedState);
+      })
+      .map(([key]) => key);
+    const relocated = matchingGroupIndices.flatMap(groupIndex => {
+      const stateKey = interruptStateKeyForGroup(installed.stateKey, groupIndex);
+      return stateKey && matchingStateKeys.includes(stateKey) ? [{ groupIndex, stateKey }] : [];
+    });
+
+    // Codex may insert another Interrupt group and rewrite the trust-state index. That is a
+    // serialization/layout change, not a semantic ownership change, but it is safe to follow only
+    // when both the exact managed command and its exact trust state are unique.
+    if (relocated.length !== 1 || matchingGroupIndices.length !== 1 || matchingStateKeys.length !== 1) {
+      if (matchingGroupIndices.length > 0) {
+        throw new Error("Codex interrupt lifecycle hook order changed after setup; refusing to overwrite it");
+      }
+      throw changed();
     }
-    throw changed();
+    effectiveGroupIndex = relocated[0]!.groupIndex;
+    effectiveStateKey = relocated[0]!.stateKey;
   }
-  if (!equal(document.hooks?.state?.[installed.stateKey], expectedState)) throw changed();
 
   const ranges: SourceRange[] = [];
   // A native config edit may discard comments. Authority comes from the exact journal, command,
@@ -336,8 +377,8 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
       ranges.push({ start, end: comment.range[1] });
     }
   }
-  const groupPath = ["hooks", "Interrupt", installed.groupIndex];
-  const statePath = ["hooks", "state", installed.stateKey];
+  const groupPath = ["hooks", "Interrupt", effectiveGroupIndex];
+  const statePath = ["hooks", "state", effectiveStateKey];
   const startsWith = (path: (string | number)[], prefix: (string | number)[]) =>
     prefix.every((part, index) => path[index] === part);
   let groupLocated = false;
@@ -394,7 +435,9 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   }
   if (!groupLocated || !stateLocated) throw changed();
   // Keep byte-exact restoration when the owned fragment has not been reformatted.
-  const exact = text.indexOf(installed.fragment);
+  const exact = effectiveGroupIndex === installed.groupIndex && effectiveStateKey === installed.stateKey
+    ? text.indexOf(installed.fragment)
+    : -1;
   if (exact >= 0 && text.indexOf(installed.fragment, exact + 1) < 0) {
     ranges.splice(0, ranges.length, { start: exact, end: exact + installed.fragment.length });
   } else {
@@ -414,8 +457,8 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
     } else merged.push({ ...range });
   }
   const expectedRestored = structuredClone(document);
-  expectedRestored.hooks!.Interrupt!.splice(installed.groupIndex, 1);
-  delete expectedRestored.hooks!.state![installed.stateKey];
+  expectedRestored.hooks!.Interrupt!.splice(effectiveGroupIndex, 1);
+  delete expectedRestored.hooks!.state![effectiveStateKey];
   try {
     if (!equal(withoutEmptyHookContainers(parseHookDocument(removeRanges(text, merged))),
       withoutEmptyHookContainers(expectedRestored))) throw changed();
