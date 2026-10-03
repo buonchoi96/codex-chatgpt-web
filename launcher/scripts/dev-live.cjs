@@ -18,8 +18,24 @@ const {
   waitForElectronShutdown,
   waitForReplacementRuntime,
 } = require("./dev-live-lifecycle.cjs");
-const liveHome = path.resolve(
+function resolveUserPath(value) {
+  if (value === "~") return os.homedir();
+  if (value.startsWith("~/") || value.startsWith("~\\")) return path.resolve(os.homedir(), value.slice(2));
+  return path.resolve(value);
+}
+
+function samePath(left, right) {
+  const normalize = value => process.platform === "win32"
+    ? path.resolve(value).toLowerCase()
+    : path.resolve(value);
+  return normalize(left) === normalize(right);
+}
+
+const liveHome = resolveUserPath(
   process.env.CODEX_WEB_GPT_LIVE_HOME || path.join(os.homedir(), ".codex-chatgpt-web-live"),
+);
+const productionHome = resolveUserPath(
+  process.env.CODEX_CHATGPT_WEB_HOME || path.join(os.homedir(), ".codex-chatgpt-web"),
 );
 const liveUserData = path.join(liveHome, "launcher");
 const liveTunnelLeasePath = path.join(liveHome, "runtime", "live-tunnel-handoff.json");
@@ -40,6 +56,8 @@ let electronReloadInFlight = false;
 let reloadTimer;
 let electronRetryTimer;
 let routeTimer;
+let liveRouteConnected = false;
+let productionRouteWasActive = false;
 let viteRestartTimer;
 let reloadRunning = false;
 let reloadAgain = false;
@@ -61,6 +79,20 @@ function liveEnvironment(extra = {}) {
     ...extra,
   };
   delete env.CODEX_WEB_GPT_DEV_HOME;
+  return env;
+}
+
+function productionRouteEnvironment() {
+  const env = {
+    ...process.env,
+    CODEX_CHATGPT_WEB_HOME: productionHome,
+    CODEX_WEB_GPT_BUN: bun,
+    CODEX_CHATGPT_WEB_BUN: bun,
+  };
+  delete env.CODEX_WEB_GPT_DEV_HOME;
+  delete env.CODEX_WEB_GPT_LIVE_MODE;
+  delete env.CODEX_WEB_GPT_LIVE_TUNNEL_LEASE;
+  delete env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR;
   return env;
 }
 
@@ -485,23 +517,78 @@ async function restartDaemonFromSource() {
   throw new Error("source launcher did not recover the Responses daemon within 20 seconds");
 }
 
-function routeCommand(action) {
+function routeCommand(action, env = liveEnvironment()) {
   return spawnSync(bun, ["run", path.join(repoRoot, "src", "cli.ts"), "route", action], {
     cwd: repoRoot,
-    env: liveEnvironment(),
+    env,
     encoding: "utf8",
     windowsHide: true,
   });
+}
+
+function routeCommandDetail(result) {
+  return String(result.stderr || result.stdout || result.error || "").trim();
+}
+
+function parseRouteStatus(result, owner) {
+  if (result.error || result.status !== 0) {
+    throw new Error(`${owner} Codex route status failed${routeCommandDetail(result) ? `: ${routeCommandDetail(result)}` : ""}`);
+  }
+  let status;
+  try {
+    status = JSON.parse(String(result.stdout || ""));
+  } catch {
+    throw new Error(`${owner} Codex route status returned invalid JSON`);
+  }
+  if (!status || typeof status !== "object" || Array.isArray(status)
+    || typeof status.installed !== "boolean" || typeof status.active !== "boolean"
+    || !Array.isArray(status.errors)) {
+    throw new Error(`${owner} Codex route status returned an invalid payload`);
+  }
+  return status;
+}
+
+function handoffProductionRoute() {
+  if (samePath(productionHome, liveHome)) return;
+  const status = parseRouteStatus(routeCommand("status", productionRouteEnvironment()), "installed launcher");
+  if (!status.installed || !status.active) return;
+  if (status.errors.length > 0) {
+    throw new Error(`installed launcher Codex route is not healthy enough to hand off: ${status.errors.join("; ")}`);
+  }
+  const disconnected = routeCommand("disconnect", productionRouteEnvironment());
+  if (disconnected.error || disconnected.status !== 0) {
+    throw new Error(
+      `could not temporarily disconnect the installed launcher Codex route`
+      + (routeCommandDetail(disconnected) ? `: ${routeCommandDetail(disconnected)}` : ""),
+    );
+  }
+  productionRouteWasActive = true;
+  log("temporarily disconnected the installed launcher Codex route for live source ownership");
+}
+
+function restoreProductionRoute() {
+  if (!productionRouteWasActive || samePath(productionHome, liveHome)) return;
+  const connected = routeCommand("connect", productionRouteEnvironment());
+  if (connected.error || connected.status !== 0) {
+    warn(
+      `could not reconnect the installed launcher Codex route`
+      + (routeCommandDetail(connected) ? `: ${routeCommandDetail(connected)}` : ""),
+    );
+    return;
+  }
+  productionRouteWasActive = false;
+  log("restored the installed launcher Codex route");
 }
 
 function tryConnectRoute() {
   if (!liveConfig()) return false;
   const result = routeCommand("connect");
   if (result.error || result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || result.error || "").trim();
+    const detail = routeCommandDetail(result);
     warn(`could not connect the live Codex route yet${detail ? `: ${detail}` : ""}`);
     return false;
   }
+  liveRouteConnected = true;
   log("real Codex route is connected to the source runtime");
   return true;
 }
@@ -519,13 +606,14 @@ function startRouteMonitor() {
 }
 
 function restorePreviousRoute() {
-  if (!fs.existsSync(path.join(liveHome, "config.json"))) return;
+  if (!liveRouteConnected || !fs.existsSync(path.join(liveHome, "config.json"))) return;
   const result = routeCommand("disconnect");
   if (result.error || result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || result.error || "").trim();
+    const detail = routeCommandDetail(result);
     warn(`could not restore the previous Codex route${detail ? `: ${detail}` : ""}`);
     return;
   }
+  liveRouteConnected = false;
   log("previous Codex route restored");
 }
 
@@ -610,6 +698,7 @@ async function stop(exitCode = 0) {
   for (const watcher of watchers.splice(0)) watcher.close();
   if (ownsLiveLease) {
     restorePreviousRoute();
+    restoreProductionRoute();
     removeLiveTunnelLease(liveTunnelLeasePath, process.pid, liveTunnelSessionId);
     ownsLiveLease = false;
   }
@@ -630,6 +719,7 @@ async function main() {
   ownsLiveLease = true;
   log(`persistent live home: ${liveHome}`);
   log("the installed launcher must stay closed while this process owns Codex Native2/tunnel resources");
+  handoffProductionRoute();
   buildBrowserHelper();
   vitePort = await freeLoopbackPort(preferredVitePort);
   viteUrl = `http://127.0.0.1:${vitePort}`;
