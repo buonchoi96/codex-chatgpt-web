@@ -35,6 +35,7 @@ export class ChunkTokenEstimator {
 
   estimate(text: string): number {
     let count = 0;
+    let chunkIndex = 0;
     for (let start = 0; start < text.length;) {
       let end = Math.min(start + TOKENIZER_CHUNK_CHARS, text.length);
       if (end < text.length) {
@@ -43,10 +44,13 @@ export class ChunkTokenEstimator {
         if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end -= 1;
       }
       const chunk = text.slice(start, end);
-      let tokens = this.cache.get(chunk);
+      // Oversized sequential contexts must not evict their own immutable prefix on
+      // every pass. Admit only the first 512 chunks; count the remaining suffix exactly.
+      const cacheable = chunkIndex++ < 512;
+      let tokens = cacheable ? this.cache.get(chunk) : undefined;
       if (tokens === undefined) {
         tokens = this.countChunk(chunk);
-        this.cache.set(chunk, tokens, chunk.length * 2);
+        if (cacheable) this.cache.set(chunk, tokens, chunk.length * 2);
       }
       count += tokens;
       start = end;
