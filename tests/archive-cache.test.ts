@@ -28,6 +28,14 @@ test("archive retries reuse exact content while isolating returned buffer mutati
     const events = readFileSync(join(root, "runtime/backend-perf.jsonl"), "utf8")
       .trim().split("\n").map(line => JSON.parse(line)).filter(e => e.stage === "archive_build");
     expect(events.map(e => e.cache_hit)).toEqual([false, true, true, false]);
+    for (let i = 0; i < 5; i++) {
+      const other = structuredClone(prompt);
+      other.archive!.contextText += ` eviction-${i}`;
+      chatGptPromptFilePayloads(other);
+    }
+    chatGptPromptFilePayloads(prompt);
+    const last = readFileSync(join(root, "runtime/backend-perf.jsonl"), "utf8").trim().split("\n").at(-1)!;
+    expect(JSON.parse(last).cache_hit).toBeFalse();
   } finally {
     if (previousHome === undefined) delete process.env.CODEX_CHATGPT_WEB_HOME; else process.env.CODEX_CHATGPT_WEB_HOME = previousHome;
     if (previousPerf === undefined) delete process.env.CODEX_CHATGPT_WEB_PERF; else process.env.CODEX_CHATGPT_WEB_PERF = previousPerf;

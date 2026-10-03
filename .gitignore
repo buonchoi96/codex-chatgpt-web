@@ -15,6 +15,7 @@ launcher/build/
 launcher/release/
 launcher/artifacts/
 .playwright-cli/
+.playwright-mcp/
 output/
 notes.md
 /.agents/skills/github-pairing/
