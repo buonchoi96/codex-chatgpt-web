@@ -831,7 +831,8 @@ describe("reversible native Codex route integration", () => {
     const reconnected = activateCodexIntegration();
     expect(reconnected).toEqual({ changed: true, active: true });
     const reconnectedText = readFileSync(configPath, "utf8");
-    expect(reconnectedText).toContain(active.interruptHook.command);
+    const reconnectedConfig = Bun.TOML.parse(reconnectedText) as any;
+    expect(reconnectedConfig.hooks.Interrupt[0].hooks[0].command).toBe(active.interruptHook.command);
     expect(inspectCodexIntegration()).toMatchObject({ installed: true, active: true, errors: [] });
 
     deactivateCodexIntegration();
