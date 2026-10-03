@@ -23,7 +23,24 @@ function validLiveTunnelLease(value) {
 function createLiveTunnelLease(filePath, ownerPid, sessionId, createdAt = new Date().toISOString()) {
   const lease = { version: 1, ownerPid, sessionId, createdAt };
   if (!validLiveTunnelLease(lease)) throw new Error("Live tunnel lease record is invalid");
-  writePrivateFileAtomic(filePath, `${JSON.stringify(lease)}\n`);
+  // Serialize acquisition before examining/replacing a dead owner's record. A second parent
+  // must never overwrite the active handoff lease, including during concurrent starts.
+  const lockPath = `${filePath}.acquire`;
+  require("node:fs").mkdirSync(require("node:path").dirname(filePath), { recursive: true, mode: 0o700 });
+  let lock;
+  try {
+    lock = fs.openSync(lockPath, "wx", 0o600);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error("A live source session is already running or acquiring its lease");
+    throw error;
+  }
+  try {
+    if (isLiveTunnelLeaseActive(filePath)) throw new Error("A live source session is already running for this home");
+    writePrivateFileAtomic(filePath, `${JSON.stringify(lease)}\n`);
+  } finally {
+    fs.closeSync(lock);
+    fs.rmSync(lockPath, { force: true });
+  }
   return lease;
 }
 
@@ -43,8 +60,13 @@ function isLiveTunnelLeaseActive(filePath) {
   return Boolean(lease && processRunning(lease.ownerPid));
 }
 
-function removeLiveTunnelLease(filePath) {
+function removeLiveTunnelLease(filePath, ownerPid, sessionId) {
+  if (ownerPid !== undefined || sessionId !== undefined) {
+    const lease = readLiveTunnelLease(filePath);
+    if (!lease || lease.ownerPid !== ownerPid || lease.sessionId !== sessionId) return false;
+  }
   fs.rmSync(filePath, { force: true });
+  return true;
 }
 
 module.exports = {

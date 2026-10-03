@@ -34,6 +34,7 @@ const idleRestartTimeoutMs = Number(process.env.CODEX_WEB_GPT_LIVE_RESTART_TIMEO
 let vite;
 let electron;
 let stopped = false;
+let ownsLiveLease = false;
 let electronRestarting = false;
 let electronReloadInFlight = false;
 let reloadTimer;
@@ -607,8 +608,11 @@ async function stop(exitCode = 0) {
   if (routeTimer) clearInterval(routeTimer);
   if (viteRestartTimer) clearTimeout(viteRestartTimer);
   for (const watcher of watchers.splice(0)) watcher.close();
-  restorePreviousRoute();
-  removeLiveTunnelLease(liveTunnelLeasePath);
+  if (ownsLiveLease) {
+    restorePreviousRoute();
+    removeLiveTunnelLease(liveTunnelLeasePath, process.pid, liveTunnelSessionId);
+    ownsLiveLease = false;
+  }
   electronRestarting = true;
   await waitForElectronShutdown(electron, waitForElectronExit, message => warn(message));
   electron = undefined;
@@ -623,6 +627,7 @@ async function main() {
   fs.mkdirSync(liveHome, { recursive: true });
   fs.mkdirSync(liveUserData, { recursive: true });
   createLiveTunnelLease(liveTunnelLeasePath, process.pid, liveTunnelSessionId);
+  ownsLiveLease = true;
   log(`persistent live home: ${liveHome}`);
   log("the installed launcher must stay closed while this process owns Codex Native2/tunnel resources");
   buildBrowserHelper();

@@ -165,7 +165,9 @@ test("turn-tab bootstrap retries idle commit timeouts inside one browser lease",
   const retries = [];
   await loadCommittedTurnSurface(
     contents,
-    Date.now() + 100,
+    // The complete launcher suite starts many Node processes concurrently. The two 5ms
+    // attempt deadlines still exercise retries; allow scheduler stalls outside those attempts.
+    Date.now() + 2_000,
     undefined,
     retry => retries.push(retry.attempt),
     5,
