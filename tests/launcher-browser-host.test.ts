@@ -56,8 +56,9 @@ test("launcher automation-security status fails closed on invalid records", asyn
   } });
   try {
     const descriptor = descriptorFile(`http://127.0.0.1:${server.port}`);
-    await expect(readLauncherAutomationSecurityStatus(descriptor))
-      .rejects.toBeInstanceOf(LauncherAutomationSecurityStatusUnavailableError);
+    const failure = readLauncherAutomationSecurityStatus(descriptor);
+    await expect(failure).rejects.toBeInstanceOf(LauncherAutomationSecurityStatusUnavailableError);
+    await expect(failure).rejects.toMatchObject({ retryable: true });
   } finally { server.stop(true); }
 });
 
