@@ -1008,7 +1008,12 @@ export function startServer(
             leaseFailure === "browser_surface_bootstrap_timeout"
               ? "The ChatGPT browser turn did not finish browser setup before its lease expired. The turn was stopped."
               : "The ChatGPT browser helper stopped reporting progress and its lease expired. The turn was stopped.",
-            { status: 504, errorType: "server_error", code: leaseFailure, retryable: false },
+            {
+              status: 504,
+              errorType: "server_error",
+              code: leaseFailure,
+              retryable: leaseFailure === "helper_heartbeat_expired",
+            },
           )
           : chatGptBrowserTabClosedError();
         // Revoke the owner first. This prevents a compaction callback that observes its retained
