@@ -761,6 +761,52 @@ describe("reversible native Codex route integration", () => {
     expect(existsSync(getCodexJournalRecoveryPath())).toBe(true);
   });
 
+  test("Install Models accepts a unique native hook relocation and preserves the inserted foreign hook", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = 'model = "gpt-5.6-sol"\n';
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+    saveConfig(config);
+
+    const installed = installCodexIntegration(config);
+    const active = readFileSync(configPath, "utf8");
+    const relocatedStateKey = installed.interruptHook.stateKey.replace(/:interrupt:\d+:0$/, ":interrupt:1:0");
+    expect(relocatedStateKey).not.toBe(installed.interruptHook.stateKey);
+    const foreign = [
+      "[[hooks.Interrupt]]",
+      "[[hooks.Interrupt.hooks]]",
+      'type = "command"',
+      'command = "foreign-user-hook"',
+      "timeout = 3",
+      "",
+    ].join("\n");
+    const rewritten = active
+      .replace(
+        "# Managed by codex-chatgpt-web: release the exact Responses request when its Codex turn is interrupted.",
+        foreign + "# Managed by codex-chatgpt-web: release the exact Responses request when its Codex turn is interrupted.",
+      )
+      .replace(
+        `[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]`,
+        `[hooks.state.${JSON.stringify(relocatedStateKey)}]`,
+      );
+    writeFileSync(configPath, rewritten);
+
+    expect(() => preflightCodexIntegration(config)).not.toThrow();
+    const refreshed = installCodexIntegration(config);
+    const refreshedText = readFileSync(configPath, "utf8");
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    expect((Bun.TOML.parse(refreshedText) as any).hooks.Interrupt).toHaveLength(2);
+    expect(refreshedText).toContain('command = "foreign-user-hook"');
+    expect(refreshed.interruptHook.groupIndex).toBe(1);
+    expect(refreshed.interruptHook.stateKey).toMatch(/:interrupt:1:0$/);
+
+    uninstallCodexIntegration();
+    const restored = readFileSync(configPath, "utf8");
+    expect(restored).toContain('command = "foreign-user-hook"');
+    expect(restored).toContain('model = "gpt-5.6-sol"');
+  });
+
   test("explicit setup restores a removed hook without discarding the current Codex config", () => {
     for (const ending of ["\n", "\r\n"]) {
       for (const keepRoute of [true, false]) {
