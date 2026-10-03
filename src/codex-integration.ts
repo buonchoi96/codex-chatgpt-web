@@ -410,12 +410,28 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
   if (!existsSync(existing.configPath)) throw new Error(`Codex config is missing: ${existing.configPath}`);
   const current = readFileSync(existing.configPath, "utf8");
   if (existing.version === 10 && existing.active) {
-    verifyInstalledRoute(current, existing);
-    return { changed: false, active: true };
+    try {
+      verifyInstalledRoute(current, existing);
+      return { changed: false, active: true };
+    } catch (installedError) {
+      // Another managed codex-chatgpt-web owner (for example the installed launcher) may have
+      // cleanly restored this journal's baseline while the live process was not running. Recover
+      // only when the physical config proves that exact disconnected baseline; otherwise preserve
+      // the original fail-closed ownership error.
+      try {
+        verifyRestoredRoute(current, existing);
+      } catch {
+        throw installedError;
+      }
+    }
   }
   let baseline: string;
   if ((existing.version === 4 || existing.version === 5 || existing.version === 6 || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10) && !existing.active) {
     verifyRestoredRoute(current, existing);
+    baseline = current;
+  } else if (existing.version === 10 && existing.active) {
+    // The active journal was stale, but the exact restored baseline was proven above. Reconnect
+    // directly from that baseline without trying to remove a hook that is no longer present.
     baseline = current;
   } else {
     verifyInstalledRoute(current, existing);
