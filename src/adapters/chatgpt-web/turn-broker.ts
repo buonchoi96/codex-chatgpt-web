@@ -732,7 +732,9 @@ export class TurnBroker implements TurnBrokerOwner {
     invocation.finishNative?.();
     const surface = invocation.request.wireName.includes("windows_computer_use") ? "computer_use_cycle"
       : invocation.request.wireName.includes("cua_repl") ? "browser_use_cycle" : "tool_cycle";
-    channel.finishDecision = invocation.perf?.start(surface);
+    // One channel transition starts when the first result becomes available. Later
+    // parallel completions must not discard that timer or shorten the reported interval.
+    channel.finishDecision ??= invocation.perf?.start(surface);
     channel.toolCallsCompleted += 1;
     const retainedResult = structuredClone(result);
     channel.recentToolResults.delete(callId);

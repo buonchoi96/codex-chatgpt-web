@@ -28,6 +28,7 @@ let cachedSink: ((event: BackendPerfEvent) => void) | undefined;
 
 // Profiling is opt-in and deliberately synchronous so reloads do not lose the final timings.
 // The shared local file is bounded; a full log must be archived/removed before a new capture.
+// Enabling the marker requires a reload; removing it stops marker-based writes immediately.
 function defaultSink(): ((event: BackendPerfEvent) => void) | undefined {
   const runtime = join(getConfigDir(), 'runtime');
   const flag = process.env.CODEX_CHATGPT_WEB_PERF;
@@ -38,6 +39,7 @@ function defaultSink(): ((event: BackendPerfEvent) => void) | undefined {
   if (process.env.CODEX_CHATGPT_WEB_PERF !== '1'
     && !existsSync(join(runtime, 'backend-perf.enabled'))) return undefined;
   return cachedSink = event => {
+    if (flag !== '1' && !existsSync(join(runtime, 'backend-perf.enabled'))) return;
     const file = join(runtime, 'backend-perf.jsonl');
     const line = `${JSON.stringify(event)}\n`;
     mkdirSync(runtime, { recursive: true, mode: 0o700 });

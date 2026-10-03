@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { strToU8, zipSync } from "fflate";
+import { strToU8, zipSync, type Zippable } from "fflate";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
 import { chatGptPlanUsesLunaOnly, detectChatGptLimitsPlan, readChatGptUsageAccount, readChatGptUsageModel, supportsChatGptUsageTracking, type ChatGptUsageModel } from "./limits";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from "playwright-core";
@@ -18,6 +18,7 @@ import {
 } from "../../config";
 import { estimateTokens } from "../../lib/token-estimate";
 import { BackendPerfTrace } from "../../lib/backend-perf";
+import { BoundedCache } from "../../lib/bounded-cache";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "./ui-labels";
 import type { CodexProviderConfig } from "../../types";
 import { parseDataUrl } from "../image";
@@ -841,13 +842,22 @@ const chatGptExpiredSessionAlert = (page: Page): Locator => page
   .last();
 
 export async function throwIfChatGptSessionFailureAlert(page: Page): Promise<void> {
-  if (await chatGptExpiredSessionAlert(page).isVisible().catch(() => false)) {
+  const expired = chatGptExpiredSessionAlert(page).isVisible().catch(() => false);
+  // Overlap read-only probes, but consume them in the original safety priority.
+  // Capture speculative construction failures so expiry never waits for (or loses
+  // priority to) a slow/failing subscription read.
+  const subscription = Promise.resolve()
+    .then(() => chatGptSubscriptionFailureAlert(page).isVisible().catch(() => false))
+    .then(value => ({ value }), error => ({ error }));
+  if (await expired) {
     throw new ChatGptWebAdapterError(
       "The ChatGPT session has expired. Sign in again in Codex Web GPT.",
       { status: 401, errorType: "authentication_error", code: "chatgpt_session_expired", retryable: false },
     );
   }
-  if (!await chatGptSubscriptionFailureAlert(page).isVisible().catch(() => false)) return;
+  const subscriptionResult = await subscription;
+  if ("error" in subscriptionResult) throw subscriptionResult.error;
+  if (!subscriptionResult.value) return;
   throw new ChatGptWebAdapterError(
     "ChatGPT could not load the account subscription. Reload ChatGPT inside the launcher and retry; sign out only if the error persists.",
     { status: 503, errorType: "server_error", code: "chatgpt_subscription_unavailable", retryable: true },
@@ -2627,65 +2637,96 @@ function assertChatGptPromptAttachments(prompt: CompiledChatGptWebPrompt): void 
   validateSkillFiles(prompt.skillFiles);
 }
 
+// Retain only immutable ZIP bytes: four artifacts, 32 MiB total, two-minute non-sliding reuse window.
+// Names are presentation metadata, never an authority for reuse. Frame every complete
+// content field before hashing so changed images, detail, skill text or ordering invalidate.
+const contextArchiveCache = new BoundedCache<string, Buffer>(4, 32 * 1024 * 1024, 120_000);
+function contextArchiveKey(prompt: CompiledChatGptWebPrompt): string {
+  const hash = createHash("sha256");
+  const field = (value: string) => { hash.update(`${Buffer.byteLength(value, "utf8")}:`).update(value); };
+  field("context-archive-v1-text6-images0");
+  field(prompt.archive!.contextText);
+  field(String(prompt.images.length));
+  for (const image of prompt.images) {
+    field(image.ref); field(image.imageUrl); field(JSON.stringify(image.detail ?? null));
+  }
+  field(String(prompt.skillFiles?.length ?? 0));
+  for (const file of prompt.skillFiles ?? []) { field(file.name); field(file.text); }
+  return hash.digest("hex");
+}
+
 function chatGptContextArchivePayload(
   prompt: CompiledChatGptWebPrompt,
 ): { name: string; mimeType: string; buffer: Buffer } {
   if (!prompt.archive) throw new Error("Missing ChatGPT context archive");
-  const entries: Record<string, Uint8Array> = {
-    "context.txt": strToU8(prompt.archive.contextText),
-  };
-  const manifestImages: Array<Record<string, unknown>> = [];
-  let rawBytes = Buffer.byteLength(prompt.archive.contextText, "utf8");
-
-  for (const image of prompt.images) {
-    const parsed = parseDataUrl(image.imageUrl);
-    if (!parsed) throw new Error(`ChatGPT web input image ${image.ref} must be an inline base64 data URL`);
-    const extension = imageExtensions.get(parsed.mediaType.toLowerCase());
-    if (!extension) throw new Error(`ChatGPT web input image ${image.ref} has unsupported media type: ${parsed.mediaType}`);
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(parsed.base64) || parsed.base64.length % 4 !== 0) {
-      throw new Error(`ChatGPT web input image ${image.ref} contains invalid base64 data`);
+  const finish = new BackendPerfTrace("archive").start("archive_build");
+  try {
+    const key = contextArchiveKey(prompt);
+    const cached = contextArchiveCache.get(key);
+    if (cached) {
+      const buffer = Buffer.from(cached);
+      finish("ok", { bytes: buffer.length, cache_hit: true });
+      return { name: prompt.archive.name, mimeType: "application/zip", buffer };
     }
-    const buffer = Buffer.from(parsed.base64, "base64");
-    if (buffer.length === 0) throw new Error(`ChatGPT web input image ${image.ref} is empty`);
-    if (buffer.length > 20_000_000) throw new Error(`ChatGPT web input image ${image.ref} exceeds 20 MB`);
-    rawBytes += buffer.length;
-    if (rawBytes > 500_000_000) {
-      throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+    let rawBytes = Buffer.byteLength(prompt.archive.contextText, "utf8");
+    if (rawBytes > 500_000_000) throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+    const entries: Zippable = {
+      "context.txt": strToU8(prompt.archive.contextText),
+    };
+    const manifestImages: Array<Record<string, unknown>> = [];
+
+    for (const image of prompt.images) {
+      const parsed = parseDataUrl(image.imageUrl);
+      if (!parsed) throw new Error(`ChatGPT web input image ${image.ref} must be an inline base64 data URL`);
+      const extension = imageExtensions.get(parsed.mediaType.toLowerCase());
+      if (!extension) throw new Error(`ChatGPT web input image ${image.ref} has unsupported media type: ${parsed.mediaType}`);
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(parsed.base64) || parsed.base64.length % 4 !== 0) {
+        throw new Error(`ChatGPT web input image ${image.ref} contains invalid base64 data`);
+      }
+      const buffer = Buffer.from(parsed.base64, "base64");
+      if (buffer.length === 0) throw new Error(`ChatGPT web input image ${image.ref} is empty`);
+      if (buffer.length > 20_000_000) throw new Error(`ChatGPT web input image ${image.ref} exceeds 20 MB`);
+      rawBytes += buffer.length;
+      if (rawBytes > 500_000_000) {
+        throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+      }
+      const path = `images/${image.ref}.${extension}`;
+      entries[path] = [buffer, { level: 0 }];
+      manifestImages.push({
+        attachment_ref: image.ref,
+        path,
+        mime_type: parsed.mediaType.toLowerCase(),
+        ...(image.detail ? { detail: image.detail } : {}),
+      });
     }
-    const path = `images/${image.ref}.${extension}`;
-    entries[path] = buffer;
-    manifestImages.push({
-      attachment_ref: image.ref,
-      path,
-      mime_type: parsed.mediaType.toLowerCase(),
-      ...(image.detail ? { detail: image.detail } : {}),
-    });
-  }
 
-  const manifestSkills: Array<Record<string, unknown>> = [];
-  for (const file of prompt.skillFiles ?? []) {
-    const path = `skills/${file.name}`;
-    const data = strToU8(file.text);
-    rawBytes += data.length;
-    if (rawBytes > 500_000_000) {
-      throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+    const manifestSkills: Array<Record<string, unknown>> = [];
+    for (const file of prompt.skillFiles ?? []) {
+      const path = `skills/${file.name}`;
+      const data = strToU8(file.text);
+      rawBytes += data.length;
+      if (rawBytes > 500_000_000) {
+        throw new Error("ChatGPT context archive exceeds the 500 MB uncompressed bridge limit");
+      }
+      entries[path] = data;
+      manifestSkills.push({ filename: file.name, path, mime_type: "text/plain; charset=utf-8" });
     }
-    entries[path] = data;
-    manifestSkills.push({ filename: file.name, path, mime_type: "text/plain; charset=utf-8" });
-  }
 
-  entries["manifest.json"] = strToU8(JSON.stringify({
-    version: 1,
-    context: { path: "context.txt", mime_type: "text/plain; charset=utf-8" },
-    images: manifestImages,
-    skills: manifestSkills,
-  }, null, 2));
+    entries["manifest.json"] = strToU8(JSON.stringify({
+      version: 1,
+      context: { path: "context.txt", mime_type: "text/plain; charset=utf-8" },
+      images: manifestImages,
+      skills: manifestSkills,
+    }, null, 2));
 
-  const zipped = new BackendPerfTrace("archive").measure("archive_build", () => Buffer.from(zipSync(entries, { level: 6 })), { bytes: rawBytes });
-  if (zipped.length > 500_000_000) {
-    throw new Error("ChatGPT context archive exceeds the 500 MB compressed bridge limit");
-  }
-  return { name: prompt.archive.name, mimeType: "application/zip", buffer: zipped };
+    const zipped = Buffer.from(zipSync(entries, { level: 6 }));
+    if (zipped.length > 500_000_000) {
+      throw new Error("ChatGPT context archive exceeds the 500 MB compressed bridge limit");
+    }
+    if (zipped.length <= 32 * 1024 * 1024) contextArchiveCache.set(key, Buffer.from(zipped), zipped.length);
+    finish("ok", { bytes: zipped.length, cache_hit: false });
+    return { name: prompt.archive.name, mimeType: "application/zip", buffer: zipped };
+  } catch (error) { finish("error", { cache_hit: false }); throw error; }
 }
 
 export function chatGptPromptFilePayloads(
@@ -3367,7 +3408,7 @@ export class ChatGptBrowserWorker {
   }
 
   private async waitForTurnDomMutation(page: Page, timeoutMs = 50): Promise<void> {
-    await page.evaluate(({ timeout, attributeFilter }) => new Promise<void>(resolveMutation => {
+    await withChatGptBrowserObservationTimeout(page.evaluate(({ timeout, attributeFilter }) => new Promise<void>(resolveMutation => {
       let settled = false;
       let settleTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = () => {
@@ -3391,7 +3432,7 @@ export class ChatGptBrowserWorker {
         attributeFilter,
       });
       const timeoutTimer = setTimeout(finish, timeout);
-    }), { timeout: timeoutMs, attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES] });
+    }), { timeout: timeoutMs, attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES] }));
   }
 
   private async waitForTurnDomOrExternalProgress(
@@ -3399,8 +3440,9 @@ export class ChatGptBrowserWorker {
     afterProgressRevision: number,
     externalProgress?: ChatGptTurnProgressReader,
     signal?: AbortSignal,
+    timeoutMs = 50,
   ): Promise<void> {
-    const domMutation = this.waitForTurnDomMutation(page);
+    const domMutation = this.waitForTurnDomMutation(page, timeoutMs);
     if (!externalProgress) {
       await withBrowserTurnAbort(domMutation, signal);
       return;
@@ -6275,6 +6317,9 @@ export class ChatGptBrowserWorker {
         );
       }
       console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);
+      finishSubmitted();
+      const finishFirstReasoning = perf.start("first_reasoning");
+      const finishFirstText = perf.start("first_text");
       let responseTurn = await this.waitForNewAssistantTurn(
         page,
         submissionBaseline,
@@ -6292,9 +6337,6 @@ export class ChatGptBrowserWorker {
           : undefined,
       );
       await diagnostics.capture(page, "send-accepted");
-      finishSubmitted();
-      const finishFirstReasoning = perf.start("first_reasoning");
-      const finishFirstText = perf.start("first_text");
 
       let lastHeartbeat = 0;
       let finalText = "";
@@ -6898,7 +6940,11 @@ export class ChatGptBrowserWorker {
           });
           if (domError) throw new Error(domError);
         }
-        await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
+        // Wake on useful DOM/native progress while retaining the original 250 ms
+        // fallback for CSS-only changes and health checks. No failure ceiling changes.
+        await this.waitForTurnDomOrExternalProgress(
+          page, externalProgressSnapshot?.revision ?? 0, turn.externalProgress, turn.abortSignal, 250,
+        );
        } catch (error) {
         // Only a defect in this worker is retried here. Every deliberate signal — adapter errors,
         // aborts, closed tabs, DOM-health verdicts — still fails the turn immediately.
