@@ -443,6 +443,12 @@ function validateBatchTools(parsed: CodexParsedRequest, requests: BrokerToolRequ
 
 /** Keep the Responses bridge alive during every awaited phase of a browser turn. */
 export const CHATGPT_WEB_ADAPTER_HEARTBEAT_MS = 10_000;
+/**
+ * A recent verified-clear Launcher account-safety record may bridge a short control-channel outage.
+ * Actual paused records still hard-stop immediately; this grace applies only when verification
+ * itself is temporarily unavailable.
+ */
+export const CHATGPT_LAUNCHER_SECURITY_CLEAR_GRACE_MS = 5 * 60_000;
 
 export function createChatGptWebAdapter(
   provider: CodexProviderConfig,
@@ -473,6 +479,22 @@ export function createChatGptWebAdapter(
       : undefined);
   const readLauncherSecurityStatus = dependencies.launcherAutomationSecurityStatus
     ?? readLauncherAutomationSecurityStatus;
+  const launcherSecurityRetryDelaysMs = [100, 250] as const;
+  let lastVerifiedLauncherSecurityClearAt: number | undefined;
+  const readLauncherSecurityStatusResilient = async (descriptorPath: string): Promise<LauncherAutomationSecurityRecord> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= launcherSecurityRetryDelaysMs.length; attempt += 1) {
+      try {
+        return await readLauncherSecurityStatus(descriptorPath);
+      } catch (error) {
+        lastError = error;
+        const delayMs = launcherSecurityRetryDelaysMs[attempt];
+        if (delayMs === undefined) break;
+        await new Promise(resolveSleep => setTimeout(resolveSleep, delayMs));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  };
   const stoppedLauncherTraces = new Map<string, { error: ChatGptWebAdapterError; expiresAt: number }>();
   const launcherTraceBlockTtlMs = 30 * 60_000;
   const rememberLauncherTraceStop = (traceId: string, error: ChatGptWebAdapterError): void => {
@@ -503,24 +525,32 @@ export function createChatGptWebAdapter(
       if (!retainedLauncherDescriptor) {
         throw new LauncherAutomationSecurityStatusUnavailableError("Launcher browser-host descriptor is not configured");
       }
-      record = await readLauncherSecurityStatus(retainedLauncherDescriptor);
+      record = await readLauncherSecurityStatusResilient(retainedLauncherDescriptor);
     } catch (error) {
-      const unavailable = new ChatGptWebAdapterError(
-        "The Launcher account-safety status could not be verified. This ChatGPT Web turn has been stopped.",
+      const now = Date.now();
+      if (lastVerifiedLauncherSecurityClearAt !== undefined
+        && now - lastVerifiedLauncherSecurityClearAt <= CHATGPT_LAUNCHER_SECURITY_CLEAR_GRACE_MS
+        && accountSafety?.isHardStopped() !== true) {
+        console.warn(
+          `[chatgpt-web] Launcher account-safety status temporarily unavailable; using recent verified-clear state trace=${traceId}`,
+        );
+        return;
+      }
+      throw new ChatGptWebAdapterError(
+        "The Launcher account-safety status could not be verified temporarily. Retry after the Launcher control channel recovers.",
         {
           status: 503,
           errorType: "server_error",
           code: "chatgpt_account_safety_status_unavailable",
-          retryable: false,
+          retryable: true,
           cause: error,
         },
       );
-      stopLauncherTraces(unavailable, [traceId]);
-      throw unavailable;
     }
 
     const reconciled = accountSafety?.reconcileLauncherAutomationSecurity(record) === true;
     if (!reconciled || accountSafety?.isHardStopped()) {
+      lastVerifiedLauncherSecurityClearAt = undefined;
       const signal = record.signal ?? "invalid_security_state";
       const stopped = new ChatGptWebAdapterError(
         `ChatGPT Web automation is paused by Launcher account safety (${signal}). Resolve the issue in Launcher before resuming.`,
@@ -536,6 +566,7 @@ export function createChatGptWebAdapter(
       stopLauncherTraces(stopped, [...chatGptTurnSessions.activeTraceIds(), traceId]);
       throw stopped;
     }
+    lastVerifiedLauncherSecurityClearAt = Date.now();
   };
   if (launcherBacked) {
     structuredBroker?.setDispatchGuard(traceId => ensureLauncherAutomationSecurity(traceId));
