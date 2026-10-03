@@ -2238,7 +2238,7 @@ test("a live automatic helper gets five minutes to recover a missed heartbeat", 
 test("expiry cancellation preserves a changed owner and keeps failed cleanup visible", async () => {
   for (const outcome of ["reused", "failed"]) {
     const removed = [], warnings = [];
-    const tab = { id: "expiry-race", traceId: "trace_expiry", helperPid: 123,
+    const tab = { id: "expiry-race", traceId: "trace_expiry", helperPid: 2_000_000_000,
       status: "running", bootstrapReady: true, lastHeartbeatAt: 0 };
     const fixture = Object.assign(Object.create(BrowserHost.prototype), {
       turnTabs: new Map([[tab.id, tab]]),
