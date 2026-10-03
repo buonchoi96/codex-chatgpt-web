@@ -43,6 +43,23 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   assert.match(main, /runtime recovery failed/);
 });
 
+test("source live hands off an active installed route and restores it on exit", () => {
+  const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live.cjs"), "utf8");
+  assert.match(source, /productionHome/);
+  assert.match(source, /productionRouteEnvironment/);
+  assert.match(source, /handoffProductionRoute/);
+  assert.match(source, /temporarily disconnected the installed launcher Codex route for live source ownership/);
+  assert.match(source, /productionRouteWasActive = true/);
+  assert.match(source, /restoreProductionRoute/);
+  assert.match(source, /restored the installed launcher Codex route/);
+  assert.match(source, /liveRouteConnected = true/);
+  assert.match(source, /if \(!liveRouteConnected/);
+  const stop = source.indexOf("async function stop");
+  assert.ok(source.indexOf("restorePreviousRoute();", stop) < source.indexOf("restoreProductionRoute();", stop));
+  const main = source.indexOf("async function main");
+  assert.ok(source.indexOf("handoffProductionRoute();", main) < source.indexOf("startElectron();", main));
+});
+
 test("source live owns a tunnel handoff lease through Electron restarts and removes it before normal exit", () => {
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live.cjs"), "utf8");
   const lifecycle = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-lifecycle.cjs"), "utf8");
