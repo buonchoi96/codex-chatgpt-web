@@ -357,7 +357,7 @@ test("Launcher status outage blocks the active MCP call and does not persist an 
       },
     });
     await expect(adapter.runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, () => {}))
-      .rejects.toMatchObject({ code: "chatgpt_account_safety_status_unavailable", retryable: false });
+      .rejects.toMatchObject({ code: "chatgpt_account_safety_status_unavailable", retryable: true });
     const token = await broker.register({
       cwd: tempRoot,
       roots: [tempRoot],
@@ -383,6 +383,18 @@ test("Launcher status outage blocks the active MCP call and does not persist an 
     await broker.close();
     rmSync(safetyPath, { force: true });
   }
+});
+
+test("Launcher status outages keep recent verified-clear state instead of burning reconnect budget", () => {
+  const source = readFileSync(
+    new URL("../src/adapters/chatgpt-web/index.ts", import.meta.url),
+    "utf8",
+  );
+  expect(source).toContain("readLauncherSecurityStatusResilient");
+  expect(source).toContain("lastVerifiedLauncherSecurityClearAt");
+  expect(source).toContain("CHATGPT_LAUNCHER_SECURITY_CLEAR_GRACE_MS");
+  expect(source).toContain("using recent verified-clear state");
+  expect(source).not.toContain("stopLauncherTraces(unavailable, [traceId])");
 });
 
 function canonicalCurrentWireRequest(environmentText: string): CodexParsedRequest {
