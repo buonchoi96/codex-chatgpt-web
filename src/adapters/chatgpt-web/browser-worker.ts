@@ -17,6 +17,7 @@ import {
   LEGACY_CHATGPT_CONNECTOR_NAMES,
 } from "../../config";
 import { estimateTokens } from "../../lib/token-estimate";
+import { BackendPerfTrace } from "../../lib/backend-perf";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "./ui-labels";
 import type { CodexProviderConfig } from "../../types";
 import { parseDataUrl } from "../image";
@@ -2680,7 +2681,7 @@ function chatGptContextArchivePayload(
     skills: manifestSkills,
   }, null, 2));
 
-  const zipped = Buffer.from(zipSync(entries, { level: 6 }));
+  const zipped = new BackendPerfTrace("archive").measure("archive_build", () => Buffer.from(zipSync(entries, { level: 6 })), { bytes: rawBytes });
   if (zipped.length > 500_000_000) {
     throw new Error("ChatGPT context archive exceeds the 500 MB compressed bridge limit");
   }
@@ -2959,6 +2960,7 @@ export class ChatGptBrowserWorker {
   ): Promise<T> {
     chatGptSuspensionClock.start();
     const startedAt = performance.now();
+    const finishPerf = new BackendPerfTrace(traceId).start(stage);
     const suspendedAtStart = suspensionClock.suspendedMs();
     console.info(`[chatgpt-web] browser turn ${traceId} stage=${stage} started`);
     const controller = new AbortController();
@@ -2984,9 +2986,11 @@ export class ChatGptBrowserWorker {
       });
       actionPromise = action(controller.signal);
       const value = await Promise.race([actionPromise, timeout]);
+      finishPerf();
       console.info(`[chatgpt-web] browser turn ${traceId} stage=${stage} completed durationMs=${Math.round(performance.now() - startedAt)}`);
       return value;
     } catch (error) {
+      finishPerf("error");
       let surfacedError = error;
       if (stageTimedOut && awaitAbortedActionSettlement && actionPromise) {
         try {
@@ -5661,8 +5665,12 @@ export class ChatGptBrowserWorker {
       const multipartFinalPrompt = prepared.multipart && multipartTransactionId
         ? formatChatGptWebMultipartCommit(prepared.multipart, multipartTransactionId)
         : undefined;
-      const estimatedInputTokens = estimateCompiledChatGptWebInputTokens(prepared, turn.modelId);
-      const estimatedMessageTokens = estimateCompiledChatGptWebMessageTokens(prepared, turn.modelId);
+      const perf = new BackendPerfTrace(turn.traceId);
+      const finishSubmitted = perf.start("submission_accepted");
+      const [estimatedInputTokens, estimatedMessageTokens] = perf.measure("token_estimation", () => [
+        estimateCompiledChatGptWebInputTokens(prepared, turn.modelId),
+        estimateCompiledChatGptWebMessageTokens(prepared, turn.modelId),
+      ]);
       const maxMessageChars = compiledChatGptWebMaxMessageChars(prepared);
       const maxStageMessageTokens = multipartStages
         ? Math.max(...multipartStages.map(stage => estimateTokens(stage.text, turn.modelId)))
@@ -6284,6 +6292,9 @@ export class ChatGptBrowserWorker {
           : undefined,
       );
       await diagnostics.capture(page, "send-accepted");
+      finishSubmitted();
+      const finishFirstReasoning = perf.start("first_reasoning");
+      const finishFirstText = perf.start("first_text");
 
       let lastHeartbeat = 0;
       let finalText = "";
@@ -6309,6 +6320,7 @@ export class ChatGptBrowserWorker {
       const emitMarkdownDelta = (delta: string): void => {
         const visible = checkpointStream ? checkpointStream.push(delta) : delta;
         if (!visible) return;
+        finishFirstText();
         if (deferFinalText) bufferedFinalDeltas.push(visible);
         else turn.onTextDelta(visible);
       };
@@ -6609,6 +6621,7 @@ export class ChatGptBrowserWorker {
             }
           })();
           for (const trace of visibleTrace.observe(snapshot.traceBlocks, terminalUiReady)) {
+            finishFirstReasoning();
             if (trace.kind === "commentary") turn.onCommentary?.(trace.text, trace.continuation === true);
             else turn.onReasoningSummary?.(trace.text, trace.continuation === true);
           }

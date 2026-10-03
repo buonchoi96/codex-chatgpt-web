@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { BackendPerfTrace } from "../../lib/backend-perf";
 import { notifyLauncherTurn, readLauncherBrowserHostDescriptor } from "../../launcher-browser-host";
 import {
   ChatGptCompactionHandoffAccepted,
@@ -222,7 +223,9 @@ export class LauncherBrowserHelperClient {
 
   async run(turn: BrowserTurn): Promise<string> {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
-    await this.ensureChild();
+    const finishReady = new BackendPerfTrace(turn.traceId).start("helper_ready");
+    try { await this.ensureChild(); finishReady(); }
+    catch (error) { finishReady("error"); throw error; }
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if (turn.onMultipartStageAcknowledged && !this.helperFeatures.has("multipart-stage-ack")) {
       throw new Error(

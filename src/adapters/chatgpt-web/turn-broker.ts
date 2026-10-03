@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { BackendPerfTrace } from "../../lib/backend-perf";
 import { isWindowsPipeEndpoint } from "../../config";
 import {
   CompactionTransactionStore,
@@ -55,6 +56,9 @@ interface PendingInvocation {
   reject: (error: Error) => void;
   /** The MCP response deadline elapsed after Codex had already received this call. */
   detached?: boolean;
+  finishQueue?: () => void;
+  finishNative?: () => void;
+  perf?: BackendPerfTrace;
 }
 
 interface ToolWaiter {
@@ -109,6 +113,7 @@ interface TurnChannel {
   toolCallsCompleted: number;
   lastComputerUseCompletedAt?: number;
   lastComputerUseCompletedTool?: string;
+  finishDecision?: () => void;
   requireNativeCompletionReceipt: boolean;
   pendingNativeCompletionReceipt?: { activityId: string; receipt: NativeCompletionReceipt };
   nativeCompletionReceipt?: { receipt: NativeCompletionReceipt; revision: number };
@@ -724,6 +729,10 @@ export class TurnBroker implements TurnBrokerOwner {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
     channel.invocations.delete(callId);
+    invocation.finishNative?.();
+    const surface = invocation.request.wireName.includes("windows_computer_use") ? "computer_use_cycle"
+      : invocation.request.wireName.includes("cua_repl") ? "browser_use_cycle" : "tool_cycle";
+    channel.finishDecision = invocation.perf?.start(surface);
     channel.toolCallsCompleted += 1;
     const retainedResult = structuredClone(result);
     channel.recentToolResults.delete(callId);
@@ -1876,6 +1885,8 @@ export class TurnBroker implements TurnBrokerOwner {
       freeform: request.freeform === true,
       ...(request.freeform === true ? { input: request.input ?? "" } : { arguments: request.arguments ?? {} }),
     };
+    binding.channel.finishDecision?.();
+    binding.channel.finishDecision = undefined;
     if (binding.channel.lastComputerUseCompletedAt !== undefined) {
       const decisionLatencyMs = Math.max(0, Date.now() - binding.channel.lastComputerUseCompletedAt);
       console.info(
@@ -1886,7 +1897,9 @@ export class TurnBroker implements TurnBrokerOwner {
       binding.channel.lastComputerUseCompletedTool = undefined;
     }
     return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
-      binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke });
+      const perf = new BackendPerfTrace(binding.channel.traceId);
+      binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke,
+        perf, finishQueue: perf.start("broker_queue") });
       binding.channel.queuedCallIds.push(callId);
       binding.channel.toolCallsQueued += 1;
       console.info(
@@ -1899,7 +1912,12 @@ export class TurnBroker implements TurnBrokerOwner {
   private takeQueued(channel: TurnChannel): BrokerToolRequest[] {
     const ids = channel.queuedCallIds.splice(0);
     for (const id of ids) {
-      if (channel.invocations.has(id)) channel.deliveredCallIds.add(id);
+      const invocation = channel.invocations.get(id);
+      if (invocation) {
+        channel.deliveredCallIds.add(id);
+        invocation.finishQueue?.();
+        invocation.finishNative = invocation.perf?.start("native_completion");
+      }
     }
     return ids.map(id => channel.invocations.get(id)?.request).filter((request): request is BrokerToolRequest => Boolean(request));
   }

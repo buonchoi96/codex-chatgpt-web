@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import { BackendPerfTrace } from "../../lib/backend-perf";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
 import { defaultBrokerEndpoint, expandUserPath, resolveBrokerEndpoint } from "../../config";
 import {
@@ -735,6 +736,9 @@ export function createChatGptWebAdapter(
       turnToken?: string,
       activeTurnRecovery = false,
     ) => {
+      const perf = new BackendPerfTrace(traceId);
+      const finishCompile = perf.start("prompt_compilation");
+      try {
       let compiled = compileChatGptWebPrompt(
         input,
         turnCapabilities,
@@ -758,7 +762,9 @@ export function createChatGptWebAdapter(
           );
         }
       }
+      finishCompile();
       return compiled;
+      } catch (error) { finishCompile("error"); throw error; }
     };
     if (captureLunaCheckpoint) {
       console.info(
