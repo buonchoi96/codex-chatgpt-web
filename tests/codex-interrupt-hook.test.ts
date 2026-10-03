@@ -294,6 +294,50 @@ test("keeps foreign TOML tables inserted between the managed hook and its trust 
   }
 });
 
+test("follows one uniquely relocated managed hook when Codex inserts an earlier Interrupt group", () => {
+  const original = 'model = "example"\n';
+  const { text, installed } = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", {
+    runtimeCommand: ["/opt/runtime"],
+  });
+  const relocatedStateKey = installed.stateKey.replace(/:interrupt:\d+:0$/, ":interrupt:1:0");
+  expect(relocatedStateKey).not.toBe(installed.stateKey);
+  const foreign = [
+    "[[hooks.Interrupt]]",
+    "[[hooks.Interrupt.hooks]]",
+    'type = "command"',
+    'command = "foreign-user-hook"',
+    "timeout = 3",
+    "",
+  ].join("\n");
+  const rewritten = text
+    .replace(MANAGED_INTERRUPT_HOOK_START, foreign + MANAGED_INTERRUPT_HOOK_START)
+    .replace(
+      `[hooks.state.${JSON.stringify(installed.stateKey)}]`,
+      `[hooks.state.${JSON.stringify(relocatedStateKey)}]`,
+    );
+
+  expect((Bun.TOML.parse(rewritten) as any).hooks.Interrupt).toHaveLength(2);
+  verifyCodexInterruptHook(rewritten, installed);
+  const restored = restoreCodexInterruptHook(rewritten, installed);
+  expect(restored).toContain('command = "foreign-user-hook"');
+  expect(restored).not.toContain(installed.command);
+  verifyCodexInterruptHookRestored(restored);
+
+  const staleTrustIndex = rewritten.replace(
+    `[hooks.state.${JSON.stringify(relocatedStateKey)}]`,
+    `[hooks.state.${JSON.stringify(installed.stateKey)}]`,
+  );
+  expect(() => verifyCodexInterruptHook(staleTrustIndex, installed)).toThrow("order changed after setup");
+
+  const duplicateTrust = rewritten + [
+    "",
+    `[hooks.state.${JSON.stringify(installed.stateKey)}]`,
+    `trusted_hash = ${JSON.stringify(installed.trustedHash)}`,
+    "",
+  ].join("\n");
+  expect(() => verifyCodexInterruptHook(duplicateTrust, installed)).toThrow("order changed after setup");
+});
+
 test("preserves ownership when Codex moves trust state before the hook and normalizes boundary newlines", () => {
   for (const ending of ["\n", "\r\n", "\r"]) {
     const original = 'model = "example"\n'.replaceAll("\n", ending);
