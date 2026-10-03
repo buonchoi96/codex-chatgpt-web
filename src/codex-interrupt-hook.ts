@@ -474,7 +474,52 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   return merged;
 }
 
+function restoreExactCodexInterruptHookFragment(
+  text: string,
+  installed: InstalledCodexInterruptHook,
+): string | undefined {
+  if (codexInterruptHookHash(installed.command) !== installed.trustedHash) {
+    throw new Error("Codex interrupt lifecycle hook journal hash is invalid");
+  }
+  const exact = text.indexOf(installed.fragment);
+  if (exact < 0 || text.indexOf(installed.fragment, exact + 1) >= 0) return undefined;
+  if (managedMarkerCount(text) !== 1 || text.split(MANAGED_INTERRUPT_HOOK_END).length - 1 !== 1) return undefined;
+
+  const expectedGroup = { hooks: [{ type: "command", command: installed.command, timeout: 3 }] };
+  const expectedState = { trusted_hash: installed.trustedHash };
+  const equal = (left: unknown, right: unknown) =>
+    JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
+
+  let source: HookDocument;
+  let fragment: HookDocument;
+  try {
+    source = parseHookDocument(text);
+    fragment = parseHookDocument(installed.fragment);
+  } catch {
+    return undefined;
+  }
+  if (!equal(fragment.hooks?.Interrupt, [expectedGroup])
+    || !equal(fragment.hooks?.state, { [installed.stateKey]: expectedState })) return undefined;
+  if (!equal(source.hooks?.Interrupt?.[installed.groupIndex], expectedGroup)
+    || !equal(source.hooks?.state?.[installed.stateKey], expectedState)) return undefined;
+
+  const repaired = text.slice(0, exact) + text.slice(exact + installed.fragment.length);
+  try {
+    const expectedRestored = structuredClone(source);
+    expectedRestored.hooks!.Interrupt!.splice(installed.groupIndex, 1);
+    delete expectedRestored.hooks!.state![installed.stateKey];
+    if (!equal(
+      withoutEmptyHookContainers(parseHookDocument(repaired)),
+      withoutEmptyHookContainers(expectedRestored),
+    )) return undefined;
+  } catch {
+    return undefined;
+  }
+  return repaired;
+}
+
 export function verifyCodexInterruptHook(text: string, installed: InstalledCodexInterruptHook): void {
+  if (restoreExactCodexInterruptHookFragment(text, installed) !== undefined) return;
   locateCodexInterruptHook(text, installed);
 }
 
@@ -494,6 +539,8 @@ export function restoreCodexInterruptHook(
         && !Object.hasOwn(state, installed.stateKey))) return text;
     }
   }
+  const exact = restoreExactCodexInterruptHookFragment(text, installed);
+  if (exact !== undefined) return exact;
   const owned = locateCodexInterruptHook(text, installed).sort((left, right) => right.start - left.start);
   for (const range of owned) text = text.slice(0, range.start) + text.slice(range.end);
   return text;
