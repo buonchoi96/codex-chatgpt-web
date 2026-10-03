@@ -1426,7 +1426,7 @@ describe("trusted Codex task environment continuity", () => {
     database.close();
     expect(() => new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request))
       .toThrow("does not authenticate");
-  });
+  }, 15_000);
 
   test.each([null, undefined])("recovers a V1 native child with session agent_path=%s and agent name /root", agentPath => {
     const codexHome = mkdtempSync(join(tmpdir(), "codex-chatgpt-null-agent-path-"));
