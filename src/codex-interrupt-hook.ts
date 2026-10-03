@@ -64,11 +64,11 @@ function lineEnding(text: string): "\n" | "\r\n" | "\r" {
 }
 
 function tomlAstSource(text: string): string {
-  const normalized = text.replace(/\\r(?!\\n)/g, "\\n");
+  const normalized = text.replace(/\r(?!\n)/g, "\n");
   // toml-eslint-parser source ranges are used against the original config. Replace a leading
   // UTF-8 BOM with one same-width character instead of removing it so every AST offset remains
   // aligned with the source we later edit.
-  return normalized.startsWith("\\uFEFF") ? " " + normalized.slice(1) : normalized;
+  return normalized.startsWith("\uFEFF") ? " " + normalized.slice(1) : normalized;
 }
 
 function managedMarkerCount(text: string): number {
