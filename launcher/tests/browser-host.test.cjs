@@ -2203,6 +2203,38 @@ test("an expired browser surface cancels its runtime before releasing the tab", 
   }]));
 });
 
+test("a live automatic helper gets five minutes to recover a missed heartbeat", async () => {
+  const cancellations = [];
+  const removed = [];
+  const tab = {
+    id: "tab-live-heartbeat-grace",
+    traceId: "trace_live_heartbeat_grace",
+    helperPid: process.pid,
+    status: "running",
+    bootstrapReady: true,
+    lastHeartbeatAt: 0,
+  };
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    turnTabs: new Map([[tab.id, tab]]),
+    lastTurnSweepAt: 55_000,
+    cancelTurn: async (traceId, reason) => { cancellations.push({ traceId, reason }); },
+    removeTurnTab: () => { removed.push(tab.id); },
+    logger: { warn() {} },
+  });
+
+  await BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 60_000);
+  assert.deepEqual(cancellations, []);
+  assert.deepEqual(removed, []);
+
+  fixture.lastTurnSweepAt = 295_000;
+  await BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 300_000);
+  assert.deepEqual(cancellations, [{
+    traceId: tab.traceId,
+    reason: "helper_heartbeat_expired",
+  }]);
+  assert.deepEqual(removed, [tab.id]);
+});
+
 test("expiry cancellation preserves a changed owner and keeps failed cleanup visible", async () => {
   for (const outcome of ["reused", "failed"]) {
     const removed = [], warnings = [];
