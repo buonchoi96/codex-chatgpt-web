@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
 import { getStaticTOMLValue, parseTOML, type AST } from "toml-eslint-parser";
 import type { AppConfig } from "./config";
-import { getConfigDir } from "./config";
+import { getConfigDir, stripUtf8Bom } from "./config";
 import type { InstalledCodexInterruptHook } from "./codex-integration-shared";
 
 export const MANAGED_INTERRUPT_HOOK_START =
@@ -61,6 +61,14 @@ export function codexInterruptHookCommand(
 
 function lineEnding(text: string): "\n" | "\r\n" | "\r" {
   return text.includes("\r\n") ? "\r\n" : text.includes("\n") ? "\n" : text.includes("\r") ? "\r" : "\n";
+}
+
+function tomlAstSource(text: string): string {
+  const normalized = text.replace(/\\r(?!\\n)/g, "\\n");
+  // toml-eslint-parser source ranges are used against the original config. Replace a leading
+  // UTF-8 BOM with one same-width character instead of removing it so every AST offset remains
+  // aligned with the source we later edit.
+  return normalized.startsWith("\\uFEFF") ? " " + normalized.slice(1) : normalized;
 }
 
 function managedMarkerCount(text: string): number {
@@ -137,7 +145,7 @@ export function installCodexInterruptHookCommand(
         : `${ending}${ending}`;
   const trailing = text.length > 0 && text.endsWith(ending) ? ending : "";
   const fragment = `${leading}${core}${trailing}`;
-  const ast = parseTOML(text.replace(/\r(?!\n)/g, "\n"), { tomlVersion: "1.0" });
+  const ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
   const inline = inlineInterruptArray(ast);
   let installedText = `${text}${fragment}`;
   if (inline) {
@@ -184,7 +192,7 @@ function inlineInterruptArray(ast: AST.TOMLProgram): AST.TOMLArray | undefined {
 }
 
 function parseHookDocument(text: string): HookDocument {
-  return Bun.TOML.parse(text.replace(/\r\n?/g, "\n")) as HookDocument;
+  return Bun.TOML.parse(stripUtf8Bom(text).replace(/\r\n?/g, "\n")) as HookDocument;
 }
 
 /**
@@ -314,7 +322,7 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
       || !equal(journal.hooks?.state, { [installed.stateKey]: expectedState })) throw changed();
     document = parseHookDocument(text);
     // Normalize bare CR without moving offsets; the parser retains every source range and comment.
-    ast = parseTOML(text.replace(/\r(?!\n)/g, "\n"), { tomlVersion: "1.0" });
+    ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
     journalAst = parseTOML(installed.fragment.replace(/\r(?!\n)/g, "\n"), { tomlVersion: "1.0" });
   } catch {
     throw changed();
@@ -478,7 +486,7 @@ export function restoreCodexInterruptHook(
   // Explicit Setup can reinstall a fully removed hook. A stale journal alone does not mean
   // there is still a definition to remove; partial edits must retain the strict checks below.
   if (options.allowAbsent && managedMarkerCount(text) === 0 && !text.includes(MANAGED_INTERRUPT_HOOK_END)) {
-    const { hooks } = Bun.TOML.parse(text) as { hooks?: unknown };
+    const { hooks } = Bun.TOML.parse(stripUtf8Bom(text)) as { hooks?: unknown };
     if (hooks === undefined) return text;
     if (hooks && typeof hooks === "object" && !Array.isArray(hooks) && !Object.hasOwn(hooks, "Interrupt")) {
       const state = (hooks as Record<string, unknown>).state;
