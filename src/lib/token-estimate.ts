@@ -1,4 +1,5 @@
 import { get_encoding, type Tiktoken } from "tiktoken";
+import { BoundedCache } from "./bounded-cache";
 
 /**
  * Token accounting for ChatGPT Web prompts.
@@ -22,21 +23,37 @@ function chatGptTokenizer(): Tiktoken {
  */
 export function estimateTokens(text: string, modelId?: string): number {
   void modelId;
-  if (!text) return 0;
-
-  const encoding = chatGptTokenizer();
-  let count = 0;
-  for (let start = 0; start < text.length;) {
-    let end = Math.min(start + TOKENIZER_CHUNK_CHARS, text.length);
-    if (end < text.length) {
-      const previous = text.charCodeAt(end - 1);
-      const next = text.charCodeAt(end);
-      if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
-        end -= 1;
-      }
-    }
-    count += encoding.encode_ordinary(text.slice(start, end)).length;
-    start = end;
-  }
-  return count;
+  return ordinaryTextEstimator.estimate(text);
 }
+
+/** Cache exact chunk counts within one tokenizer; never substitute approximate token ratios. */
+export class ChunkTokenEstimator {
+  // At most 512 immutable chunks / 4 MiB of UTF-16 text, retained for at most five minutes.
+  private readonly cache = new BoundedCache<string, number>(512, 4 * 1024 * 1024, 5 * 60_000);
+
+  constructor(private readonly countChunk: (text: string) => number) {}
+
+  estimate(text: string): number {
+    let count = 0;
+    for (let start = 0; start < text.length;) {
+      let end = Math.min(start + TOKENIZER_CHUNK_CHARS, text.length);
+      if (end < text.length) {
+        const previous = text.charCodeAt(end - 1);
+        const next = text.charCodeAt(end);
+        if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end -= 1;
+      }
+      const chunk = text.slice(start, end);
+      let tokens = this.cache.get(chunk);
+      if (tokens === undefined) {
+        tokens = this.countChunk(chunk);
+        this.cache.set(chunk, tokens, chunk.length * 2);
+      }
+      count += tokens;
+      start = end;
+    }
+    return count;
+  }
+}
+
+// The model argument remains informational: every existing route uses this same o200k tokenizer.
+const ordinaryTextEstimator = new ChunkTokenEstimator(text => chatGptTokenizer().encode_ordinary(text).length);
