@@ -50,7 +50,7 @@ export function isLauncherAutomationSecurityRecord(value: unknown): value is Lau
 
 export class LauncherAutomationSecurityStatusUnavailableError extends Error {
   readonly code = "chatgpt_account_safety_status_unavailable";
-  readonly retryable = false;
+  readonly retryable = true;
 
   constructor(message: string) {
     super(message);
