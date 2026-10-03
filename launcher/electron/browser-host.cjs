@@ -44,6 +44,10 @@ const HIDDEN_TURN_VIEWPORT = Object.freeze({ width: 800, height: 600 });
 // whose helper disappeared without delivering the normal /v1/turn/end event.
 const TURN_HEARTBEAT_SWEEP_MS = 5_000;
 const TURN_HEARTBEAT_TIMEOUT_MS = 60_000;
+// A live helper can temporarily miss the control heartbeat while Windows/tunnel recovery or a
+// Chromium stall monopolizes its event loop. Do not confuse a live process with an orphan after
+// only one minute; give it the same five-minute recovery horizon used by transient Web failures.
+const TURN_HEARTBEAT_LIVE_HELPER_GRACE_MS = 5 * 60_000;
 const TURN_TAB_BOOTSTRAP_TIMEOUT_MS = 120_000;
 const RETAINED_TURN_TAB_TTL_MS = 30 * 60 * 1000;
 const BROWSER_NAVIGATION_TIMEOUT_MS = 60_000;
@@ -1773,8 +1777,14 @@ class BrowserHost {
       if (tab.status !== "running") continue;
       const bootstrapExpired = tab.bootstrapReady !== true
         && now >= (tab.bootstrapDeadlineAt ?? Number.POSITIVE_INFINITY);
+      const heartbeatAge = now - (tab.lastHeartbeatAt ?? 0);
+      const helperStillRunning = tab.bootstrapReady === true
+        && heartbeatAge >= TURN_HEARTBEAT_TIMEOUT_MS
+        && processRunning(tab.helperPid);
       const heartbeatExpired = tab.bootstrapReady === true
-        && now - (tab.lastHeartbeatAt ?? 0) >= TURN_HEARTBEAT_TIMEOUT_MS;
+        && heartbeatAge >= (helperStillRunning
+          ? TURN_HEARTBEAT_LIVE_HELPER_GRACE_MS
+          : TURN_HEARTBEAT_TIMEOUT_MS);
       if (!bootstrapExpired && !heartbeatExpired) continue;
       if (tab.expiryCancellation) {
         cancellations.push(tab.expiryCancellation);
