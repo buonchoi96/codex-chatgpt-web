@@ -50,3 +50,37 @@ test("response wakeup aborts its external progress listener when DOM state arriv
   await done;
   expect(progressSignal.aborted).toBeTrue();
 });
+
+
+test("aborting one response wakeup consumes its external progress cancellation", async () => {
+  let rejectProgress!: (error: Error) => void;
+  let progressSignal!: AbortSignal;
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    waitForTurnDomMutation: () => new Promise<void>(() => {}),
+  });
+  const progress = {
+    waitForChange: (_revision: number, signal: AbortSignal) => {
+      progressSignal = signal;
+      return new Promise<void>((_resolve, reject) => {
+        rejectProgress = reject;
+        signal.addEventListener("abort", () => {
+          queueMicrotask(() => rejectProgress(new DOMException("ChatGPT external progress wait aborted", "AbortError")));
+        }, { once: true });
+      });
+    },
+  };
+  const controller = new AbortController();
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const done = worker.waitForTurnDomOrExternalProgress({}, 9, progress, controller.signal, 250);
+    controller.abort();
+    await expect(done).rejects.toMatchObject({ name: "AbortError" });
+    expect(progressSignal.aborted).toBeTrue();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
