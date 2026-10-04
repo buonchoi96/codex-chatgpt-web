@@ -248,6 +248,19 @@ function chatGptModelControlUnavailableFailure(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith(CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE);
 }
 
+export async function retryTransientChatGptModelControlSelection<T>(
+  select: () => Promise<T>,
+  recover: () => Promise<void>,
+): Promise<T> {
+  try {
+    return await select();
+  } catch (error) {
+    if (!chatGptModelControlUnavailableFailure(error)) throw error;
+    await recover();
+    return await select();
+  }
+}
+
 function chatGptModelControlUnavailableError(diagnostic: string): Error {
   return new Error(CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE, { cause: new Error(diagnostic) });
 }
@@ -6022,10 +6035,7 @@ export class ChatGptBrowserWorker {
           trackUsage,
           turn.modelFamily,
         );
-        try {
-          return await select();
-        } catch (error) {
-          if (!chatGptModelControlUnavailableFailure(error)) throw error;
+        return retryTransientChatGptModelControlSelection(select, async () => {
           // A reconnect/helper restart can leave a proven picker surface in a transient React
           // commit race: diagnostics may show the requested slider/value even though the next
           // semantic read loses that surface. No prompt has been sent at this boundary, so one
@@ -6037,8 +6047,7 @@ export class ChatGptBrowserWorker {
           await settleChatGptUi();
           await throwIfChatGptRateLimitDialog(page);
           await throwIfChatGptSessionFailureAlert(page);
-          return await select();
-        }
+        });
       };
       let mode = await this.runStage(turn.traceId, "effort_selection", browserStageTimeouts.effortSelection, selectStagingMode);
       await diagnostics.capture(page, "effort-selection-complete");
