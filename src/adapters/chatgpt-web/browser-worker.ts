@@ -244,6 +244,10 @@ function chatGptConnectorUnavailableError(message: string): ChatGptWebAdapterErr
 const CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE = "ChatGPT model controls are unavailable. Reload ChatGPT and retry the task.";
 const CHATGPT_EFFORT_SLIDER_READY_TIMEOUT_MS = 15_000;
 
+function chatGptModelControlUnavailableFailure(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith(CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE);
+}
+
 function chatGptModelControlUnavailableError(diagnostic: string): Error {
   return new Error(CHATGPT_MODEL_CONTROL_UNAVAILABLE_MESSAGE, { cause: new Error(diagnostic) });
 }
@@ -1403,14 +1407,51 @@ function chatGptAbortError(signal: AbortSignal | undefined, fallbackMessage: str
 
 function withBrowserTurnAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(new DOMException("ChatGPT web turn aborted", "AbortError"));
+  if (signal.aborted) {
+    // The caller has already abandoned this operation, but the promise was created before this
+    // guard ran. Consume any eventual rejection so one cancelled turn cannot become an unhandled
+    // rejection in the shared browser-helper process.
+    void promise.catch(() => {});
+    return Promise.reject(new DOMException("ChatGPT web turn aborted", "AbortError"));
+  }
   return new Promise<T>((resolvePromise, rejectPromise) => {
-    const onAbort = () => rejectPromise(new DOMException("ChatGPT web turn aborted", "AbortError"));
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const resolveOnce = (value: T) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolvePromise(value);
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectPromise(error);
+    };
+    const onAbort = () => rejectOnce(new DOMException("ChatGPT web turn aborted", "AbortError"));
     signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolvePromise, rejectPromise).finally(() => {
-      signal.removeEventListener("abort", onAbort);
-    });
+    // Always attach both handlers. If Abort wins first, a later rejection from the underlying
+    // operation is still observed and cannot terminate the shared helper.
+    promise.then(resolveOnce, rejectOnce);
   });
+}
+
+function waitForExternalProgressWake(
+  externalProgress: ChatGptTurnProgressReader,
+  afterRevision: number,
+  signal: AbortSignal,
+): Promise<void> {
+  return externalProgress.waitForChange(afterRevision, signal).then(
+    () => undefined,
+    error => {
+      // Aborting the losing progress listener is normal Promise.race cleanup, not a turn failure.
+      // Resolve that cancellation locally so Node's strict unhandled-rejection mode can never
+      // promote it into a browser-helper process exit.
+      if (signal.aborted && error instanceof DOMException && error.name === "AbortError") return;
+      throw error;
+    },
+  );
 }
 
 export interface BrowserTurn {
@@ -3454,7 +3495,7 @@ export class ChatGptBrowserWorker {
     try {
       await withBrowserTurnAbort(Promise.race([
         domMutation,
-        externalProgress.waitForChange(afterProgressRevision, progressSignal).then(() => undefined),
+        waitForExternalProgressWake(externalProgress, afterProgressRevision, progressSignal),
       ]), signal);
     } finally {
       progressWaitAbort.abort();
@@ -3494,7 +3535,7 @@ export class ChatGptBrowserWorker {
         try {
           const observed = await withBrowserTurnAbort(Promise.race([
             this.currentSubmissionEvidence(page, baseline, signal).then(value => ({ kind: "dom" as const, value })),
-            externalProgress.waitForChange(progress?.revision ?? 0, progressSignal)
+            waitForExternalProgressWake(externalProgress, progress?.revision ?? 0, progressSignal)
               .then(() => ({ kind: "external" as const })),
           ]), signal);
           if (observed.kind === "external") continue;
@@ -5971,8 +6012,8 @@ export class ChatGptBrowserWorker {
       }
       // A retained lease proves the connector binding, not the current model selection.
       // Reconcile the live control before every submission, including retained continuations.
-      const selectStagingMode = () => (
-        this.selectModelAndEffort(
+      const selectStagingMode = async () => {
+        const select = () => this.selectModelAndEffort(
           page,
           turn.modelId,
           stagingMode.effort,
@@ -5980,8 +6021,25 @@ export class ChatGptBrowserWorker {
           checkpoint => diagnostics.capture(page, checkpoint),
           trackUsage,
           turn.modelFamily,
-        )
-      );
+        );
+        try {
+          return await select();
+        } catch (error) {
+          if (!chatGptModelControlUnavailableFailure(error)) throw error;
+          // A reconnect/helper restart can leave a proven picker surface in a transient React
+          // commit race: diagnostics may show the requested slider/value even though the next
+          // semantic read loses that surface. No prompt has been sent at this boundary, so one
+          // local close/settle/reselect is safe and avoids consuming a native reconnect attempt.
+          console.warn(
+            `[chatgpt-web] browser turn ${turn.traceId} retrying transient model picker selection once before Send`,
+          );
+          await page.keyboard.press("Escape").catch(() => {});
+          await settleChatGptUi();
+          await throwIfChatGptRateLimitDialog(page);
+          await throwIfChatGptSessionFailureAlert(page);
+          return await select();
+        }
+      };
       let mode = await this.runStage(turn.traceId, "effort_selection", browserStageTimeouts.effortSelection, selectStagingMode);
       await diagnostics.capture(page, "effort-selection-complete");
 
