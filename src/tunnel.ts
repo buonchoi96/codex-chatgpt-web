@@ -6,8 +6,8 @@ import type { AppConfig, BrowserInteractionMode, TunnelConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
 import { runCommand, runChecked } from "./process";
 
-export const TUNNEL_VERSION = "0.0.12";
-const MIGRATABLE_TUNNEL_VERSIONS = new Set(["0.0.10"]);
+export const TUNNEL_VERSION = "0.0.15";
+const MIGRATABLE_TUNNEL_VERSIONS = new Set(["0.0.12", "0.0.10"]);
 const RELEASE_BASE = `https://github.com/openai/tunnel-client/releases/download/v${TUNNEL_VERSION}`;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 export const TUNNEL_READY_TIMEOUT_MS = 120_000;
@@ -339,6 +339,7 @@ export interface TunnelRuntimeStatus {
   healthy: boolean;
   ready: boolean;
   state?: string;
+  controlPlanePollState?: string;
   detail: string;
 }
 
@@ -413,21 +414,50 @@ export function parseTunnelStatus(output: string, alias: string, exitStatus = 0)
   }
   try {
     const parsed = JSON.parse(output) as Record<string, unknown>;
-    if (!Array.isArray(parsed.entries)) throw new Error("local inventory has no entries array");
+
+    // v0.0.15 runtimes status returns one rich payload. Keep the inventory parser below only as a
+    // compatibility boundary for older fixtures/diagnostics; production status must use the rich
+    // payload so local readiness cannot hide a broken control-plane poll route.
+    if (!Array.isArray(parsed.entries)) {
+      const payloadAlias = typeof parsed.alias === "string" ? parsed.alias : alias;
+      if (payloadAlias !== alias) throw new Error("runtime status returned the wrong alias");
+      const state = typeof parsed.runtime_state === "string" ? parsed.runtime_state : undefined;
+      if (state && !["stopped", "starting", "healthy", "ready"].includes(state)) {
+        throw new Error("runtime status has an unsupported runtime state");
+      }
+      const processRunning = parsed.process_running === true || (state !== undefined && state !== "stopped");
+      const healthy = parsed.healthy === true;
+      const ready = parsed.ready === true;
+      const poll = nestedRecord(parsed, "control_plane_poll_health");
+      const controlPlanePollState = typeof poll?.state === "string" ? poll.state : "unknown";
+      const controlPlaneReady = controlPlanePollState === "healthy" || controlPlanePollState === "direct";
+      const remoteError = typeof parsed.remote_error === "string" && parsed.remote_error.trim()
+        ? parsed.remote_error.trim()
+        : undefined;
+      const ok = processRunning && healthy && ready && controlPlaneReady;
+      const detail = safeTunnelDetail([
+        `process_running=${processRunning}`,
+        `healthy=${healthy}`,
+        `ready=${ready}`,
+        `control_plane_poll=${controlPlanePollState}`,
+        ...(state ? [`state=${state}`] : []),
+        ...(remoteError ? [`remote_error=${remoteError}`] : []),
+      ].join("; "));
+      return { ok, processRunning, healthy, ready, state, controlPlanePollState, detail };
+    }
+
     const matches = parsed.entries.filter(entry => entry?.alias === alias);
     if (matches.length > 1) throw new Error("local inventory contains duplicate aliases");
     const state = matches.length === 0 ? "stopped" : matches[0].runtime_state;
     if (!["stopped", "starting", "healthy", "ready"].includes(state)) {
       throw new Error("local inventory has an unsupported runtime state");
     }
-    // tunnel-client 0.0.12 derives these states from the live process and local healthz/readyz
-    // probes. It does not need the optional remote control-plane lookup made by `status`.
     const processRunning = state !== "stopped";
     const healthy = state === "healthy" || state === "ready";
     const ready = state === "ready";
     const ok = processRunning && healthy && ready;
     const detail = ok
-      ? "process_running=true healthy=true ready=true"
+      ? "process_running=true healthy=true ready=true legacy_inventory=true"
       : safeTunnelDetail([
         `process_running=${processRunning}`,
         `healthy=${healthy}`,
@@ -437,7 +467,13 @@ export function parseTunnelStatus(output: string, alias: string, exitStatus = 0)
       ].join("; "));
     return { ok, processRunning, healthy, ready, state, detail };
   } catch (error) {
-    return { ok: false, processRunning: false, healthy: false, ready: false, detail: `tunnel-client returned invalid local inventory: ${safeTunnelDetail(error instanceof Error ? error.message : String(error))}` };
+    return {
+      ok: false,
+      processRunning: false,
+      healthy: false,
+      ready: false,
+      detail: `tunnel-client returned invalid runtime status: ${safeTunnelDetail(error instanceof Error ? error.message : String(error))}`,
+    };
   }
 }
 
@@ -448,7 +484,7 @@ export function tunnelStatus(config: AppConfig): TunnelRuntimeStatus {
   }
   const result = runCommand(
     settings.binaryPath,
-    ["runtimes", "cleanup", "--json"],
+    ["runtimes", "status", settings.alias, "--json"],
     { timeout: 10_000 },
   );
   return parseTunnelStatus(tunnelCommandOutput(result), settings.alias, result.status);

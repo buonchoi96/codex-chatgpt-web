@@ -164,3 +164,12 @@ Useful overrides:
   model when no explicit `model_reasoning_effort` override or profile is supplied.
 
 A Tunnel runtime key may have access to both tunnels, but the **Tunnel IDs themselves must differ**.
+
+
+### Tunnel discovery health
+
+DEV live pins OpenAI `tunnel-client` v0.0.15. Connector-facing readiness is checked with
+`tunnel-client runtimes status <alias> --json`, including `control_plane_poll_health`; local
+`/healthz` and `/readyz` alone are not treated as proof that ChatGPT can discover the tunnel.
+The CLI lane is recycled independently when its local process is alive but the control-plane poll
+route is not healthy/direct.

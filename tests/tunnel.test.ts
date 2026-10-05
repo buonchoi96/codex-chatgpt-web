@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { zipSync } from "fflate";
 import * as config from "../src/config";
 import * as commands from "../src/process";
-import { TUNNEL_VERSION, installTunnelClient, parseTunnelStatus, stopTunnel, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError } from "../src/tunnel";
+import { TUNNEL_VERSION, installTunnelClient, parseTunnelStatus, stopTunnel, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError, tunnelStatus } from "../src/tunnel";
 
 test("a failed tunnel stop trusts OS exit evidence, never the inventory's cleared PID", () => {
   const appConfig = { mode: "full", tunnel: { binaryPath: process.execPath, alias: "ours" } } as config.AppConfig;
@@ -145,16 +145,77 @@ test("tunnel verification and install errors survive failed cleanup and rollback
   });
 });
 
-test("pins the fixed tunnel-client and migrates only the previously shipped version", () => {
-  expect(TUNNEL_VERSION).toBe("0.0.12");
-  expect(tunnelClientInstallAction("0.0.12")).toBe("reuse");
+test("pins the current tunnel-client and migrates only versions previously shipped by this repo", () => {
+  expect(TUNNEL_VERSION).toBe("0.0.15");
+  expect(tunnelClientInstallAction("0.0.15")).toBe("reuse");
+  expect(tunnelClientInstallAction("0.0.12")).toBe("upgrade");
   expect(tunnelClientInstallAction("0.0.10")).toBe("upgrade");
   expect(() => tunnelClientInstallAction("0.0.11")).toThrow("not a trusted upgrade source");
   expect(() => tunnelClientInstallAction("9.9.9")).toThrow("not a trusted upgrade source");
 });
 
 describe("tunnel status boundary", () => {
-  test("requires the exact alias to have a locally verified ready runtime", () => {
+  test("requires rich runtime status to prove both local readiness and control-plane polling", () => {
+    expect(parseTunnelStatus(JSON.stringify({
+      alias: "ours",
+      runtime_state: "ready",
+      process_running: true,
+      healthy: true,
+      ready: true,
+      control_plane_poll_health: { state: "healthy" },
+    }), "ours")).toEqual({
+      ok: true,
+      processRunning: true,
+      healthy: true,
+      ready: true,
+      state: "ready",
+      controlPlanePollState: "healthy",
+      detail: "process_running=true; healthy=true; ready=true; control_plane_poll=healthy; state=ready",
+    });
+
+    for (const pollState of ["failed", "degraded", "unknown"]) {
+      expect(parseTunnelStatus(JSON.stringify({
+        alias: "ours",
+        runtime_state: "ready",
+        process_running: true,
+        healthy: true,
+        ready: true,
+        control_plane_poll_health: { state: pollState },
+      }), "ours")).toMatchObject({
+        ok: false,
+        processRunning: true,
+        healthy: true,
+        ready: true,
+        controlPlanePollState: pollState,
+      });
+    }
+  });
+
+  test("uses runtimes status for connector-facing readiness instead of cleanup inventory", () => {
+    const appConfig = { mode: "full", tunnel: { binaryPath: process.execPath, alias: "ours" } } as config.AppConfig;
+    const command = spyOn(commands, "runCommand").mockReturnValue({
+      status: 0,
+      stderr: "",
+      stdout: JSON.stringify({
+        alias: "ours",
+        runtime_state: "ready",
+        process_running: true,
+        healthy: true,
+        ready: true,
+        control_plane_poll_health: { state: "direct" },
+      }),
+    });
+    try {
+      expect(tunnelStatus(appConfig)).toMatchObject({ ok: true, controlPlanePollState: "direct" });
+      expect(command.mock.calls.map(call => call[1])).toEqual([
+        ["runtimes", "status", "ours", "--json"],
+      ]);
+    } finally {
+      command.mockRestore();
+    }
+  });
+
+  test("keeps legacy inventory parsing only as a compatibility boundary", () => {
     expect(parseTunnelStatus(JSON.stringify({
       entries: [{ alias: "ours", runtime_state: "ready" }],
     }), "ours")).toEqual({
@@ -163,7 +224,7 @@ describe("tunnel status boundary", () => {
       healthy: true,
       ready: true,
       state: "ready",
-      detail: "process_running=true healthy=true ready=true",
+      detail: "process_running=true healthy=true ready=true legacy_inventory=true",
     });
     for (const state of ["stopped", "starting", "healthy"]) {
       expect(parseTunnelStatus(JSON.stringify({ entries: [
@@ -227,7 +288,7 @@ describe("tunnel status boundary", () => {
     for (const output of ["invalid JSON", "{}", JSON.stringify({ entries: [ready, ready] }),
       JSON.stringify({ entries: [{ ...ready, runtime_state: "unknown" }] })]) {
       expect(parseTunnelStatus(output, "ours")).toMatchObject({ ok: false, ready: false });
-      expect(parseTunnelStatus(output, "ours").detail).toContain("invalid local inventory");
+      expect(parseTunnelStatus(output, "ours").detail).toContain("invalid runtime status");
     }
     expect(parseTunnelStatus(JSON.stringify({ entries: [{ ...ready, alias: "other" }] }), "ours"))
       .toMatchObject({ ok: false, processRunning: false, healthy: false, ready: false, state: "stopped" });
