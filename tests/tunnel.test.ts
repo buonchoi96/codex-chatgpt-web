@@ -172,7 +172,6 @@ test("connect passes the persisted organization scope to tunnel-client", () => {
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       organizationId: "org_test123",
       runtimeKeyFile: join(root, "runtime.key"),
-      profileDir: undefined,
       profileName: "ours",
       alias: "ours",
     });
