@@ -126,6 +126,14 @@ test("dev:live wires the isolated CLI lane without replacing the production work
   assert.match(source, /restoreProductionRoute/);
 });
 
+test("CLI lane supervisor stays alive while waiting for first-time setup", () => {
+  const launcherRoot = path.resolve(__dirname, "..");
+  const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-lane.cjs"), "utf8");
+  assert.match(source, /Keep this interval referenced even before CLI setup exists/);
+  assert.match(source, /monitorTimer = setInterval/);
+  assert.doesNotMatch(source, /monitorTimer\.unref/);
+});
+
 test("CLI lane setup preserves its configured port and recycles unhealthy tunnel state", () => {
   const launcherRoot = path.resolve(__dirname, "..");
   const repoRoot = path.resolve(launcherRoot, "..");

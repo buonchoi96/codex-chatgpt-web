@@ -269,8 +269,10 @@ async function main() {
   log(`home: ${paths.cliHome}`);
   log(`Codex home: ${paths.cliCodexHome}`);
   await ensureLane();
+  // Keep this interval referenced even before CLI setup exists. dev:live owns this supervisor
+  // for the whole session; unref() here lets the process exit cleanly after the initial
+  // "not configured yet" check, which makes the parent restart it forever.
   monitorTimer = setInterval(() => scheduleEnsure(), 1_000);
-  monitorTimer.unref?.();
 }
 
 process.once("SIGINT", () => { void stop(0); });
