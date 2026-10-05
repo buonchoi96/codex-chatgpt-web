@@ -3574,10 +3574,11 @@ test("message delivery timeout fallback does not depend on role=alert", async ()
   expect(await chatGptMessageDeliveryTimeoutVisible(page)).toBeTrue();
 });
 
-test("page-level network errors arm recovery for both short and expanded Web copy", async () => {
+test("page-level network errors arm recovery for short, expanded, and interrupted-connection Web copy", async () => {
   for (const message of [
     "network error",
     "A network error occurred. Please check your connection and try again.",
+    "Connecting interrupted. Waiting for complete answer",
   ]) {
     const fixture = dialogPage(message, "Retry");
     expect(await chatGptNetworkErrorVisible(fixture.page)).toBeTrue();
@@ -3589,13 +3590,13 @@ test("page-level network errors arm recovery for both short and expanded Web cop
 
   // Visibility, not button discovery, owns the five-minute watchdog.
   const noButton = dialogPage(
-    "A network error occurred. Please check your connection and try again.",
+    "Connecting interrupted. Waiting for complete answer",
     "Not Retry",
   );
   expect(await chatGptNetworkErrorVisible(noButton.page)).toBeTrue();
   expect(await chatGptNetworkErrorRetryButton(noButton.page)).toBeUndefined();
 
-  const unrelated = dialogPage("ordinary response text", "Retry");
+  const unrelated = dialogPage("Connecting interrupted. Waiting for complete answer soon", "Retry");
   expect(await chatGptNetworkErrorVisible(unrelated.page)).toBeFalse();
   expect(await chatGptNetworkErrorRetryButton(unrelated.page)).toBeUndefined();
 
