@@ -273,6 +273,18 @@ function tunnel(config: AppConfig): TunnelConfig {
   return config.tunnel;
 }
 
+function tunnelCommandEnvironment(settings: TunnelConfig): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (settings.organizationId) {
+    // tunnel-client has two distinct organization concepts:
+    // --organization-id scopes remote tunnel lookup/create, while the runtime/control-plane
+    // client reads CONTROL_PLANE_ORGANIZATION_ID to emit OpenAI-Organization. Persisted config
+    // must supply both so managed children and read-only status calls use the same organization.
+    env.CONTROL_PLANE_ORGANIZATION_ID = settings.organizationId;
+  }
+  return env;
+}
+
 export function connectTunnel(config: AppConfig): void {
   const settings = tunnel(config);
   mkdirSync(settings.profileDir, { recursive: true, mode: 0o700 });
@@ -287,7 +299,10 @@ export function connectTunnel(config: AppConfig): void {
     "--runtime-api-key", `file:${settings.runtimeKeyFile}`,
     "--mcp-command", mcpCommand(config),
     "--json",
-  ], { timeout: TUNNEL_READY_TIMEOUT_MS });
+  ], {
+    timeout: TUNNEL_READY_TIMEOUT_MS,
+    env: tunnelCommandEnvironment(settings),
+  });
   const structuredOutput = result.stdout.trim();
   const launchError = structuredOutput
     ? tunnelConnectLaunchError(structuredOutput)
@@ -306,7 +321,7 @@ export function stopTunnel(config: AppConfig): void {
   const result = runCommand(
     settings.binaryPath,
     ["runtimes", "stop", settings.alias, "--json"],
-    { timeout: 15_000 },
+    { timeout: 15_000, env: tunnelCommandEnvironment(settings) },
   );
   if (result.status !== 0
     && !/not found|not running|unknown alias|\balias\b[^\r\n]{0,160}\bis not known\b/i.test(
@@ -490,7 +505,7 @@ export function tunnelStatus(config: AppConfig): TunnelRuntimeStatus {
   const result = runCommand(
     settings.binaryPath,
     ["runtimes", "status", settings.alias, "--json"],
-    { timeout: 10_000 },
+    { timeout: 10_000, env: tunnelCommandEnvironment(settings) },
   );
   return parseTunnelStatus(tunnelCommandOutput(result), settings.alias, result.status);
 }

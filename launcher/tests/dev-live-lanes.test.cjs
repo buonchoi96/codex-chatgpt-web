@@ -134,6 +134,15 @@ test("CLI lane supervisor stays alive while waiting for first-time setup", () =>
   assert.doesNotMatch(source, /monitorTimer\.unref/);
 });
 
+test("CLI setup ignores per-command CODEX_HOME overrides from CLI diagnostics", () => {
+  const launcherRoot = path.resolve(__dirname, "..");
+  const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-setup.cjs"), "utf8");
+  assert.match(source, /const setupEnvironment = \{ \.\.\.process\.env \}/);
+  assert.match(source, /delete setupEnvironment\.CODEX_HOME/);
+  assert.match(source, /delete setupEnvironment\.CODEX_CHATGPT_WEB_HOME/);
+  assert.match(source, /resolveLiveLanePaths\(setupEnvironment\)/);
+});
+
 test("CLI lane setup preserves its configured port and recycles unhealthy tunnel state", () => {
   const launcherRoot = path.resolve(__dirname, "..");
   const repoRoot = path.resolve(launcherRoot, "..");

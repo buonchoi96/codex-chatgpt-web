@@ -18,7 +18,14 @@ const repoRoot = path.resolve(launcherRoot, "..");
 const sourceCli = path.join(repoRoot, "src", "cli.ts");
 const tunnelScript = path.join(repoRoot, "scripts", "dev-live-cli-tunnel.ts");
 const bun = process.env.CODEX_WEB_GPT_BUN || process.execPath;
-const paths = resolveLiveLanePaths();
+
+// Debug/status commands deliberately set CODEX_HOME and CODEX_CHATGPT_WEB_HOME to the CLI lane.
+// Those per-command overrides must not redefine what setup considers the Desktop/default Codex
+// home, otherwise rerunning setup from the same PowerShell session falsely reports a collision.
+const setupEnvironment = { ...process.env };
+delete setupEnvironment.CODEX_HOME;
+delete setupEnvironment.CODEX_CHATGPT_WEB_HOME;
+const paths = resolveLiveLanePaths(setupEnvironment);
 const setupMarker = path.join(paths.cliHome, "runtime", "setup-in-progress");
 
 function fail(message) {

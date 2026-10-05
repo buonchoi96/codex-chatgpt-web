@@ -188,3 +188,11 @@ bun run dev:live:cli-setup
 
 The organization ID is saved in `cli-lane/config.json`, so later `dev:live` runs do not require
 the environment variable.
+
+
+CLI tunnel commands also inject the persisted organization ID as
+`CONTROL_PLANE_ORGANIZATION_ID`. This is intentionally separate from
+`runtimes connect --organization-id`: the latter scopes tunnel lookup/create, while the
+environment value supplies the `OpenAI-Organization` context used by the managed runtime and
+read-only control-plane status requests. `dev:live:cli-setup` ignores temporary
+`CODEX_HOME`/`CODEX_CHATGPT_WEB_HOME` values set by CLI diagnostic commands.

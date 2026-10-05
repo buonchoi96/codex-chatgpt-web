@@ -180,6 +180,8 @@ test("connect passes the persisted organization scope to tunnel-client", () => {
     expect(command.mock.calls[0]?.[1]).toContain("--organization-id");
     const args = command.mock.calls[0]?.[1] as string[];
     expect(args[args.indexOf("--organization-id") + 1]).toBe("org_test123");
+    const options = command.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv };
+    expect(options.env?.CONTROL_PLANE_ORGANIZATION_ID).toBe("org_test123");
   } finally {
     command.mockRestore();
     fs.rmSync(root, { recursive: true, force: true });
@@ -224,7 +226,10 @@ describe("tunnel status boundary", () => {
   });
 
   test("uses runtimes status for connector-facing readiness instead of cleanup inventory", () => {
-    const appConfig = { mode: "full", tunnel: { binaryPath: process.execPath, alias: "ours" } } as config.AppConfig;
+    const appConfig = {
+      mode: "full",
+      tunnel: { binaryPath: process.execPath, alias: "ours", organizationId: "org_status123" },
+    } as config.AppConfig;
     const command = spyOn(commands, "runCommand").mockReturnValue({
       status: 0,
       stderr: "",
@@ -242,6 +247,8 @@ describe("tunnel status boundary", () => {
       expect(command.mock.calls.map(call => call[1])).toEqual([
         ["runtimes", "status", "ours", "--json"],
       ]);
+      const options = command.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv };
+      expect(options.env?.CONTROL_PLANE_ORGANIZATION_ID).toBe("org_status123");
     } finally {
       command.mockRestore();
     }
