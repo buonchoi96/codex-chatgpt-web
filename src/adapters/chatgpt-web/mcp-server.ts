@@ -12,6 +12,8 @@ import {
 import { CODEX_OUTPUT_CONTROL_WIRE_NAME, submitNativeOutputControl } from "./native-output-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
+import { classifyNativeOperation, operationFingerprint, splitIndependentInspections, type NativeOperationIntent } from "./native-operation";
+import { computerUseIntent, computerUseProgram, type ComputerUseOperation } from "./native-computer-use";
 
 interface ClaimedTurn {
   bindingId: string;
@@ -31,6 +33,8 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_tool_inventory",
   "codex_tool_wait",
   "codex_readonly_tool_call",
+  "codex_computer_use_observe",
+  "codex_computer_use_action",
   "codex_windows_computer_use_observe",
   "codex_windows_computer_use_action",
   "codex_windows_computer_use_call",
@@ -128,6 +132,12 @@ export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
 export const CHATGPT_WEB_COMMAND_YIELD_MAX_MS = 30_000;
 export const CHATGPT_WEB_WRITE_STDIN_YIELD_MAX_MS = 60_000;
 export const CODEX_COMPLETION_CONTROL_WIRE_NAME = "codex.control.turn_complete";
+export const CODEX_COMPUTER_USE_OBSERVE = "codex.control.computer_use_observe";
+export const CODEX_COMPUTER_USE_ACTION = "codex.control.computer_use_action";
+const computerUseWindowSchema = z.object({ id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), app: z.string().min(1).max(16_384) });
+const computerUseObserveSchema = z.object({ operation: z.enum(["list_apps", "list_windows", "window_state"]), window: computerUseWindowSchema.optional() });
+const computerUseActionSchema = z.object({ operation: z.enum(["activate_window", "type_text"]), window: computerUseWindowSchema, text: z.string().max(100_000).optional() });
+const GATEWAY_FAILURE_LINE = "if (result?.isError === true) text(__CODEX_NATIVE_FAILURE_MARKER__);";
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
   "For each pasted Codex Web GPT request, begin with codex_turn_start using the request_id in its request block.",
@@ -145,6 +155,7 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "A successful command, inspection, inventory lookup, or intermediate tool result is progress only. Do not end the response while any requested edit, test, validation, publication, or other actionable requirement remains; continue the Codex Native tool loop.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For native desktop automation, prefer an official OpenAI Codex Computer Use capability that is actually present in the current outer Codex registry.",
+  `For Windows list_apps, list_windows, or window_state, prefer codex_computer_use_observe; for an observed exact app/window activate_window or type_text, use codex_computer_use_action. Cached connectors can use codex_tool_call with wire_name ${CODEX_COMPUTER_USE_OBSERVE} or ${CODEX_COMPUTER_USE_ACTION} and the same operation arguments. These finite routes retain native safety checks and persistent Sky bindings. Native targeted typing already activates its window; do not prepend redundant activation.`,
   "For native Windows app control, explicitly query codex_tool_inventory for node_repl. When mcp__node_repl__js is available, prefer persistent node_repl + @oai/sky: import @oai/sky, retain sky in the REPL session, call sky.list_apps(), and continue through the native app/window operations exposed by sky.",
   COMPUTER_USE_FAST_PATH_RULE,
   "Use codex_tool_inventory to discover the exact Computer Use surface. When discovery_tools contains tool_search, invoke tool_search through codex_tool_call and continue discovery in the same response; then invoke the exact returned wire_name through codex_tool_call or the native exec gateway.",
@@ -602,6 +613,7 @@ function execGatewayResultProgram(invocation: string[]): string {
     "  text(value);",
     "};",
     "emit(result);",
+    GATEWAY_FAILURE_LINE,
   ].join("\n");
 }
 
@@ -809,17 +821,33 @@ export async function runChatGptMcpServer(options: {
     );
   }
 
+  const inventoryCache = new Map<string, { registry: string; createdAt: number; pages: Map<string, GatewayToolCatalogPage> }>();
+
   const invoke = async (
     bindingId: string,
     bound: ChatGptTurnEnvironment & { expiresAt?: number },
     tool: CodexTool,
-    payload: { arguments?: Record<string, unknown>; input?: string },
+    payload: { arguments?: Record<string, unknown>; input?: string; requestedTool?: string;
+      semanticArguments?: Record<string, unknown>; semanticInput?: string; operationIntent?: NativeOperationIntent; gatewayResult?: boolean },
     signal?: AbortSignal,
   ) => {
     const timeoutMs = chatGptMcpInvocationTimeout(bound);
     // Client-owned identity lets a transport timeout retract exactly one call while it is still
     // queued. The broker is authoritative about whether Codex ever received that call.
     const callId = `call_${randomBytes(24).toString("base64url")}`;
+    const requestedTool = payload.requestedTool ?? wireName(tool);
+    const semanticArguments = payload.semanticArguments ?? payload.arguments;
+    const semanticInput = payload.requestedTool ? payload.semanticInput : payload.input;
+    const failureMarker = payload.gatewayResult ? JSON.stringify({ __codex_native_failure_v1: randomBytes(24).toString("hex") }) : undefined;
+    if (failureMarker && !payload.input?.endsWith(GATEWAY_FAILURE_LINE)) {
+      throw new Error("Native gateway result framing is missing");
+    }
+    const nativeInput = failureMarker
+      ? payload.input!.slice(0, -GATEWAY_FAILURE_LINE.length)
+        + `if (result?.isError === true) text(${JSON.stringify(failureMarker)});`
+      : payload.input;
+    // A search/reset may change a deferred registry even when the outer descriptors stay equal.
+    if (tool.toolSearch || /tool_search|node_repl.*reset/.test(requestedTool)) inventoryCache.delete(bindingId);
     try {
       const response = await callTurnBroker<BrokerToolResult>(options.brokerSocketPath, {
         method: "invoke",
@@ -827,7 +855,12 @@ export async function runChatGptMcpServer(options: {
         callId,
         wireName: wireName(tool),
         freeform: tool.freeform === true,
-        ...(tool.freeform ? { input: payload.input ?? "" } : { arguments: payload.arguments ?? {} }),
+        ...(tool.freeform ? { input: nativeInput ?? "" } : { arguments: payload.arguments ?? {} }),
+        requestedTool,
+        operationIntent: payload.operationIntent ?? classifyNativeOperation(requestedTool, semanticArguments),
+        operationFingerprint: operationFingerprint(requestedTool, semanticArguments, semanticInput),
+        registryGeneration: createHash("sha256").update(JSON.stringify(bound.tools)).digest("hex").slice(0, 12),
+        ...(failureMarker ? { failureMarker } : {}),
       }, timeoutMs, signal);
       return asMcpResult(response);
     } catch (error) {
@@ -990,7 +1023,8 @@ export async function runChatGptMcpServer(options: {
               claimed.bindingId,
               bound,
               gateway!,
-              { input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments) },
+              { input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments), gatewayResult: true,
+                requestedTool: "exec_command", semanticArguments: execCommandArguments },
               signal,
             );
         return {
@@ -1034,7 +1068,22 @@ export async function runChatGptMcpServer(options: {
     }
     return invoke(bindingId, bound, gateway, {
       input: execGatewayProgram(nestedToolName, freeform, payload, bound.tools.map(wireName)),
+      gatewayResult: true, requestedTool: nestedToolName, semanticArguments: payload.arguments, semanticInput: payload.input,
     }, signal);
+  };
+
+  const runComputerUse = async (claimed: ClaimedTurn, request: ComputerUseOperation, signal?: AbortSignal) => {
+    const bound = claimed.environment;
+    const generation = createHash("sha256").update(JSON.stringify(bound.tools)).digest("hex");
+    const code = computerUseProgram(request, generation);
+    const direct = bound.tools.find(tool => ["mcp__node_repl__js", "node_repl__js"].includes(wireName(tool)) && !tool.freeform);
+    const payload = { arguments: { code }, operationIntent: computerUseIntent(request.operation),
+      requestedTool: `computer_use.${request.operation}`, semanticArguments: { ...request, generation } };
+    if (direct) return invoke(claimed.bindingId, bound, direct, payload, signal);
+    const gateway = execGateway(bound);
+    if (!gateway) throw new Error("This turn has no native node_repl capability or exec gateway; discover Computer Use first");
+    return invoke(claimed.bindingId, bound, gateway, { ...payload, arguments: undefined,
+      input: execGatewayProgram("mcp__node_repl__js", false, { arguments: { code } }, bound.tools.map(wireName)), gatewayResult: true }, signal);
   };
 
   server.registerTool(
@@ -1077,6 +1126,11 @@ export async function runChatGptMcpServer(options: {
           ...(justification !== undefined ? { justification } : {}),
           ...(prefix_rule !== undefined ? { prefix_rule } : {}),
         };
+        const inspections = Object.keys(permissions).length === 0 && tty !== true ? splitIndependentInspections(cmd) : undefined;
+        if (inspections) return runParallelCommands(claimed, inspections.map(cmd => ({ cmd,
+          ...(workdir ? { workdir } : {}), ...(yield_time_ms !== undefined ? { yield_time_ms } : {}),
+          ...(max_output_tokens !== undefined ? { max_output_tokens } : {}),
+        })), extra.signal);
         const execCommandArguments = {
           cmd,
           ...(workdir ? { workdir } : {}),
@@ -1109,6 +1163,7 @@ export async function runChatGptMcpServer(options: {
         }
         return invoke(claimed.bindingId, bound, gateway, {
           input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments),
+          gatewayResult: true, requestedTool: "exec_command", semanticArguments: execCommandArguments,
         }, extra.signal);
       },
     ),
@@ -1269,22 +1324,33 @@ export async function runChatGptMcpServer(options: {
         let nestedTotal = 0;
         let nestedPage: Array<Record<string, unknown>> = [];
         const gateway = execGateway(bound);
-        if (gateway) {
+        const exactDirectHit = needle && directMatches.some(tool => wireName(tool).toLowerCase() === needle);
+        if (gateway && !exactDirectHit) {
           const excludedGatewayNames = bound.tools.map(wireName);
           const nestedOffset = Math.max(0, offset - directMatches.length);
           const nestedLimit = Math.max(0, limit - directPage.length);
-          const response = await invoke(claimed.bindingId, bound, gateway, {
-            input: gatewayToolCatalogProgram({
-              query,
-              offset: nestedOffset,
-              limit: nestedLimit,
-              // A gateway-discovered entry may supplement the outer registry, but it must never
-              // duplicate or reopen an outer tool that this contract deliberately hid (including
-              // our own MCP namespace in Zero Risk).
-              excludedNames: excludedGatewayNames,
-            }),
-          }, extra.signal);
-          const catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames));
+          const registry = createHash("sha256").update(JSON.stringify(bound)).digest("hex");
+          let cache = inventoryCache.get(claimed.bindingId);
+          if (!cache || cache.registry !== registry || Date.now() - cache.createdAt > 60_000) {
+            cache = { registry, createdAt: Date.now(), pages: new Map() };
+            inventoryCache.set(claimed.bindingId, cache);
+            if (inventoryCache.size > 64) inventoryCache.delete(inventoryCache.keys().next().value!);
+          }
+          const cacheKey = JSON.stringify([query, nestedOffset, nestedLimit]);
+          let catalog = cache.pages.get(cacheKey);
+          if (!catalog) {
+            const response = await invoke(claimed.bindingId, bound, gateway, {
+              input: gatewayToolCatalogProgram({
+                query,
+                offset: nestedOffset,
+                limit: nestedLimit,
+                // Never reopen outer tools deliberately hidden by the contract.
+                excludedNames: excludedGatewayNames,
+              }),
+            }, extra.signal);
+            catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames));
+            if (cache.pages.size < 64) cache.pages.set(cacheKey, catalog);
+          }
           nestedTotal = catalog.total;
           nestedPage = catalog.tools.map(tool => ({
             wire_name: tool.name,
@@ -1392,6 +1458,20 @@ export async function runChatGptMcpServer(options: {
   );
 
   if (contract === "native") {
+    for (const [name, schema, readOnly] of [
+      ["codex_computer_use_observe", computerUseObserveSchema, true],
+      ["codex_computer_use_action", computerUseActionSchema, false],
+    ] as const) {
+      server.registerTool(name, {
+        title: readOnly ? "Observe native Windows state" : "Act on an observed native Windows window",
+        description: readOnly
+          ? "Finite Sky list_apps, list_windows or window_state. Read-only native UI state, no activation or screenshot. Reuses persistent module/window bindings."
+          : "Finite Sky activate_window or type_text on an exact app/window returned by native enumeration. Sky performs native safety and foreground checks. Input activates its own window; do not prepend another activation. No retries, saving, confirmation or arbitrary JavaScript.",
+        inputSchema: { turn_token: turnTokenSchema, ...schema.shape },
+        annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, idempotentHint: readOnly, openWorldHint: !readOnly },
+      }, async (input: ComputerUseOperation & { turn_token: string }, extra: McpRequestExtra) => withClaimedTurn(name, input.turn_token, extra,
+        claimed => runComputerUse(claimed, schema.parse(input), extra.signal)));
+    }
     server.registerTool(
       "codex_windows_computer_use_observe",
       {
@@ -1610,6 +1690,11 @@ export async function runChatGptMcpServer(options: {
           }
           return runParallelCommands(claimed, parsed.data.commands, extra.signal);
         }
+        if (contract === "native" && (wire_name === CODEX_COMPUTER_USE_OBSERVE || wire_name === CODEX_COMPUTER_USE_ACTION)) {
+          if (input !== undefined) throw new Error("Structured Computer Use does not accept freeform input");
+          const parsed = (wire_name === CODEX_COMPUTER_USE_OBSERVE ? computerUseObserveSchema : computerUseActionSchema).parse(args ?? {});
+          return runComputerUse(claimed, parsed, extra.signal);
+        }
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);
@@ -1631,6 +1716,7 @@ export async function runChatGptMcpServer(options: {
             input: execGatewayProgram(wire_name, input !== undefined, {
               ...(input !== undefined ? { input } : { arguments: invocationArguments }),
             }, bound.tools.map(wireName)),
+            gatewayResult: true, requestedTool: wire_name, semanticArguments: input === undefined ? invocationArguments : undefined, semanticInput: input,
           }, extra.signal);
         }
         if (tool.freeform) {

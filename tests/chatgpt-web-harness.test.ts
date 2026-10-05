@@ -3129,6 +3129,8 @@ describe("ChatGPT outer-native harness v4", () => {
       const listed = await client.listTools();
       expect(listed.tools.map(tool => tool.name).sort()).toEqual([
         "codex_apply_patch",
+        "codex_computer_use_action",
+        "codex_computer_use_observe",
         "codex_exec",
         "codex_parallel_exec",
         "codex_readonly_tool_call",
@@ -3152,7 +3154,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }));
       // The explicit name, schema and annotation assertions below are the connector ABI contract.
       // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
-      expect(publicConnectorAbi).toHaveLength(13);
+      expect(publicConnectorAbi).toHaveLength(15);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -3312,7 +3314,15 @@ describe("ChatGPT outer-native harness v4", () => {
           query,
           include_schema: includeSchema,
         });
-        const [request] = await broker.nextToolBatch(token);
+        const abort = new AbortController();
+        const outcome = await Promise.race([
+          pending.then(() => []),
+          broker.nextToolBatch(token, abort.signal).catch(() => []),
+        ]);
+        abort.abort();
+        // Exact direct hits now resolve without scanning the nested registry.
+        if (outcome.length === 0) return await pending;
+        const [request] = outcome;
         expect(request).toMatchObject({ wireName: "exec", freeform: true });
         const gatewayCalls: GatewayProgramCall[] = [];
         const content = await executeGatewayProgram(request!.input!, nestedToolNames, gatewayCalls);

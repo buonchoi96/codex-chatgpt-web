@@ -9,6 +9,8 @@ import {
   type CompactionTransactionHandle,
 } from "./compaction-transaction";
 import type { ChatGptTurnEnvironment } from "./environment";
+import { nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure,
+  sanitizedOperationIntent, type NativeOperationIntent } from "./native-operation";
 
 interface PendingTurn extends ChatGptTurnEnvironment {
   expiresAt?: number;
@@ -20,6 +22,9 @@ export interface BrokerToolRequest {
   freeform: boolean;
   arguments?: Record<string, unknown>;
   input?: string;
+  requestedTool?: string;
+  operationIntent?: NativeOperationIntent;
+  registryGeneration?: string;
 }
 
 export interface BrokerToolResult {
@@ -68,6 +73,9 @@ interface PendingInvocation {
   finishQueue?: () => void;
   finishNative?: () => void;
   perf?: BackendPerfTrace;
+  startedAt: number;
+  fingerprint: string;
+  failureMarker?: string;
 }
 
 interface ToolWaiter {
@@ -117,6 +125,7 @@ interface TurnChannel {
   detachedResults: Map<string, BrokerToolResult>;
   /** Small replay window closes the race where completion lands exactly as the transport deadline fires. */
   recentToolResults: Map<string, BrokerToolResult>;
+  rejectedOperations: Map<string, BrokerToolResult>;
   waiters: Set<ToolWaiter>;
   toolCallsQueued: number;
   toolCallsCompleted: number;
@@ -215,6 +224,11 @@ interface BrokerRequest {
   outputSequence?: number;
   expectedRevision?: number;
   contract?: "native" | "safe";
+  requestedTool?: string;
+  operationIntent?: NativeOperationIntent;
+  operationFingerprint?: string;
+  registryGeneration?: string;
+  failureMarker?: string;
 }
 
 interface BrokerResponse {
@@ -596,6 +610,7 @@ export class TurnBroker implements TurnBrokerOwner {
       invocations: new Map(),
       detachedResults: new Map(),
       recentToolResults: new Map(),
+      rejectedOperations: new Map(),
       waiters: new Set(),
       toolCallsQueued: 0,
       toolCallsCompleted: 0,
@@ -756,6 +771,15 @@ export class TurnBroker implements TurnBrokerOwner {
     // parallel completions must not discard that timer or shorten the reported interval.
     channel.finishDecision ??= invocation.perf?.start(surface);
     channel.toolCallsCompleted += 1;
+    result = preserveNativeGatewayFailure(result, invocation.failureMarker);
+    const safety = nativeSafetyDiagnostic(result);
+    if (safety.result !== "not_reported") {
+      result = { ...result, _meta: { ...(result._meta && typeof result._meta === "object" ? result._meta : {}), codexNativeSafety: safety } };
+      channel.rejectedOperations.set(invocation.fingerprint, structuredClone(result));
+    }
+    console.info(`[native-operation] trace=${channel.traceId} ${operationTelemetry("completed", invocation.request, {
+      safety, brokerDelivered: true, operationAlreadyDispatched: true, elapsedMs: Date.now() - invocation.startedAt,
+    })}`);
     const retainedResult = structuredClone(result);
     channel.recentToolResults.delete(callId);
     channel.recentToolResults.set(callId, retainedResult);
@@ -1902,12 +1926,27 @@ export class TurnBroker implements TurnBrokerOwner {
 
     await this.dispatchGuard?.(binding.channel.traceId);
     if (socketSignal?.aborted) throw new Error("turn broker invocation was cancelled before dispatch");
+    const fingerprint = typeof request.operationFingerprint === "string" && /^[a-f0-9]{64}$/.test(request.operationFingerprint)
+      ? request.operationFingerprint : operationFingerprint(wireName, request.arguments, request.input);
     const toolRequest: BrokerToolRequest = {
       callId,
       wireName,
       freeform: request.freeform === true,
       ...(request.freeform === true ? { input: request.input ?? "" } : { arguments: request.arguments ?? {} }),
+      ...(typeof request.requestedTool === "string" && /^[A-Za-z0-9_.-]{1,200}$/.test(request.requestedTool)
+        ? { requestedTool: request.requestedTool } : {}),
+      ...(sanitizedOperationIntent(request.operationIntent) ? { operationIntent: sanitizedOperationIntent(request.operationIntent) } : {}),
+      ...(typeof request.registryGeneration === "string" && /^[a-f0-9]{12}$/.test(request.registryGeneration)
+        ? { registryGeneration: request.registryGeneration } : {}),
     };
+    const rejected = binding.channel.rejectedOperations.get(fingerprint);
+    if (rejected) {
+      console.info(`[native-operation] trace=${binding.channel.traceId} ${operationTelemetry("blocked_before_dispatch", toolRequest, {
+        safety: nativeSafetyDiagnostic(rejected), brokerDelivered: false, operationAlreadyDispatched: false,
+        retryAttempted: true, retryRepresentationChanged: false, elapsedMs: 0,
+      })}`);
+      return structuredClone(rejected);
+    }
     binding.channel.finishDecision?.();
     binding.channel.finishDecision = undefined;
     if (binding.channel.lastComputerUseCompletedAt !== undefined) {
@@ -1922,9 +1961,15 @@ export class TurnBroker implements TurnBrokerOwner {
     return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
       const perf = new BackendPerfTrace(binding.channel.traceId);
       binding.channel.invocations.set(callId, { request: toolRequest, resolve: resolveInvoke, reject: rejectInvoke,
+        startedAt: Date.now(), fingerprint,
+        ...(typeof request.failureMarker === "string" && /^\{"__codex_native_failure_v1":"[a-f0-9]{48}"\}$/.test(request.failureMarker)
+          ? { failureMarker: request.failureMarker } : {}),
         perf, finishQueue: perf.start("broker_queue") });
       binding.channel.queuedCallIds.push(callId);
       binding.channel.toolCallsQueued += 1;
+      console.info(`[native-operation] trace=${binding.channel.traceId} ${operationTelemetry("queued", toolRequest, {
+        brokerDelivered: false, operationAlreadyDispatched: false,
+      })}`);
       console.info(
         `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}${this.diagnosticSuffix()}`,
       );
@@ -1947,6 +1992,9 @@ export class TurnBroker implements TurnBrokerOwner {
 
   private logToolDelivery(channel: TurnChannel, batch: BrokerToolRequest[], path: "immediate" | "waiter" | "replay"): void {
     for (const request of batch) {
+      console.info(`[native-operation] trace=${channel.traceId} ${operationTelemetry("delivered", request, {
+        brokerDelivered: true, nativeInvoked: "unknown", operationAlreadyDispatched: true, deliveryReplay: path === "replay",
+      })}`);
       console.info(
         `[chatgpt-web] broker trace=${channel.traceId} delivered call=${request.callId.slice(0, 17)} path=${path} replay=${path === "replay"}${this.diagnosticSuffix()}`,
       );
