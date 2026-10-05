@@ -10,6 +10,75 @@ const {
 
 const paths = resolveLiveLanePaths();
 
+const SESSION_SUBCOMMANDS = new Set(["exec", "resume", "fork"]);
+const NON_SESSION_SUBCOMMANDS = new Set([
+  "login",
+  "logout",
+  "mcp",
+  "app-server",
+  "completion",
+  "sandbox",
+  "features",
+  "doctor",
+  "apply",
+  "cloud",
+  "debug",
+]);
+
+function hasFlag(args, longName, shortName) {
+  return args.some(arg => (
+    arg === longName
+    || arg === shortName
+    || arg.startsWith(`${longName}=`)
+    || (shortName && arg.startsWith(`${shortName}=`))
+  ));
+}
+
+function explicitModelSelection(args) {
+  return hasFlag(args, "--model", "-m") || hasFlag(args, "--profile", "-p");
+}
+
+function sessionSubcommand(args) {
+  return args.find(arg => SESSION_SUBCOMMANDS.has(arg) || NON_SESSION_SUBCOMMANDS.has(arg));
+}
+
+function isSessionInvocation(args) {
+  const command = sessionSubcommand(args);
+  return command === undefined || SESSION_SUBCOMMANDS.has(command);
+}
+
+function defaultCliModel(config) {
+  const override = process.env.CODEX_WEB_GPT_LIVE_CLI_MODEL?.trim();
+  if (override) return override;
+  return config.solAvailable === false
+    ? "chatgpt-web/gpt-5.6-luna"
+    : "chatgpt-web/gpt-5.6-sol";
+}
+
+function normalizeCodexArgs(rawArgs, config, platform = process.platform) {
+  const args = [...rawArgs];
+  const session = isSessionInvocation(rawArgs);
+  let defaultedModel;
+  let disabledDaemon = false;
+
+  if (session && !explicitModelSelection(rawArgs)) {
+    defaultedModel = defaultCliModel(config);
+    args.unshift("--model", defaultedModel);
+  }
+
+  const command = sessionSubcommand(rawArgs);
+  const interactiveDaemonPath = command === undefined || command === "resume" || command === "fork";
+  if (platform === "win32" && interactiveDaemonPath && !hasFlag(rawArgs, "--no-daemon")) {
+    // Codex 0.157.x can fail to detach its managed app-server daemon when the parent is already
+    // constrained by a Windows Job Object. DEV live does not need that shared daemon, so bypass it
+    // only for TUI/resume/fork; exec already uses the direct one-shot path.
+    args.unshift("--no-daemon");
+    disabledDaemon = true;
+  }
+
+  return { args, defaultedModel, disabledDaemon };
+}
+
 function firstCommandPath(name) {
   const locator = process.platform === "win32"
     ? spawnSync("where.exe", [name], { encoding: "utf8", windowsHide: true })
@@ -107,7 +176,16 @@ async function main() {
   }
 
   const invocation = findCodexInvocation();
-  const args = [...invocation.prefixArgs, ...process.argv.slice(2)];
+  const normalized = normalizeCodexArgs(process.argv.slice(2), cliConfig);
+  if (normalized.defaultedModel) {
+    process.stdout.write(
+      `[dev-codex] default model: ${normalized.defaultedModel} (pass -m/--model or --profile to override)\n`,
+    );
+  }
+  if (normalized.disabledDaemon) {
+    process.stdout.write("[dev-codex] Windows DEV TUI: using --no-daemon to avoid Job Object detach failures\n");
+  }
+  const args = [...invocation.prefixArgs, ...normalized.args];
   const child = spawn(invocation.command, args, {
     cwd: process.cwd(),
     env: cliLaneEnvironment(paths),

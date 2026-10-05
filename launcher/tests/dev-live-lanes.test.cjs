@@ -145,6 +145,18 @@ test("CLI lane setup preserves its configured port and recycles unhealthy tunnel
   assert.match(tunnelHelper, /stopTunnel\(config\)/);
 });
 
+test("dev:codex defaults isolated sessions to a routed Web model and bypasses the Windows daemon", () => {
+  const launcherRoot = path.resolve(__dirname, "..");
+  const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-codex.cjs"), "utf8");
+  assert.match(source, /CODEX_WEB_GPT_LIVE_CLI_MODEL/);
+  assert.match(source, /chatgpt-web\/gpt-5\.6-sol/);
+  assert.match(source, /chatgpt-web\/gpt-5\.6-luna/);
+  assert.match(source, /explicitModelSelection/);
+  assert.match(source, /command === "resume" \|\| command === "fork"/);
+  assert.match(source, /args\.unshift\("--no-daemon"\)/);
+  assert.match(source, /exec already uses the direct one-shot path/);
+});
+
 test("dev:codex avoids shell execution for Windows npm shims", () => {
   const launcherRoot = path.resolve(__dirname, "..");
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-codex.cjs"), "utf8");

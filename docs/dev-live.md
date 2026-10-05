@@ -63,6 +63,12 @@ independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop 
 
    Do not use a plain inherited `codex` process for dual-lane tests; the wrapper pins the CLI
    process to `cli-lane/codex-home`.
+
+   For a session/exec without an explicit `-m/--model` or `--profile`, the wrapper defaults to
+   `chatgpt-web/gpt-5.6-sol` (or `chatgpt-web/gpt-5.6-luna` when the CLI lane account does not
+   expose Sol). Set `CODEX_WEB_GPT_LIVE_CLI_MODEL` to choose another default. On Windows the
+   wrapper also adds `--no-daemon` for TUI/resume/fork so Codex 0.157.x cannot fail on Job Object
+   daemon detachment; `exec` remains on its normal one-shot path.
 7. Restart the Desktop Codex app once after its initial route/catalog installation if requested.
 
 Later `bun run dev:live` runs reuse both lane states. The script reconnects the Desktop Codex
@@ -145,5 +151,7 @@ Useful overrides:
 - `CODEX_WEB_GPT_LIVE_CLI_TUNNEL_ID`: optional non-interactive second Tunnel ID.
 - `CODEX_WEB_GPT_LIVE_CLI_RUNTIME_KEY_FILE`: optional non-interactive runtime-key file.
 - `CODEX_WEB_GPT_CODEX_BIN`: explicit Codex CLI executable for the wrapper.
+- `CODEX_WEB_GPT_LIVE_CLI_MODEL`: default routed Web model for `dev:codex` sessions when no
+  `-m/--model` or `--profile` is supplied.
 
 A Tunnel runtime key may have access to both tunnels, but the **Tunnel IDs themselves must differ**.
