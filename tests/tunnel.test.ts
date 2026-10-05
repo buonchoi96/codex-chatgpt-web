@@ -283,7 +283,7 @@ describe("tunnel status boundary", () => {
     expect(tunnelConnectLaunchError("not json")).toBe("tunnel-client returned non-JSON connect output");
   });
 
-  test("missing, ambiguous, or malformed local inventory cannot report ready", () => {
+  test("missing, ambiguous, or malformed runtime status cannot report ready", () => {
     const ready = { alias: "ours", runtime_state: "ready" };
     for (const output of ["invalid JSON", "{}", JSON.stringify({ entries: [ready, ready] }),
       JSON.stringify({ entries: [{ ...ready, runtime_state: "unknown" }] })]) {

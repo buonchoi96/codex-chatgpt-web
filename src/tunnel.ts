@@ -419,10 +419,11 @@ export function parseTunnelStatus(output: string, alias: string, exitStatus = 0)
     // compatibility boundary for older fixtures/diagnostics; production status must use the rich
     // payload so local readiness cannot hide a broken control-plane poll route.
     if (!Array.isArray(parsed.entries)) {
-      const payloadAlias = typeof parsed.alias === "string" ? parsed.alias : alias;
-      if (payloadAlias !== alias) throw new Error("runtime status returned the wrong alias");
-      const state = typeof parsed.runtime_state === "string" ? parsed.runtime_state : undefined;
-      if (state && !["stopped", "starting", "healthy", "ready"].includes(state)) {
+      if (typeof parsed.alias !== "string") throw new Error("runtime status has no alias");
+      if (parsed.alias !== alias) throw new Error("runtime status returned the wrong alias");
+      if (typeof parsed.runtime_state !== "string") throw new Error("runtime status has no runtime_state");
+      const state = parsed.runtime_state;
+      if (!["stopped", "starting", "healthy", "ready"].includes(state)) {
         throw new Error("runtime status has an unsupported runtime state");
       }
       const processRunning = parsed.process_running === true || (state !== undefined && state !== "stopped");
