@@ -207,7 +207,7 @@ describe("tunnel status boundary", () => {
       detail: "process_running=true; healthy=true; ready=true; control_plane_poll=healthy; state=ready",
     });
 
-    for (const pollState of ["failed", "degraded", "unknown"]) {
+    for (const pollState of ["failed", "degraded"]) {
       expect(parseTunnelStatus(JSON.stringify({
         alias: "ours",
         runtime_state: "ready",
@@ -223,6 +223,22 @@ describe("tunnel status boundary", () => {
         controlPlanePollState: pollState,
       });
     }
+
+    expect(parseTunnelStatus(JSON.stringify({
+      alias: "ours",
+      runtime_state: "ready",
+      process_running: true,
+      healthy: true,
+      ready: true,
+      control_plane_poll_health: { state: "unknown" },
+      remote_error: "403 tunnel_active_organization_required",
+    }), "ours")).toMatchObject({
+      ok: true,
+      processRunning: true,
+      healthy: true,
+      ready: true,
+      controlPlanePollState: "unknown",
+    });
   });
 
   test("uses runtimes status for connector-facing readiness instead of cleanup inventory", () => {

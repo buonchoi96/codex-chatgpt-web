@@ -172,10 +172,12 @@ A Tunnel runtime key may have access to both tunnels, but the **Tunnel IDs thems
 ### Tunnel discovery health
 
 DEV live pins OpenAI `tunnel-client` v0.0.15. Connector-facing readiness is checked with
-`tunnel-client runtimes status <alias> --json`, including `control_plane_poll_health`; local
-`/healthz` and `/readyz` alone are not treated as proof that ChatGPT can discover the tunnel.
-The CLI lane is recycled independently when its local process is alive but the control-plane poll
-route is not healthy/direct.
+`tunnel-client runtimes status <alias> --json`. The managed runtime's `/readyz` contract is
+authoritative for whether it can accept work; explicit `control_plane_poll_health=failed|degraded`
+still blocks readiness. A missing/unknown poll snapshot does not by itself fail an otherwise
+healthy/ready runtime because v0.0.15's read-only admin lookup can return
+`tunnel_active_organization_required` for organization-scoped tunnels even though the managed
+runtime itself has the persisted organization context.
 
 
 If `runtimes status` reports `tunnel_active_organization_required`, rerun CLI setup with the

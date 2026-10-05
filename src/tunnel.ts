@@ -450,11 +450,17 @@ export function parseTunnelStatus(output: string, alias: string, exitStatus = 0)
       const ready = parsed.ready === true;
       const poll = nestedRecord(parsed, "control_plane_poll_health");
       const controlPlanePollState = typeof poll?.state === "string" ? poll.state : "unknown";
-      const controlPlaneReady = controlPlanePollState === "healthy" || controlPlanePollState === "direct";
+      const controlPlaneFailed = controlPlanePollState === "failed" || controlPlanePollState === "degraded";
       const remoteError = typeof parsed.remote_error === "string" && parsed.remote_error.trim()
         ? parsed.remote_error.trim()
         : undefined;
-      const ok = processRunning && healthy && ready && controlPlaneReady;
+      // /readyz is tunnel-client's connector-facing readiness contract. In v0.0.15 the
+      // read-only admin lookup performed by `runtimes status` does not attach an
+      // OpenAI-Organization header, so an organization-scoped tunnel may report
+      // tunnel_active_organization_required even while its managed runtime is healthy and ready.
+      // Keep that remote error visible, but do not turn an otherwise ready runtime into a false
+      // negative unless local proxy health explicitly reports failed/degraded control-plane reachability.
+      const ok = processRunning && healthy && ready && !controlPlaneFailed;
       const detail = safeTunnelDetail([
         `process_running=${processRunning}`,
         `healthy=${healthy}`,
