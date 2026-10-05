@@ -919,7 +919,7 @@ export async function compactRequest(
   return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
 }
 
-export interface DevLiveLaneIdentity extends TurnBrokerDiagnosticIdentity {}
+export type DevLiveLaneIdentity = TurnBrokerDiagnosticIdentity;
 
 function diagnosticFingerprint(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
