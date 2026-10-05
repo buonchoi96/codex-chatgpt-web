@@ -34,8 +34,42 @@ function hasFlag(args, longName, shortName) {
   ));
 }
 
+function optionValue(args, longName, shortName) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === longName || arg === shortName) return args[index + 1];
+    if (arg.startsWith(`${longName}=`)) return arg.slice(longName.length + 1);
+    if (shortName && arg.startsWith(`${shortName}=`)) return arg.slice(shortName.length + 1);
+  }
+  return undefined;
+}
+
+function explicitProfileSelection(args) {
+  return hasFlag(args, "--profile", "-p");
+}
+
 function explicitModelSelection(args) {
-  return hasFlag(args, "--model", "-m") || hasFlag(args, "--profile", "-p");
+  return hasFlag(args, "--model", "-m") || explicitProfileSelection(args);
+}
+
+function configOverrideValue(args, key) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    let override;
+    if (arg === "-c" || arg === "--config") override = args[index + 1];
+    else if (arg.startsWith("--config=")) override = arg.slice("--config=".length);
+    else if (arg.startsWith("-c") && arg.length > 2) override = arg.slice(2);
+    if (typeof override !== "string") continue;
+    const separator = override.indexOf("=");
+    if (separator < 0) continue;
+    if (override.slice(0, separator).trim() === key) return override.slice(separator + 1).trim();
+  }
+  return undefined;
+}
+
+function explicitReasoningSelection(args) {
+  return explicitProfileSelection(args)
+    || configOverrideValue(args, "model_reasoning_effort") !== undefined;
 }
 
 function sessionSubcommand(args) {
@@ -55,15 +89,49 @@ function defaultCliModel(config) {
     : "chatgpt-web/gpt-5.6-sol";
 }
 
+function defaultReasoningEffort(model) {
+  const override = process.env.CODEX_WEB_GPT_LIVE_CLI_EFFORT?.trim();
+  if (override) return override;
+  switch (model) {
+    case "chatgpt-web/gpt-5.6-sol":
+    case "chatgpt-web/high":
+      return "high";
+    case "chatgpt-web/gpt-5.6-sol-instant":
+    case "chatgpt-web/gpt-5.6-luna":
+    case "chatgpt-web/light":
+      return "low";
+    case "chatgpt-web/medium":
+      return "medium";
+    case "chatgpt-web/extra-high":
+      return "xhigh";
+    case "chatgpt-web/gpt-5.6-pro":
+    case "chatgpt-web/gpt-6-pro":
+      return "max";
+    case "chatgpt-web/pro":
+      return "ultra";
+    default:
+      return undefined;
+  }
+}
+
 function normalizeCodexArgs(rawArgs, config, platform = process.platform) {
   const args = [...rawArgs];
   const session = isSessionInvocation(rawArgs);
   let defaultedModel;
+  let defaultedEffort;
   let disabledDaemon = false;
 
   if (session && !explicitModelSelection(rawArgs)) {
     defaultedModel = defaultCliModel(config);
     args.unshift("--model", defaultedModel);
+  }
+
+  const selectedModel = defaultedModel || optionValue(rawArgs, "--model", "-m");
+  if (session && selectedModel && !explicitReasoningSelection(rawArgs)) {
+    defaultedEffort = defaultReasoningEffort(selectedModel);
+    if (defaultedEffort) {
+      args.unshift("-c", `model_reasoning_effort="${defaultedEffort}"`);
+    }
   }
 
   const command = sessionSubcommand(rawArgs);
@@ -76,7 +144,7 @@ function normalizeCodexArgs(rawArgs, config, platform = process.platform) {
     disabledDaemon = true;
   }
 
-  return { args, defaultedModel, disabledDaemon };
+  return { args, defaultedModel, defaultedEffort, disabledDaemon };
 }
 
 function firstCommandPath(name) {
@@ -180,6 +248,12 @@ async function main() {
   if (normalized.defaultedModel) {
     process.stdout.write(
       `[dev-codex] default model: ${normalized.defaultedModel} (pass -m/--model or --profile to override)\n`,
+    );
+  }
+  if (normalized.defaultedEffort) {
+    process.stdout.write(
+      `[dev-codex] compatible reasoning effort: ${normalized.defaultedEffort} `
+      + "(pass -c model_reasoning_effort=... or --profile to override)\n",
     );
   }
   if (normalized.disabledDaemon) {

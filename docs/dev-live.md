@@ -66,9 +66,12 @@ independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop 
 
    For a session/exec without an explicit `-m/--model` or `--profile`, the wrapper defaults to
    `chatgpt-web/gpt-5.6-sol` (or `chatgpt-web/gpt-5.6-luna` when the CLI lane account does not
-   expose Sol). Set `CODEX_WEB_GPT_LIVE_CLI_MODEL` to choose another default. On Windows the
-   wrapper also adds `--no-daemon` for TUI/resume/fork so Codex 0.157.x cannot fail on Job Object
-   daemon detachment; `exec` remains on its normal one-shot path.
+   expose Sol). It also supplies the route-compatible reasoning effort when
+   `model_reasoning_effort` was not explicitly overridden: Sol defaults to `high`, Sol Instant
+   and Luna to `low`, and fixed Pro routes to their fixed effort. Set
+   `CODEX_WEB_GPT_LIVE_CLI_MODEL` / `CODEX_WEB_GPT_LIVE_CLI_EFFORT` to choose different DEV
+   defaults. On Windows the wrapper also adds `--no-daemon` for TUI/resume/fork so Codex 0.157.x
+   cannot fail on Job Object daemon detachment; `exec` remains on its normal one-shot path.
 7. Restart the Desktop Codex app once after its initial route/catalog installation if requested.
 
 Later `bun run dev:live` runs reuse both lane states. The script reconnects the Desktop Codex
@@ -153,5 +156,7 @@ Useful overrides:
 - `CODEX_WEB_GPT_CODEX_BIN`: explicit Codex CLI executable for the wrapper.
 - `CODEX_WEB_GPT_LIVE_CLI_MODEL`: default routed Web model for `dev:codex` sessions when no
   `-m/--model` or `--profile` is supplied.
+- `CODEX_WEB_GPT_LIVE_CLI_EFFORT`: default reasoning effort injected for the selected routed Web
+  model when no explicit `model_reasoning_effort` override or profile is supplied.
 
 A Tunnel runtime key may have access to both tunnels, but the **Tunnel IDs themselves must differ**.

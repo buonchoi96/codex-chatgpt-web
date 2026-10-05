@@ -149,8 +149,12 @@ test("dev:codex defaults isolated sessions to a routed Web model and bypasses th
   const launcherRoot = path.resolve(__dirname, "..");
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-codex.cjs"), "utf8");
   assert.match(source, /CODEX_WEB_GPT_LIVE_CLI_MODEL/);
+  assert.match(source, /CODEX_WEB_GPT_LIVE_CLI_EFFORT/);
   assert.match(source, /chatgpt-web\/gpt-5\.6-sol/);
   assert.match(source, /chatgpt-web\/gpt-5\.6-luna/);
+  assert.match(source, /case "chatgpt-web\/gpt-5\.6-sol":\s+[\s\S]*?return "high"/);
+  assert.match(source, /model_reasoning_effort=/);
+  assert.match(source, /explicitReasoningSelection/);
   assert.match(source, /explicitModelSelection/);
   assert.match(source, /command === "resume" \|\| command === "fork"/);
   assert.match(source, /args\.unshift\("--no-daemon"\)/);
