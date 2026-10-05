@@ -366,17 +366,33 @@ function scheduleElectronRestartRetry() {
 async function restartElectron() {
   if (stopped || electronReloadInFlight) return false;
   electronReloadInFlight = true;
+  let cliConfigBeforeReload;
+  let cliAdmissionDrained = false;
   try {
-    const cliConfigBeforeReload = liveCliConfig();
+    cliConfigBeforeReload = liveCliConfig();
     const cliStateBeforeReload = cliConfigBeforeReload ? await health(cliConfigBeforeReload) : undefined;
-    if ((cliStateBeforeReload?.active_http_turns ?? 0) > 0
-      || (cliStateBeforeReload?.active_browser_turns ?? 0) > 0) {
-      warn(
-        `Electron reload deferred because the isolated CLI lane still has ${cliStateBeforeReload.active_http_turns ?? "?"} HTTP `
-        + `and ${cliStateBeforeReload.active_browser_turns ?? "?"} browser turn(s)`,
-      );
-      scheduleElectronRestartRetry();
-      return false;
+    if (cliStateBeforeReload?.status === "ok") {
+      if (cliStateBeforeReload.accepting_turns !== true || !Number.isSafeInteger(cliStateBeforeReload.pid)) {
+        warn("Electron reload deferred because the isolated CLI lane is not accepting new turns cleanly");
+        scheduleElectronRestartRetry();
+        return false;
+      }
+      const cliDrained = await drainRuntimeForElectronRestart({
+        config: cliConfigBeforeReload,
+        expectedDaemonPid: cliStateBeforeReload.pid,
+        health,
+        control,
+        timeoutMs: Math.max(1_000, idleRestartTimeoutMs),
+      });
+      if (!cliDrained.allowed) {
+        warn(
+          `Electron reload deferred; isolated CLI lane admission ${cliDrained.resumed ? "was resumed" : "could not be confirmed resumed"}: `
+          + cliDrained.reason,
+        );
+        scheduleElectronRestartRetry();
+        return false;
+      }
+      cliAdmissionDrained = true;
     }
 
     const configPresent = fs.existsSync(path.join(liveHome, "config.json"));
@@ -479,6 +495,12 @@ async function restartElectron() {
       : `replacement launcher is ready; verified tunnel PID ${readiness.tunnelPid ?? "none"}`);
     return true;
   } finally {
+    if (cliAdmissionDrained && cliConfigBeforeReload && !stopped) {
+      const resumed = await control(cliConfigBeforeReload, "resume")
+        .then(value => value?.status === "ok" && value.accepting_turns === true)
+        .catch(() => false);
+      if (!resumed) warn("isolated CLI lane admission could not be confirmed resumed after Electron reload");
+    }
     electronReloadInFlight = false;
   }
 }

@@ -8,6 +8,11 @@ if (config.mode !== "full") throw new Error("DEV live CLI tunnel requires Full h
 
 if (action === "start") {
   const current = tunnelStatus(config);
+  if (!current.ok && current.processRunning) {
+    // A live-but-unhealthy alias cannot be safely connected over itself. Recycle only the
+    // isolated CLI lane runtime; the Desktop lane has a different alias and Tunnel ID.
+    stopTunnel(config);
+  }
   if (!current.ok) connectTunnel(config);
   const ready = await waitForTunnelReady(config);
   process.stdout.write(`${JSON.stringify(ready)}\n`);

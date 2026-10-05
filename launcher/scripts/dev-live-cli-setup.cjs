@@ -24,7 +24,7 @@ function fail(message) {
   process.exitCode = 1;
 }
 
-function setupPort(desktopConfig) {
+function setupPort(desktopConfig, existingCliConfig) {
   const override = Number(process.env.CODEX_WEB_GPT_LIVE_CLI_PORT || 0);
   if (override) {
     if (!Number.isInteger(override) || override < 1 || override > 65_535) {
@@ -32,6 +32,12 @@ function setupPort(desktopConfig) {
     }
     if (override === desktopConfig.port) throw new Error("CLI lane port must differ from the Desktop lane port");
     return override;
+  }
+  if (Number.isInteger(existingCliConfig?.port)
+    && existingCliConfig.port >= 1
+    && existingCliConfig.port <= 65_535
+    && existingCliConfig.port !== desktopConfig.port) {
+    return existingCliConfig.port;
   }
   const candidate = desktopConfig.port < 65_535 ? desktopConfig.port + 1 : 17_842;
   if (candidate === desktopConfig.port) throw new Error("Could not choose a distinct CLI lane port");
@@ -65,6 +71,7 @@ function main() {
   if (!fs.existsSync(paths.desktopBrowserDescriptorPath)) {
     throw new Error(`Desktop browser host is not ready at ${paths.desktopBrowserDescriptorPath}; keep bun run dev:live running`);
   }
+  const existingCliConfig = readLaneConfig(paths.cliConfigPath);
 
   fs.mkdirSync(path.dirname(setupMarker), { recursive: true, mode: 0o700 });
   fs.writeFileSync(setupMarker, `${process.pid}\n`, { flag: "w", mode: 0o600 });
@@ -73,7 +80,7 @@ function main() {
       "run", sourceCli,
       "setup",
       "--full",
-      "--port", String(setupPort(desktopConfig)),
+      "--port", String(setupPort(desktopConfig, existingCliConfig)),
       "--browser-host-descriptor", paths.desktopBrowserDescriptorPath,
       "--automatic-browser-interaction",
       "--connector-name-suffix", CLI_CONNECTOR_NAME.slice("Codex ".length),

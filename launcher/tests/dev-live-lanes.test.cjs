@@ -118,10 +118,23 @@ test("dev:live wires the isolated CLI lane without replacing the production work
   assert.equal(rootPackage.scripts["dev:codex"], "bun run launcher/scripts/dev-codex.cjs");
   assert.match(source, /startCliLaneSupervisor/);
   assert.match(source, /restartCliLaneDaemonFromSource/);
-  assert.match(source, /Electron reload deferred because the isolated CLI lane still has/);
+  assert.match(source, /config: cliConfigBeforeReload/);
+  assert.match(source, /isolated CLI lane admission/);
+  assert.match(source, /could not be confirmed resumed after Electron reload/);
   assert.match(source, /bun run dev:codex -- <codex arguments>/);
   assert.match(source, /handoffProductionRoute/);
   assert.match(source, /restoreProductionRoute/);
+});
+
+test("CLI lane setup preserves its configured port and recycles unhealthy tunnel state", () => {
+  const launcherRoot = path.resolve(__dirname, "..");
+  const repoRoot = path.resolve(launcherRoot, "..");
+  const setup = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-setup.cjs"), "utf8");
+  const tunnelHelper = fs.readFileSync(path.join(repoRoot, "scripts", "dev-live-cli-tunnel.ts"), "utf8");
+  assert.match(setup, /setupPort\(desktopConfig, existingCliConfig\)/);
+  assert.match(setup, /existingCliConfig\?\.port/);
+  assert.match(tunnelHelper, /!current\.ok && current\.processRunning/);
+  assert.match(tunnelHelper, /stopTunnel\(config\)/);
 });
 
 test("dev:codex avoids shell execution for Windows npm shims", () => {
