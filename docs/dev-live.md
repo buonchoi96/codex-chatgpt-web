@@ -156,6 +156,9 @@ Useful overrides:
 - `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`: isolated Codex home used by `dev:codex`.
 - `CODEX_WEB_GPT_LIVE_CLI_PORT`: CLI Responses port used during first setup.
 - `CODEX_WEB_GPT_LIVE_CLI_TUNNEL_ID`: optional non-interactive second Tunnel ID.
+- `CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID`: Platform organization ID for an organization-scoped
+  CLI tunnel. It is persisted into the CLI tunnel configuration and passed to
+  `tunnel-client runtimes connect --organization-id`.
 - `CODEX_WEB_GPT_LIVE_CLI_RUNTIME_KEY_FILE`: optional non-interactive runtime-key file.
 - `CODEX_WEB_GPT_CODEX_BIN`: explicit Codex CLI executable for the wrapper.
 - `CODEX_WEB_GPT_LIVE_CLI_MODEL`: default routed Web model for `dev:codex` sessions when no
@@ -173,3 +176,15 @@ DEV live pins OpenAI `tunnel-client` v0.0.15. Connector-facing readiness is chec
 `/healthz` and `/readyz` alone are not treated as proof that ChatGPT can discover the tunnel.
 The CLI lane is recycled independently when its local process is alive but the control-plane poll
 route is not healthy/direct.
+
+
+If `runtimes status` reports `tunnel_active_organization_required`, rerun CLI setup with the
+Platform organization that owns the CLI tunnel:
+
+```powershell
+$env:CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID="org_..."
+bun run dev:live:cli-setup
+```
+
+The organization ID is saved in `cli-lane/config.json`, so later `dev:live` runs do not require
+the environment variable.

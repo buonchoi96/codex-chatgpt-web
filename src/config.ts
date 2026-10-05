@@ -92,6 +92,8 @@ export function resolveInteractionConnectorIdentities(
 export interface TunnelConfig {
   binaryPath: string;
   tunnelId: string;
+  /** Platform organization context required by tunnels scoped to an organization. */
+  organizationId?: string;
   runtimeKeyFile: string;
   profileDir: string;
   profileName: string;
@@ -506,6 +508,10 @@ function parseConfig(value: unknown, path: string): AppConfig {
     }
     if (!/^tunnel_[a-f0-9]{32}$/.test(tunnel.tunnelId)) {
       throw new Error(`Invalid ${label}.tunnelId in ${path}`);
+    }
+    if (tunnel.organizationId !== undefined
+      && (typeof tunnel.organizationId !== "string" || !tunnel.organizationId.trim())) {
+      throw new Error(`Invalid ${label}.organizationId in ${path}`);
     }
     for (const key of ["profileName", "alias"] as const) {
       if (!/^[A-Za-z0-9._-]+$/.test(tunnel[key])) {

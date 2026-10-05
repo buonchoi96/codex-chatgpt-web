@@ -64,6 +64,7 @@ export interface SetupOptions {
   restartService?: boolean;
   acknowledgedUnofficial?: boolean;
   tunnelId?: string;
+  tunnelOrganizationId?: string;
   runtimeKeyFile?: string;
   runtimeKeyValue?: string;
 }
@@ -380,6 +381,7 @@ async function configureTunnel(config: AppConfig, existing: AppConfig | undefine
   let manualTunnel = existing?.manualTunnel;
   const existingTunnel = interactionMode === "manual" ? manualTunnel : automaticTunnel;
   const tunnelId = options.tunnelId ?? existingTunnel?.tunnelId;
+  const tunnelOrganizationId = options.tunnelOrganizationId?.trim() || existingTunnel?.organizationId;
   if (!tunnelId) {
     throw new Error(`${interactionMode === "manual" ? "Zero Risk" : "Automatic"} mode requires its own Tunnel ID`);
   }
@@ -406,6 +408,7 @@ async function configureTunnel(config: AppConfig, existing: AppConfig | undefine
   const configuredTunnel = createTunnelConfig({
     binaryPath: installedBinary,
     tunnelId,
+    organizationId: tunnelOrganizationId,
     runtimeKeyFile,
     profileName,
     alias: profileName,

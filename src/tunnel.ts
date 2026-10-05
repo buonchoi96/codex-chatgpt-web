@@ -218,6 +218,7 @@ export function installRuntimeKeyBytes(
 export function createTunnelConfig(options: {
   binaryPath: string;
   tunnelId: string;
+  organizationId?: string;
   runtimeKeyFile: string;
   profileName?: string;
   alias?: string;
@@ -228,9 +229,11 @@ export function createTunnelConfig(options: {
   if (!/^[A-Za-z0-9._-]+$/.test(profileName) || !/^[A-Za-z0-9._-]+$/.test(alias)) {
     throw new Error("Tunnel profile and alias may contain only letters, digits, dot, underscore, and dash");
   }
+  const organizationId = options.organizationId?.trim();
   return {
     binaryPath: options.binaryPath,
     tunnelId: options.tunnelId,
+    ...(organizationId ? { organizationId } : {}),
     runtimeKeyFile: options.runtimeKeyFile,
     profileDir: join(getConfigDir(), "tunnel", "profiles"),
     profileName,
@@ -279,6 +282,7 @@ export function connectTunnel(config: AppConfig): void {
     "--profile", settings.profileName,
     "--profile-dir", settings.profileDir,
     "--tunnel-client-bin", settings.binaryPath,
+    ...(settings.organizationId ? ["--organization-id", settings.organizationId] : []),
     "--tunnel-id", settings.tunnelId,
     "--runtime-api-key", `file:${settings.runtimeKeyFile}`,
     "--mcp-command", mcpCommand(config),
@@ -308,8 +312,8 @@ export function stopTunnel(config: AppConfig): void {
     && !/not found|not running|unknown alias|\balias\b[^\r\n]{0,160}\bis not known\b/i.test(
       `${result.stdout}\n${result.stderr}`,
     )) {
-    // v0.0.12 clears its saved PID even when SIGTERM times out. Its subsequent
-    // "stopped" inventory is not exit evidence; probe the PID from the stop error.
+    // Managed runtimes can clear their saved PID even when SIGTERM times out. A subsequent
+    // "stopped" status is not exit evidence; probe the PID from the stop error.
     if (tunnelStopProcessExited(result.stdout, settings.alias)) {
       console.warn("[codex-chatgpt-web] tunnel stop timed out; OS confirmed process exit");
       return;

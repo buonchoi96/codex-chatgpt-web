@@ -71,6 +71,7 @@ Setup options:
   --refresh-account-capabilities
                                Re-read the authenticated account's available Web models
   --tunnel-id ID               Existing OpenAI tunnel id (full mode)
+  --tunnel-organization-id ID  Platform organization context for organization-scoped tunnels
   --runtime-key-file PATH      File containing a Tunnels Read+Use runtime key
   --replace-codex-route        Reversibly replace existing Responses or Voice route settings
   --subagent-protocol MODE     compatibility-v1 (default) or native (advanced)
@@ -300,6 +301,7 @@ async function setupCommand(args: string[]): Promise<void> {
     options.subagentProtocol = subagentProtocol;
   }
   const tunnelId = takeOption(args, "--tunnel-id");
+  const tunnelOrganizationId = takeOption(args, "--tunnel-organization-id");
   const runtimeKeyFile = takeOption(args, "--runtime-key-file");
   const chrome = takeOption(args, "--chrome");
   const browserHostDescriptorPath = takeOption(args, "--browser-host-descriptor");
@@ -307,6 +309,7 @@ async function setupCommand(args: string[]): Promise<void> {
   if (browserHostDescriptorPath) options.browserHostDescriptorPath = browserHostDescriptorPath;
   options.refreshAccountCapabilities = takeFlag(args, "--refresh-account-capabilities");
   if (tunnelId) options.tunnelId = tunnelId;
+  if (tunnelOrganizationId) options.tunnelOrganizationId = tunnelOrganizationId;
   if (runtimeKeyFile) options.runtimeKeyFile = runtimeKeyFile;
   options.forceLogin = takeFlag(args, "--login");
   options.autoApproveToolCalls = takeFlag(args, "--auto-approve-tool-calls");

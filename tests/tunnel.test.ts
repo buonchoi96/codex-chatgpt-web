@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { zipSync } from "fflate";
 import * as config from "../src/config";
 import * as commands from "../src/process";
-import { TUNNEL_VERSION, installTunnelClient, parseTunnelStatus, stopTunnel, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError, tunnelStatus } from "../src/tunnel";
+import { TUNNEL_VERSION, connectTunnel, createTunnelConfig, installTunnelClient, parseTunnelStatus, stopTunnel, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError, tunnelStatus } from "../src/tunnel";
 
 test("a failed tunnel stop trusts OS exit evidence, never the inventory's cleared PID", () => {
   const appConfig = { mode: "full", tunnel: { binaryPath: process.execPath, alias: "ours" } } as config.AppConfig;
@@ -152,6 +152,39 @@ test("pins the current tunnel-client and migrates only versions previously shipp
   expect(tunnelClientInstallAction("0.0.10")).toBe("upgrade");
   expect(() => tunnelClientInstallAction("0.0.11")).toThrow("not a trusted upgrade source");
   expect(() => tunnelClientInstallAction("9.9.9")).toThrow("not a trusted upgrade source");
+});
+
+test("connect passes the persisted organization scope to tunnel-client", () => {
+  const root = fs.mkdtempSync(join(tmpdir(), "tunnel-org-scope-"));
+  const command = spyOn(commands, "runCommand").mockReturnValue({
+    status: 0,
+    stderr: "",
+    stdout: JSON.stringify({ running: true, healthy: true, ready: true }),
+  });
+  try {
+    const appConfig = config.defaultConfig("full");
+    appConfig.runtimeCommand = [process.execPath];
+    appConfig.brokerSocketPath = process.platform === "win32"
+      ? "\\\\.\\pipe\\codex-chatgpt-web-test-org"
+      : join(root, "broker.sock");
+    appConfig.tunnel = createTunnelConfig({
+      binaryPath: process.execPath,
+      tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+      organizationId: "org_test123",
+      runtimeKeyFile: join(root, "runtime.key"),
+      profileDir: undefined,
+      profileName: "ours",
+      alias: "ours",
+    });
+    appConfig.tunnel.profileDir = root;
+    connectTunnel(appConfig);
+    expect(command.mock.calls[0]?.[1]).toContain("--organization-id");
+    const args = command.mock.calls[0]?.[1] as string[];
+    expect(args[args.indexOf("--organization-id") + 1]).toBe("org_test123");
+  } finally {
+    command.mockRestore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 describe("tunnel status boundary", () => {

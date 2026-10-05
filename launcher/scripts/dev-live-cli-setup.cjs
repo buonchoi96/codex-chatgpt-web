@@ -196,8 +196,13 @@ async function main() {
     ];
     if (shouldRefreshAccountCapabilities(existingCliConfig)) args.push("--refresh-account-capabilities");
     const tunnelId = process.env.CODEX_WEB_GPT_LIVE_CLI_TUNNEL_ID?.trim();
+    const organizationId = (
+      process.env.CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID
+      || process.env.CONTROL_PLANE_ORGANIZATION_ID
+    )?.trim();
     const runtimeKeyFile = process.env.CODEX_WEB_GPT_LIVE_CLI_RUNTIME_KEY_FILE?.trim();
     if (tunnelId) args.push("--tunnel-id", tunnelId);
+    if (organizationId) args.push("--tunnel-organization-id", organizationId);
     if (runtimeKeyFile) args.push("--runtime-key-file", path.resolve(runtimeKeyFile));
 
     const result = spawnSync(bun, args, {
