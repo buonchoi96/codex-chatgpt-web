@@ -143,6 +143,15 @@ test("CLI setup ignores per-command CODEX_HOME overrides from CLI diagnostics", 
   assert.match(source, /resolveLiveLanePaths\(setupEnvironment\)/);
 });
 
+test("DEV CLI tunnel helper always targets the isolated CLI lane", () => {
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const source = fs.readFileSync(path.join(repoRoot, "scripts", "dev-live-cli-tunnel.ts"), "utf8");
+  assert.match(source, /CODEX_WEB_GPT_LIVE_CLI_HOME/);
+  assert.match(source, /CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME/);
+  assert.match(source, /process\.env\.CODEX_CHATGPT_WEB_HOME = cliHome/);
+  assert.match(source, /process\.env\.CODEX_HOME = cliCodexHome/);
+});
+
 test("CLI lane setup preserves its configured port and recycles unhealthy tunnel state", () => {
   const launcherRoot = path.resolve(__dirname, "..");
   const repoRoot = path.resolve(launcherRoot, "..");

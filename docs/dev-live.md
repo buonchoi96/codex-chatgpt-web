@@ -198,3 +198,9 @@ CLI tunnel commands also inject the persisted organization ID as
 environment value supplies the `OpenAI-Organization` context used by the managed runtime and
 read-only control-plane status requests. `dev:live:cli-setup` ignores temporary
 `CODEX_HOME`/`CODEX_CHATGPT_WEB_HOME` values set by CLI diagnostic commands.
+
+
+The direct diagnostic helper `bun run scripts/dev-live-cli-tunnel.ts <status|start|stop>` now
+selects the isolated CLI lane automatically. It does not require callers to export
+`CODEX_CHATGPT_WEB_HOME` or `CODEX_HOME`; custom DEV lane roots still use
+`CODEX_WEB_GPT_LIVE_CLI_HOME` / `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`.

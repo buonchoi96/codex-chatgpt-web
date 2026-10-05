@@ -1,7 +1,25 @@
+import os from "node:os";
+import path from "node:path";
 import { loadConfig } from "../src/config";
 import { connectTunnel, stopTunnel, tunnelStatus, waitForTunnelReady } from "../src/tunnel";
 
 const action = process.argv[2] ?? "status";
+
+// This helper is specifically for the isolated DEV CLI lane. Resolve that lane directly instead of
+// inheriting CODEX_CHATGPT_WEB_HOME/CODEX_HOME from whichever PowerShell session invokes it.
+const homeDir = os.homedir();
+const desktopHome = path.resolve(
+  process.env.CODEX_WEB_GPT_LIVE_HOME?.trim() || path.join(homeDir, ".codex-chatgpt-web-live"),
+);
+const cliHome = path.resolve(
+  process.env.CODEX_WEB_GPT_LIVE_CLI_HOME?.trim() || path.join(desktopHome, "cli-lane"),
+);
+const cliCodexHome = path.resolve(
+  process.env.CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME?.trim() || path.join(cliHome, "codex-home"),
+);
+process.env.CODEX_CHATGPT_WEB_HOME = cliHome;
+process.env.CODEX_HOME = cliCodexHome;
+
 const config = loadConfig();
 
 if (config.mode !== "full") throw new Error("DEV live CLI tunnel requires Full harness mode");
