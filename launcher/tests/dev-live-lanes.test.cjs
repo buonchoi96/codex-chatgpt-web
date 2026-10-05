@@ -138,9 +138,15 @@ test("CLI lane setup preserves its configured port and recycles unhealthy tunnel
   const launcherRoot = path.resolve(__dirname, "..");
   const repoRoot = path.resolve(launcherRoot, "..");
   const setup = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-setup.cjs"), "utf8");
+  const lane = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-lane.cjs"), "utf8");
   const tunnelHelper = fs.readFileSync(path.join(repoRoot, "scripts", "dev-live-cli-tunnel.ts"), "utf8");
   assert.match(setup, /setupPort\(desktopConfig, existingCliConfig\)/);
   assert.match(setup, /existingCliConfig\?\.port/);
+  assert.match(setup, /await quiesceExistingLane\(existingCliConfig\)/);
+  assert.match(setup, /CODEX_WEB_GPT_LIVE_CLI_REFRESH_ACCOUNT_CAPABILITIES/);
+  assert.doesNotMatch(setup, /"--replace-codex-route",\s*"--refresh-account-capabilities"/);
+  assert.match(lane, /CLI lane setup requested; draining its daemon before reconfiguration/);
+  assert.match(lane, /if \(fs\.existsSync\(setupMarker\)\) \{/);
   assert.match(tunnelHelper, /!current\.ok && current\.processRunning/);
   assert.match(tunnelHelper, /stopTunnel\(config\)/);
 });

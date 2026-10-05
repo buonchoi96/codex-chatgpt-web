@@ -54,7 +54,11 @@ independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop 
    ```
 
    Enter the second Tunnel ID/runtime key when prompted. Then create a ChatGPT connector named
-   exactly **`Codex Native2 CLI DEV`** and attach it to that second tunnel.
+   exactly **`Codex Native2 CLI DEV`** and attach it to that second tunnel. Rerunning
+   `dev:live:cli-setup` while `dev:live` remains open is supported: the wrapper drains and pauses
+   the existing CLI daemon/tunnel before rebinding its port, then the supervisor resumes it after
+   setup commits. Existing account capability results are reused on reruns unless
+   `CODEX_WEB_GPT_LIVE_CLI_REFRESH_ACCOUNT_CAPABILITIES=1` is explicitly set.
 6. Run test CLI processes through the isolated lane:
 
    ```powershell

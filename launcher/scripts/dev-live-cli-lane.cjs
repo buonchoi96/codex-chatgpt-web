@@ -175,7 +175,23 @@ function ensureTunnel() {
 }
 
 async function ensureLane() {
-  if (stopping || fs.existsSync(setupMarker)) return;
+  if (stopping) return;
+  if (fs.existsSync(setupMarker)) {
+    const config = activeConfig || readLaneConfig(paths.cliConfigPath);
+    if (config) {
+      const state = await health(config);
+      if (state?.status === "ok") {
+        log("CLI lane setup requested; draining its daemon before reconfiguration");
+        await stopDaemon(config).catch(error => warn(error.message));
+      }
+      if (tunnelOwned) {
+        const stoppedTunnel = runTunnel("stop");
+        if (!stoppedTunnel.ok) warn(`CLI tunnel stop failed: ${stoppedTunnel.detail}`);
+        tunnelOwned = false;
+      }
+    }
+    return;
+  }
   const desktopConfig = readLaneConfig(paths.desktopConfigPath);
   const cliConfig = readLaneConfig(paths.cliConfigPath);
   if (!cliConfig) {
@@ -220,7 +236,12 @@ async function ensureLane() {
   lastConfigFingerprint = nextFingerprint;
   lastWaitingMessage = undefined;
 
+  if (fs.existsSync(setupMarker)) return;
   await startDaemon(cliConfig);
+  if (fs.existsSync(setupMarker)) {
+    await stopDaemon(cliConfig).catch(error => warn(error.message));
+    return;
+  }
   ensureTunnel();
   lastTunnelCheckAt = Date.now();
   if (!routeReady(cliConfig)) {
