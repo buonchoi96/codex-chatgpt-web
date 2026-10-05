@@ -41,6 +41,15 @@ export type NativeCompletionState = "complete" | "blocked";
 
 export type TurnBrokerDispatchGuard = (traceId: string) => void | Promise<void>;
 
+export interface TurnBrokerDiagnosticIdentity {
+  lane: string;
+  connector: string;
+  tunnelAlias: string | null;
+  tunnelIdHash: string | null;
+  brokerHash: string;
+  responsesPort: number;
+}
+
 export interface NativeCompletionReceipt {
   state: NativeCompletionState;
   summary: string;
@@ -528,11 +537,22 @@ export class TurnBroker implements TurnBrokerOwner {
   private readonly traceAbortControllers = new Map<string, Set<AbortController>>();
   private acceptingExternalOwners = true;
   private dispatchGuard?: TurnBrokerDispatchGuard;
+  private diagnosticIdentity?: TurnBrokerDiagnosticIdentity;
   private server?: Server;
   private startPromise?: Promise<void>;
   private socketIdentity?: { dev: number; ino: number };
 
   private constructor(readonly socketPath: string) {}
+
+  configureDiagnosticIdentity(identity: TurnBrokerDiagnosticIdentity | undefined): void {
+    this.diagnosticIdentity = identity ? { ...identity } : undefined;
+  }
+
+  private diagnosticSuffix(): string {
+    return this.diagnosticIdentity
+      ? ` identity=${JSON.stringify(this.diagnosticIdentity)}`
+      : "";
+  }
 
   setDispatchGuard(guard: TurnBrokerDispatchGuard | undefined): void {
     this.dispatchGuard = guard;
@@ -595,7 +615,7 @@ export class TurnBroker implements TurnBrokerOwner {
     };
     this.channels.set(token, channel);
     this.pending.set(token, channel);
-    console.info(`[chatgpt-web] broker trace=${traceId} registered tokenHash=${handleFingerprint(token)}`);
+    console.info(`[chatgpt-web] broker trace=${traceId} registered tokenHash=${handleFingerprint(token)}${this.diagnosticSuffix()}`);
     return token;
   }
 
@@ -753,7 +773,7 @@ export class TurnBroker implements TurnBrokerOwner {
       );
     }
     console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}`,
+      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}${this.diagnosticSuffix()}`,
     );
     if (isComputerUseTelemetryTool(invocation.request.wireName)) {
       channel.lastComputerUseCompletedAt = Date.now();
@@ -966,7 +986,7 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision} toolsQueued=${channel.toolCallsQueued} toolsCompleted=${channel.toolCallsCompleted}`,
+      `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision} toolsQueued=${channel.toolCallsQueued} toolsCompleted=${channel.toolCallsCompleted}${this.diagnosticSuffix()}`,
     );
     return true;
   }
@@ -1129,6 +1149,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!channel) return;
     console.info(`[chatgpt-web] broker_retired ${JSON.stringify({
       traceId: channel.traceId,
+      ...(this.diagnosticIdentity ? { identity: this.diagnosticIdentity } : {}),
       pendingTools: channel.invocations.size,
       queuedTools: channel.queuedCallIds.length,
       deliveredTools: channel.deliveredCallIds.size,
@@ -1905,7 +1926,7 @@ export class TurnBroker implements TurnBrokerOwner {
       binding.channel.queuedCallIds.push(callId);
       binding.channel.toolCallsQueued += 1;
       console.info(
-        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}`,
+        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}${this.diagnosticSuffix()}`,
       );
       this.scheduleToolWaiters(binding.channel);
     });
@@ -1927,7 +1948,7 @@ export class TurnBroker implements TurnBrokerOwner {
   private logToolDelivery(channel: TurnChannel, batch: BrokerToolRequest[], path: "immediate" | "waiter" | "replay"): void {
     for (const request of batch) {
       console.info(
-        `[chatgpt-web] broker trace=${channel.traceId} delivered call=${request.callId.slice(0, 17)} path=${path} replay=${path === "replay"}`,
+        `[chatgpt-web] broker trace=${channel.traceId} delivered call=${request.callId.slice(0, 17)} path=${path} replay=${path === "replay"}${this.diagnosticSuffix()}`,
       );
     }
   }

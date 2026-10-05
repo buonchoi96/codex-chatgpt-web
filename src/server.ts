@@ -1,6 +1,6 @@
 import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
-import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
+import { closeTurnBrokers, TurnBroker, type TurnBrokerDiagnosticIdentity } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
 import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
 import {
@@ -919,6 +919,30 @@ export async function compactRequest(
   return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
 }
 
+export interface DevLiveLaneIdentity extends TurnBrokerDiagnosticIdentity {}
+
+function diagnosticFingerprint(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+export function devLiveLaneIdentity(
+  config: AppConfig,
+  environment: NodeJS.ProcessEnv = process.env,
+): DevLiveLaneIdentity | undefined {
+  if (environment.CODEX_WEB_GPT_LIVE_MODE !== "1" || config.mode !== "full") return undefined;
+  const laneRaw = environment.CODEX_WEB_GPT_LIVE_LANE?.trim();
+  const lane = laneRaw === "cli" ? "cli" : laneRaw === "desktop" ? "desktop" : "desktop";
+  const activeTunnel = config.tunnel ?? config.automaticTunnel ?? config.manualTunnel;
+  return {
+    lane,
+    connector: config.appName,
+    tunnelAlias: activeTunnel?.alias ?? null,
+    tunnelIdHash: activeTunnel?.tunnelId ? diagnosticFingerprint(activeTunnel.tunnelId) : null,
+    brokerHash: diagnosticFingerprint(config.brokerSocketPath),
+    responsesPort: config.port,
+  };
+}
+
 export function startServer(
   config: AppConfig,
   dependencies: { fetchUpstream?: NativeFetch; adapterFactory?: ChatGptWebAdapterFactory } = {},
@@ -927,7 +951,12 @@ export function startServer(
     throw new Error("DEV harness configuration cannot start a Responses listener");
   }
   const startedAt = Date.now();
+  const laneIdentity = devLiveLaneIdentity(config);
   const turnBroker = config.mode === "full" ? TurnBroker.forSocket(config.brokerSocketPath) : undefined;
+  if (turnBroker && laneIdentity) {
+    turnBroker.configureDiagnosticIdentity(laneIdentity);
+    console.info(`[chatgpt-web] dev_lane_identity ${JSON.stringify(laneIdentity)}`);
+  }
   if (config.mode === "full") {
     void turnBroker!.listen().catch(error => {
       console.error(
@@ -974,6 +1003,7 @@ export function startServer(
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
           model_catalog_requests: modelCatalogRequests,
           last_model_catalog_result: lastModelCatalogResult,
+          ...(laneIdentity ? { lane_identity: laneIdentity } : {}),
           ...activity(),
         });
       }

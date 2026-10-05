@@ -17,6 +17,7 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   assert.match(source, /\.codex-chatgpt-web-live/);
   assert.match(source, /CODEX_CHATGPT_WEB_HOME: liveHome/);
   assert.match(source, /CODEX_WEB_GPT_LAUNCHER_DATA_DIR: liveUserData/);
+  assert.match(source, /CODEX_WEB_GPT_LIVE_LANE: "desktop"/);
   assert.match(source, /Codex Native2 and its tunnel/);
   assert.doesNotMatch(source, /electronBin, \[launcherRoot, ["']--dev-profile/);
   assert.match(source, /scripts\/build-browser-helper\.ts/);

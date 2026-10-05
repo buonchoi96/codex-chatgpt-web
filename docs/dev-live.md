@@ -204,3 +204,15 @@ The direct diagnostic helper `bun run scripts/dev-live-cli-tunnel.ts <status|sta
 selects the isolated CLI lane automatically. It does not require callers to export
 `CODEX_CHATGPT_WEB_HOME` or `CODEX_HOME`; custom DEV lane roots still use
 `CODEX_WEB_GPT_LIVE_CLI_HOME` / `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`.
+
+
+### Dual-lane identity telemetry
+
+When `dev:live` is active, each Responses daemon emits a structured
+`[chatgpt-web] dev_lane_identity` record and exposes the same record as `lane_identity` on
+`GET /healthz`. The record contains the DEV lane, connector name, tunnel alias, Responses port,
+and SHA-256 fingerprints of the tunnel ID and broker endpoint; raw tunnel IDs, broker paths, and
+runtime keys are not logged. Broker registration, queue, delivery, completion, and retirement
+telemetry carries the same identity so concurrent Desktop/CLI tool calls can be proven isolated
+from one log. Installed production launcher behavior is unchanged because the telemetry is enabled
+only when `CODEX_WEB_GPT_LIVE_MODE=1`.

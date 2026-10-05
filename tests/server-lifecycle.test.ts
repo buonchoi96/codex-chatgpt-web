@@ -9,7 +9,44 @@ import { ChatGptTextFeed, ChatGptTraceFeed, chatGptTurnSessions } from "../src/a
 import { callTurnBroker, closeTurnBrokers, RemoteTurnBroker, TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint, defaultConfig, providerConfig } from "../src/config";
 import { parseRequest } from "../src/responses/parser";
-import { compactRequest, HttpTurnCounter, responseRequest, routeChatGptWebRequest, startServer } from "../src/server";
+import { compactRequest, devLiveLaneIdentity, HttpTurnCounter, responseRequest, routeChatGptWebRequest, startServer } from "../src/server";
+
+test("DEV live lane identity distinguishes Desktop and CLI without exposing raw tunnel or broker ids", () => {
+  const config = defaultConfig("full");
+  config.appName = "Codex Native2 CLI DEV";
+  config.port = 17842;
+  config.brokerSocketPath = "\\\\.\\pipe\\codex-chatgpt-web-live-cli-test";
+  config.tunnel = {
+    binaryPath: "tunnel-client",
+    tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+    runtimeKeyFile: "runtime.key",
+    profileDir: "profiles",
+    profileName: "codex-chatgpt-web-live-cli",
+    alias: "codex-chatgpt-web-live-cli",
+  };
+
+  const cli = devLiveLaneIdentity(config, {
+    CODEX_WEB_GPT_LIVE_MODE: "1",
+    CODEX_WEB_GPT_LIVE_LANE: "cli",
+  });
+  expect(cli).toMatchObject({
+    lane: "cli",
+    connector: "Codex Native2 CLI DEV",
+    tunnelAlias: "codex-chatgpt-web-live-cli",
+    responsesPort: 17842,
+  });
+  expect(cli?.tunnelIdHash).toMatch(/^[a-f0-9]{12}$/);
+  expect(cli?.brokerHash).toMatch(/^[a-f0-9]{12}$/);
+  expect(JSON.stringify(cli)).not.toContain("tunnel_0123456789abcdef0123456789abcdef");
+  expect(JSON.stringify(cli)).not.toContain("codex-chatgpt-web-live-cli-test");
+
+  const desktop = devLiveLaneIdentity(config, {
+    CODEX_WEB_GPT_LIVE_MODE: "1",
+    CODEX_WEB_GPT_LIVE_LANE: "desktop",
+  });
+  expect(desktop?.lane).toBe("desktop");
+  expect(devLiveLaneIdentity(config, {})).toBeUndefined();
+});
 
 test("DEV harness configuration cannot bind a Responses listener", () => {
   const config = { ...defaultConfig("browser-only"), purpose: "dev-harness" as const, port: 0 };

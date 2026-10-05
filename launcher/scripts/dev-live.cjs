@@ -76,6 +76,7 @@ function liveEnvironment(extra = {}) {
     CODEX_CHATGPT_WEB_HOME: liveHome,
     CODEX_WEB_GPT_LAUNCHER_DATA_DIR: liveUserData,
     CODEX_WEB_GPT_LIVE_MODE: "1",
+    CODEX_WEB_GPT_LIVE_LANE: "desktop",
     CODEX_WEB_GPT_LIVE_TUNNEL_LEASE: liveTunnelLeasePath,
     CODEX_WEB_GPT_BUN: bun,
     CODEX_CHATGPT_WEB_BUN: bun,
