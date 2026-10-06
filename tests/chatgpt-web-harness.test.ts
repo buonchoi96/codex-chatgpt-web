@@ -585,7 +585,11 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test.each([false, true])("sequential native messages honor fresh conversation mode=%s", async freshConversation => {
+  test.each([
+    { freshConversation: false, modelId: "gpt-5.6-sol", effort: "high" as const },
+    { freshConversation: true, modelId: "gpt-5.6-sol", effort: "high" as const },
+    { freshConversation: false, modelId: "gpt-5.6-luna", effort: "low" as const },
+  ])("sequential native messages honor fresh mode=$freshConversation model=$modelId", async ({ freshConversation, modelId, effort }) => {
     const socketPath = brokerTestEndpoint(`cgw-retained-messages-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -596,7 +600,7 @@ describe("ChatGPT outer-native harness v4", () => {
         experimentalFreshConversationPerTurn: freshConversation,
         brokerSocketPath: socketPath,
         localToolsEnabled: true,
-        solAvailable: true,
+        solAvailable: modelId !== "gpt-5.6-luna",
         extraHighAvailable: true, proAvailable: true,
       },
     };
@@ -626,6 +630,8 @@ describe("ChatGPT outer-native harness v4", () => {
 
     const first = rawWireRequest(environmentXml);
     const second = parsed();
+    first.modelId = second.modelId = modelId;
+    first.options.reasoning = second.options.reasoning = effort;
     second.context.messages = [
       { role: "user", content: "Inspect the project", timestamp: 2 },
       { role: "assistant", content: [{ type: "text", text: "First retained answer" }], timestamp: 3 },
@@ -657,9 +663,9 @@ describe("ChatGPT outer-native harness v4", () => {
     };
 
     try {
-      const adapter = createChatGptWebAdapter(provider);
-      await adapter.runTurn!(first, { headers: new Headers() }, () => {});
-      await adapter.runTurn!(second, { headers: new Headers() }, () => {});
+      // The HTTP server creates an adapter per provider request; proof must outlive that factory.
+      await createChatGptWebAdapter(provider).runTurn!(first, { headers: new Headers() }, () => {});
+      await createChatGptWebAdapter(provider).runTurn!(second, { headers: new Headers() }, () => {});
 
       expect(browserMessages).toBe(2);
       expect(conversationKeys[0]).toBe(freshConversation
@@ -3139,9 +3145,6 @@ describe("ChatGPT outer-native harness v4", () => {
         "codex_tool_wait",
         "codex_turn_complete",
         "codex_view_image",
-        "codex_windows_computer_use_action",
-        "codex_windows_computer_use_call",
-        "codex_windows_computer_use_observe",
         "codex_write_stdin",
       ]);
       const publicConnectorAbi = listed.tools.map(tool => ({
@@ -3154,7 +3157,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }));
       // The explicit name, schema and annotation assertions below are the connector ABI contract.
       // Adding narrowly-scoped bridge tools intentionally changes the connector identity surface.
-      expect(publicConnectorAbi).toHaveLength(15);
+      expect(publicConnectorAbi).toHaveLength(12);
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -3209,24 +3212,9 @@ describe("ChatGPT outer-native harness v4", () => {
         idempotentHint: true,
         openWorldHint: false,
       });
-      expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_action")?.annotations).toMatchObject({
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      });
-      expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_call")?.annotations).toMatchObject({
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      });
-      expect(listed.tools.find(tool => tool.name === "codex_windows_computer_use_observe")?.annotations).toMatchObject({
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      });
+      for (const name of ["codex_windows_computer_use_action", "codex_windows_computer_use_call", "codex_windows_computer_use_observe"]) {
+        expect(listed.tools.find(tool => tool.name === name)).toBeUndefined();
+      }
       expect(listed.tools.find(tool => tool.name === "codex_turn_complete")?.annotations).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false,

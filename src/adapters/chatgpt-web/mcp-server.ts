@@ -14,6 +14,8 @@ import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from ".
 import { observeMcpToolCalls } from "./mcp-observation";
 import { classifyNativeOperation, operationFingerprint, splitIndependentInspections, type NativeOperationIntent } from "./native-operation";
 import { computerUseIntent, computerUseProgram, type ComputerUseOperation } from "./native-computer-use";
+import { filterMcpAdvertisements, DEPRECATED_MCP_TOOLS } from "./mcp-advertisement";
+import { BackendPerfTrace } from "../../lib/backend-perf";
 
 interface ClaimedTurn {
   bindingId: string;
@@ -135,8 +137,8 @@ export const CODEX_COMPLETION_CONTROL_WIRE_NAME = "codex.control.turn_complete";
 export const CODEX_COMPUTER_USE_OBSERVE = "codex.control.computer_use_observe";
 export const CODEX_COMPUTER_USE_ACTION = "codex.control.computer_use_action";
 const computerUseWindowSchema = z.object({ id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), app: z.string().min(1).max(16_384) });
-const computerUseObserveSchema = z.object({ operation: z.enum(["list_apps", "list_windows", "window_state"]), window: computerUseWindowSchema.optional() });
-const computerUseActionSchema = z.object({ operation: z.enum(["activate_window", "type_text"]), window: computerUseWindowSchema, text: z.string().max(100_000).optional() });
+const computerUseObserveSchema = z.object({ operation: z.enum(["list_apps", "list_windows", "window_state"]), window: computerUseWindowSchema.optional(), knownObservationId: z.string().min(1).max(256).optional() });
+const computerUseActionSchema = z.object({ operation: z.enum(["activate_window", "type_text", "activate_and_observe"]), window: computerUseWindowSchema, text: z.string().max(100_000).optional() });
 const GATEWAY_FAILURE_LINE = "if (result?.isError === true) text(__CODEX_NATIVE_FAILURE_MARKER__);";
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
@@ -152,13 +154,12 @@ export const CHATGPT_NATIVE_MCP_INSTRUCTIONS = [
   "Do not stop after one successful subtask, implementation milestone, focused test, checkpoint, commit, or partial success when other actionable requested work remains.",
   "After each tool result, continue to the next unfinished requested requirement without asking whether to proceed.",
   "If a Codex Native call returns codex_tool_in_progress, the operation was already delivered and may still be running. Never repeat that original operation. Poll codex_tool_wait with the returned call_id until it yields the terminal tool result, then continue normally.",
-  "A successful command, inspection, inventory lookup, or intermediate tool result is progress only. Do not end the response while any requested edit, test, validation, publication, or other actionable requirement remains; continue the Codex Native tool loop.",
   "When codex_tool_inventory returns discovery_tools containing tool_search, invoke tool_search through codex_tool_call and continue in the same response. Never call a discovered mcp__ tool directly from ChatGPT.",
   "For native desktop automation, prefer an official OpenAI Codex Computer Use capability that is actually present in the current outer Codex registry.",
   `For Windows list_apps, list_windows, or window_state, prefer codex_computer_use_observe; for an observed exact app/window activate_window or type_text, use codex_computer_use_action. Cached connectors can use codex_tool_call with wire_name ${CODEX_COMPUTER_USE_OBSERVE} or ${CODEX_COMPUTER_USE_ACTION} and the same operation arguments. These finite routes retain native safety checks and persistent Sky bindings. Native targeted typing already activates its window; do not prepend redundant activation.`,
   "For native Windows app control, explicitly query codex_tool_inventory for node_repl. When mcp__node_repl__js is available, prefer persistent node_repl + @oai/sky: import @oai/sky, retain sky in the REPL session, call sky.list_apps(), and continue through the native app/window operations exposed by sky.",
   COMPUTER_USE_FAST_PATH_RULE,
-  "Use codex_tool_inventory to discover the exact Computer Use surface. When discovery_tools contains tool_search, invoke tool_search through codex_tool_call and continue discovery in the same response; then invoke the exact returned wire_name through codex_tool_call or the native exec gateway.",
+  "Reuse the exact discovered wire_name through codex_tool_call or the native exec gateway while the tool environment is unchanged.",
   "Treat cua_repl as browser-oriented unless its current description/state explicitly proves native computer APIs are enabled. apps=[], 'Native computer APIs are disabled', a missing sky trusted service, or an equivalent native-surface error is a signal to try node_repl + @oai/sky instead of declaring native Windows unavailable.",
   "Do not treat ChatGPT's browser-only computer surface as evidence of native desktop access.",
   "The codex_windows_computer_use_observe, codex_windows_computer_use_action, and codex_windows_computer_use_call tools are deprecated ABI stubs. They intentionally fail fast and never route desktop work. Use official node_repl + @oai/sky for native Windows Computer Use.",
@@ -1074,16 +1075,25 @@ export async function runChatGptMcpServer(options: {
 
   const runComputerUse = async (claimed: ClaimedTurn, request: ComputerUseOperation, signal?: AbortSignal) => {
     const bound = claimed.environment;
-    const generation = createHash("sha256").update(JSON.stringify(bound.tools)).digest("hex");
+    const generation = createHash("sha256").update(JSON.stringify({ tools: bound.tools, cwd: bound.cwd,
+      roots: bound.roots, writableRoots: bound.writableRoots, sandboxPolicy: bound.sandboxPolicy })).digest("hex");
     const code = computerUseProgram(request, generation);
     const direct = bound.tools.find(tool => ["mcp__node_repl__js", "node_repl__js"].includes(wireName(tool)) && !tool.freeform);
     const payload = { arguments: { code }, operationIntent: computerUseIntent(request.operation),
       requestedTool: `computer_use.${request.operation}`, semanticArguments: { ...request, generation } };
-    if (direct) return invoke(claimed.bindingId, bound, direct, payload, signal);
+    const finish = new BackendPerfTrace(claimed.bindingId).start(computerUseIntent(request.operation).readOnly
+      ? "computer_structured_observe" : "computer_action");
+    if (direct) {
+      try { const value = await invoke(claimed.bindingId, bound, direct, payload, signal); finish(value.isError ? "error" : "ok", { screenshot_used: false }); return value; }
+      catch (error) { finish("error"); throw error; }
+    }
     const gateway = execGateway(bound);
     if (!gateway) throw new Error("This turn has no native node_repl capability or exec gateway; discover Computer Use first");
-    return invoke(claimed.bindingId, bound, gateway, { ...payload, arguments: undefined,
-      input: execGatewayProgram("mcp__node_repl__js", false, { arguments: { code } }, bound.tools.map(wireName)), gatewayResult: true }, signal);
+    try {
+      const value = await invoke(claimed.bindingId, bound, gateway, { ...payload, arguments: undefined,
+        input: execGatewayProgram("mcp__node_repl__js", false, { arguments: { code } }, bound.tools.map(wireName)), gatewayResult: true }, signal);
+      finish(value.isError ? "error" : "ok", { screenshot_used: false }); return value;
+    } catch (error) { finish("error"); throw error; }
   };
 
   server.registerTool(
@@ -1465,8 +1475,8 @@ export async function runChatGptMcpServer(options: {
       server.registerTool(name, {
         title: readOnly ? "Observe native Windows state" : "Act on an observed native Windows window",
         description: readOnly
-          ? "Finite Sky list_apps, list_windows or window_state. Read-only native UI state, no activation or screenshot. Reuses persistent module/window bindings."
-          : "Finite Sky activate_window or type_text on an exact app/window returned by native enumeration. Sky performs native safety and foreground checks. Input activates its own window; do not prepend another activation. No retries, saving, confirmation or arbitrary JavaScript.",
+          ? "Finite Sky list_apps, list_windows or window_state. Fresh native structured state, no activation or screenshot. Supply knownObservationId only when its full prior observation remains in context; unchanged evidence then returns a compact verified delta. Reuses persistent module/window bindings."
+          : "Finite Sky activate_window, type_text or activate_and_observe on an enumerated exact app/window. Sky enforces safety and foreground checks. Input activates its own window. activate_and_observe activates once then returns fresh structured evidence. No retries, saving, confirmation or arbitrary JavaScript.",
         inputSchema: { turn_token: turnTokenSchema, ...schema.shape },
         annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, idempotentHint: readOnly, openWorldHint: !readOnly },
       }, async (input: ComputerUseOperation & { turn_token: string }, extra: McpRequestExtra) => withClaimedTurn(name, input.turn_token, extra,
@@ -1820,5 +1830,7 @@ export async function runChatGptMcpServer(options: {
     );
   }
 
-  await server.connect(observeMcpToolCalls(new StdioServerTransport(), BRIDGE_TOOL_NAMES));
+  await server.connect(filterMcpAdvertisements(
+    observeMcpToolCalls(new StdioServerTransport(), BRIDGE_TOOL_NAMES), DEPRECATED_MCP_TOOLS,
+  ));
 }

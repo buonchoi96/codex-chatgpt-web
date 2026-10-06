@@ -28,6 +28,15 @@ const {
   navigationOriginForLog,
 } = require("../electron/browser-host.cjs");
 
+const retainedFixtureProbe = { url: "https://chatgpt.com/c/owned", document: 123, count: 2, hash: "a".repeat(64) };
+const retainedFixtureCookie = { name: "authjs.session-token", domain: ".chatgpt.com", path: "/", value: "test-session", httpOnly: true };
+const retainedFixtureProof = { ...retainedFixtureProbe, navigation: 0,
+  session: createHash("sha256").update(JSON.stringify([[retainedFixtureCookie.domain, "/", retainedFixtureCookie.name, retainedFixtureCookie.value]])).digest("hex") };
+function retainedFixtureContents() {
+  return { isDestroyed: () => false, executeJavaScript: async () => retainedFixtureProbe,
+    session: { cookies: { get: async () => [retainedFixtureCookie] } } };
+}
+
 test("manual prompt handoff keeps ordinary turns at one minute and compaction at two minutes", () => {
   assert.equal(MANUAL_SUBMIT_TIMEOUT_MS, 60_000);
   assert.equal(MANUAL_COMPACTION_SUBMIT_TIMEOUT_MS, 120_000);
@@ -2693,6 +2702,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
   const conversationKey = "a".repeat(64);
   const tab = {
     id: "tab-reused",
+    retainedSurfaceProof: retainedFixtureProof,
     surfaceId: "surface-reused",
     traceId: "trace_previous",
     conversationKey,
@@ -2708,6 +2718,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
       webContents: {
         isDestroyed: () => false,
         setBackgroundThrottling: (enabled) => throttling.push(enabled),
+        ...retainedFixtureContents(),
       },
     },
   };
@@ -2853,13 +2864,14 @@ test("a connector conversation is reused even when its connector proof must be r
   const retained = {
     id: "retained",
     surfaceId: "surface-retained",
+    retainedSurfaceProof: retainedFixtureProof,
     traceId: "trace_old",
     status: "ready",
     conversationKey,
     connectorIdentity: "Codex Native2",
     connectorBound: false,
     interactionMode: "automatic",
-    view: { webContents: { isDestroyed: () => true } },
+    view: { webContents: { ...retainedFixtureContents(), setBackgroundThrottling() {} } },
   };
   let created = false;
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
@@ -3031,6 +3043,7 @@ test("a completed keyed turn is retained for thirty minutes and preserves its ac
     view: { webContents: {
       isDestroyed: () => false,
       setBackgroundThrottling: (enabled) => throttling.push(enabled),
+      ...retainedFixtureContents(),
     } },
   };
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
@@ -3067,6 +3080,44 @@ test("a completed keyed turn is retained for thirty minutes and preserves its ac
   const retainedAt = tab.lastHeartbeatAt;
   BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, retainedAt + (30 * 60 * 1000) - 1);
   assert.equal(fixture.turnTabs.has(tab.id), true);
+});
+
+test("completion proof cannot retain a closed tab or overwrite a replacement helper", async () => {
+  for (const transition of ["closed", "new-owner"]) {
+    let resolveProbe;
+    const probe = new Promise(resolve => { resolveProbe = resolve; });
+    const tab = { id: "tab-race", traceId: "trace-race", helperPid: 777,
+      status: "running", conversationKey: "e".repeat(64),
+      view: { webContents: { ...retainedFixtureContents(), executeJavaScript: () => probe } } };
+    const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+      turnTabs: new Map([[tab.id, tab]]), closedTurnOwners: new Map(),
+      userCancelledTurnOwners: new Map(),
+      logger: { info() {} },
+      syncPowerSaveBlocker: () => assert.fail("stale completion must not publish state"),
+    });
+    const completion = BrowserHost.prototype.endTurn.call(fixture,
+      tab.traceId, tab.helperPid, "completed", false, undefined, true);
+    if (transition === "closed") {
+      fixture.turnTabs.delete(tab.id);
+      fixture.closedTurnOwners.set(tab.traceId, tab.helperPid);
+      fixture.userCancelledTurnOwners.set(tab.traceId, tab.helperPid);
+    } else {
+      tab.helperPid = 888;
+      tab.traceId = "replacement";
+    }
+    resolveProbe(retainedFixtureProbe);
+    if (transition === "closed") {
+      assert.deepEqual(await completion, { cancelledByUser: true });
+      assert.equal(fixture.turnTabs.size, 0);
+      assert.equal(fixture.closedTurnOwners.size, 0);
+    } else {
+      await assert.rejects(completion, /changed owner during completion verification/);
+      assert.equal(tab.helperPid, 888);
+      assert.equal(tab.traceId, "replacement");
+    }
+    assert.equal(tab.status, "running");
+    assert.equal(tab.retainedSurfaceProof, undefined);
+  }
 });
 
 test("a retained browser tab expires at thirty minutes", () => {

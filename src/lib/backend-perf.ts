@@ -12,10 +12,22 @@ const stages = new Set([
   'computer_use_cycle', 'browser_use_cycle', 'tool_cycle',
   'multipart_stage', 'multipart_acknowledgement', 'multipart_commit',
   'completion_receipt_recovery',
+  'retained_conversation_acquire', 'retained_conversation_verify', 'fresh_surface_bootstrap',
+  'fresh_surface_navigation', 'model_state_verify', 'connector_state_verify', 'followup_suffix_compile',
+  'compaction_source_interrupt', 'compaction_source_settle', 'compaction_ledger_build', 'compaction_delta_build',
+  'compaction_model_first_output', 'compaction_handoff_submit', 'compaction_handoff_accept', 'compaction_browser_cleanup',
+  'computer_observation_cache_hit', 'computer_structured_observe', 'computer_screenshot_observe',
+  'computer_action', 'computer_tool_result_to_next_action', 'network_rebind', 'response_dom_rebind', 'frontend_retry',
+  'turn_start', 'turn_complete', 'runtime_start', 'runtime_attach', 'runtime_reconnect',
+  'helper_reconnect', 'page_rebind', 'response_rebind', 'assistant_rebind',
+  'compaction_prepare', 'compaction_request', 'compaction_summary', 'compaction_apply', 'compaction_resume',
+  'response_observation', 'tool_boundary_observation', 'structured_observation',
+  'screenshot_capture', 'screenshot_encoding', 'model_decision', 'broker_result_ready', 'mcp_call', 'mcp_reply',
 ]);
 export type BackendPerfMetrics = {
   bytes?: number; count?: number; cache_hit?: boolean; screenshot_used?: boolean;
   queue_ms?: number; dispatch_ms?: number; decision_ms?: number;
+  tokens?: number; full_scan?: boolean; delta_scan?: boolean; model_decision_ms?: number;
 };
 export type BackendPerfEvent = BackendPerfMetrics & {
   event: 'perf.stage'; trace: string; stage: string;
@@ -72,13 +84,18 @@ export class BackendPerfTrace {
       if (!Number.isFinite(duration) || duration < 0) return;
       const event: BackendPerfEvent = { event: 'perf.stage', trace: this.trace, stage,
         duration_ms: duration, outcome: outcome === 'error' ? 'error' : 'ok' };
-      for (const key of ['bytes', 'count', 'queue_ms', 'dispatch_ms', 'decision_ms'] as const) {
-        const value = metrics[key];
-        if (typeof value === 'number' && Number.isFinite(value) && value >= 0) event[key] = value;
-      }
-      for (const key of ['cache_hit', 'screenshot_used'] as const) {
-        if (typeof metrics[key] === 'boolean') event[key] = metrics[key];
-      }
+      // Read data properties only. Hostile getters or malformed metrics cannot affect a task.
+      try { if (metrics && typeof metrics === 'object') {
+        for (const key of ['bytes', 'count', 'queue_ms', 'dispatch_ms', 'decision_ms', 'model_decision_ms', 'tokens'] as const) {
+          const value = Object.getOwnPropertyDescriptor(metrics, key)?.value;
+          if (typeof value === 'number' && Number.isFinite(value) && value >= 0
+            && (key !== 'tokens' || Number.isSafeInteger(value))) event[key] = value;
+        }
+        for (const key of ['cache_hit', 'screenshot_used', 'full_scan', 'delta_scan'] as const) {
+          const value = Object.getOwnPropertyDescriptor(metrics, key)?.value;
+          if (typeof value === 'boolean') event[key] = value;
+        }
+      } } catch { /* Even proxy traps must not interfere with task execution. */ }
       try { this.sink?.(event); } catch { /* Profiling cannot fail a task. */ }
     };
   }

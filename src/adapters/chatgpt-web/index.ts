@@ -68,6 +68,10 @@ import {
   retainedActiveTurnRecoveryRequest,
   retainedConversationResumeRequest,
 } from "./conversation-key";
+import { RetainedConversationProofStore } from "./retained-followup-proof";
+// responseRequest constructs an adapter per native round; proof must survive those factories.
+// Keys include provider/profile, thread, model, effort and compaction epoch; memory loss fails closed.
+const retainedFollowupProofs = new RetainedConversationProofStore();
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
   const configured = provider.chatgptWeb?.brokerSocketPath?.trim();
@@ -677,23 +681,26 @@ export function createChatGptWebAdapter(
       && !parsed._compactionRequest
       && !freshConversationPerTurn
       && Boolean(retainedLauncherDescriptor);
-    const checkpointInput = captureLunaCheckpoint
+    const inputPerf = new BackendPerfTrace(traceId);
+    const compactionInput = parsed._compactionRequest
+      ? inputPerf.measure("compaction_delta_build", () => enhancedRecoveryCheckpointStore.prepareCompactionInput(parsed))
+      : undefined;
+    const checkpointInput = compactionInput
+      ? { parsed: compactionInput.parsed, applied: compactionInput.mode === "delta", reason: compactionInput.reason }
+      : captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
       : captureEnhancedRecoveryCheckpoint
         ? enhancedRecoveryCheckpointStore.apply(parsed)
         : { parsed, applied: false };
-    // Ordinary paid-model retention follows the thread/compaction epoch. Luna stays fresh across
-    // native turns, but gets a turn-scoped recovery identity so a transient browser failure after
-    // extensive tool work can reuse the exact active Temporary Chat instead of replaying a huge
-    // current-turn transcript into another browser surface.
+    // All healthy tool-capable turns, including Luna, share the exact thread/model/epoch lease.
+    // The canonical ancestry proof below is independent of durable fresh-surface checkpoints.
     const retainedConversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
-      && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
       && mode.localTools
       && retainedLauncherDescriptor
-      ? chatGptConversationKey(checkpointInput.parsed, executionNamespace)
+      ? chatGptConversationKey(parsed, executionNamespace)
       : undefined;
-    const lunaRecoveryConversationKey = !parsed._compactionRequest
+    const lunaRecoveryConversationKey = !retainedConversationKey && !parsed._compactionRequest
       && !freshConversationPerTurn
       && parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
       && mode.localTools
@@ -702,11 +709,13 @@ export function createChatGptWebAdapter(
       : undefined;
     const conversationKey = retainedConversationKey ?? lunaRecoveryConversationKey;
     const lunaActiveTurnRecovery = lunaRecoveryConversationKey !== undefined;
-    // A healthy retained paid-model page already owns its full browser history, so send only
+    // A healthy retained page already owns its full browser history, so send only
     // the ordinary canonical suffix. The durable checkpoint is consumed only when a fresh page is
     // actually prepared, where checkpointInput.parsed replaces old assistant/tool transcript.
     const resumeInput = retainedConversationKey
-      ? retainedConversationResumeRequest(parsed)
+      ? manualRequest
+        ? retainedConversationResumeRequest(parsed)
+        : inputPerf.measure("retained_conversation_verify", () => retainedFollowupProofs.resume(retainedConversationKey, parsed))
       : lunaActiveTurnRecovery
         ? retainedActiveTurnRecoveryRequest(checkpointInput.parsed)
         : undefined;
@@ -738,6 +747,7 @@ export function createChatGptWebAdapter(
     ) => {
       const perf = new BackendPerfTrace(traceId);
       const finishCompile = perf.start("prompt_compilation");
+      const finishSuffix = input === resumeInput ? perf.start("followup_suffix_compile") : () => {};
       try {
       let compiled = compileChatGptWebPrompt(
         input,
@@ -748,7 +758,7 @@ export function createChatGptWebAdapter(
       // Recovery summaries may reduce retransmission cost, but they must never change the physical
       // transport chosen for canonical archive-scale history. A fresh surface must receive the same
       // complete context.txt and historical images that the original Codex context requires.
-      if (checkpointInput.applied && input === checkpointInput.parsed && !activeTurnRecovery) {
+      if (!parsed._compactionRequest && checkpointInput.applied && input === checkpointInput.parsed && !activeTurnRecovery) {
         const canonicalCompiled = compileChatGptWebPrompt(
           parsed,
           turnCapabilities,
@@ -763,8 +773,9 @@ export function createChatGptWebAdapter(
         }
       }
       finishCompile();
+      finishSuffix("ok", { count: input.context.messages.length });
       return compiled;
-      } catch (error) { finishCompile("error"); throw error; }
+      } catch (error) { finishCompile("error"); finishSuffix("error"); throw error; }
     };
     if (captureLunaCheckpoint) {
       console.info(
@@ -785,6 +796,9 @@ export function createChatGptWebAdapter(
       capturedCheckpoint = captured;
     };
     const finalizeCheckpoint = (browser: Promise<string>): Promise<string> => browser.then(answer => {
+      // Compaction canonicalization happens at the response boundary after verifying the
+      // browser's unmodified Markdown stream (or in the structured fallback owner).
+      if (parsed._compactionRequest) return answer;
       if (!captureLunaCheckpoint) return answer;
       if (checkpointCaptureError) throw checkpointCaptureError;
       if (capturedCheckpoint) lunaCheckpointStore.commit(parsed, capturedCheckpoint, answer);
@@ -1175,7 +1189,7 @@ export function createChatGptWebAdapter(
         const structuredOutputValidator = parsed._compactionRequest
           ? undefined
           : createChatGptStructuredOutputValidator(parsed.options.outputFormat);
-        const bufferStructuredOutput = structuredOutputValidator !== undefined;
+        const bufferStructuredOutput = structuredOutputValidator !== undefined || parsed._compactionRequest === true;
         const retryKey = `${executionNamespace}:${chatGptTurnRetryKey(parsed)}`;
         const exhaustedRetry = chatGptWebTurnRetryPolicy.exhaustedError(retryKey);
         if (exhaustedRetry) {
@@ -1593,15 +1607,20 @@ export function createChatGptWebAdapter(
                 throw new Error("ChatGPT browser Markdown stream did not reproduce the completed answer");
               }
               structuredOutputValidator?.(settled.answer);
+              const finalAnswer = parsed._compactionRequest
+                ? canonicalizeCompactionHandoff(parsed, settled.answer) : settled.answer;
+              if (!manualRequest && session.runtime.conversationKey && !parsed._compactionRequest) {
+                retainedFollowupProofs.commit(session.runtime.conversationKey, parsed, settled.answer);
+              }
               if (bufferStructuredOutput) {
-                emitRoundBatch(buffer => emitTextDeltas([settled.answer], buffer));
+                emitRoundBatch(buffer => emitTextDeltas([finalAnswer], buffer));
               }
               const reasoning = session.roundReasoning(roundKey);
               session.setFinalReasoning(reasoning);
               session.setFinalEvents(session.roundEvents(roundKey));
               emitRoundBatch(buffer => emitBrowserCompletion(
-                settled,
-                estimateChatGptWebUsage(currentUsageInput(parsed), { answer: settled.answer, reasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
+                { ...settled, answer: finalAnswer },
+                estimateChatGptWebUsage(currentUsageInput(parsed), { answer: finalAnswer, reasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                 buffer,
               ));
               session.completeRound(roundKey);
@@ -1775,10 +1794,15 @@ export function createChatGptWebAdapter(
                 if (nativeOutputConflict) {
                   console.warn(`[chatgpt-web] native_output_conflict_fallback trace=${traceId}`);
                 }
-                const finalAnswer = tunneledFinal !== undefined && !nativeOutputConflict
+                const browserAnswer = tunneledFinal !== undefined && !nativeOutputConflict
                   ? tunneledFinal
                   : completedOutcome.answer;
+                const finalAnswer = parsed._compactionRequest
+                  ? canonicalizeCompactionHandoff(parsed, browserAnswer) : browserAnswer;
                 structuredOutputValidator?.(finalAnswer);
+                if (!manualRequest && session.runtime.conversationKey && !parsed._compactionRequest) {
+                  retainedFollowupProofs.commit(session.runtime.conversationKey, parsed, finalAnswer);
+                }
                 if (observerNativeOutputTunnel) {
                   if (session.nativeOutputAfterSequence() === 0 && roundReasoning.length > 0) {
                     emitRoundBatch(buffer => emitTraceEvents(

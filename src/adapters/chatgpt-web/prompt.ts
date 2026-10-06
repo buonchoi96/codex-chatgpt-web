@@ -735,7 +735,6 @@ export function compileChatGptWebPrompt(
       ...(!manualControl ? [
         "For Full Harness execution, call codex_turn_complete directly when it is callable on the current connector surface. If the current connector reports codex_turn_complete is not callable or missing, use codex_tool_call with wire_name codex.control.turn_complete, turn_token at the top level, and receipt fields inside arguments. Do not emit a final answer until the accepted receipt has remaining_actionable_requirements empty. Do not search the outer Codex tool registry for the receipt.",
       ] : []),
-      "Continue using the available tools until the requested work is complete and verified.",
       ...(!manualControl ? [
         "Write the user-facing final answer only after the last required tool result has settled, codex_turn_complete or its codex.control.turn_complete stable-ABI fallback has accepted the full-task receipt, and the full-request completion check above passes. Do not call another work tool after beginning that final answer.",
       ] : [

@@ -80,6 +80,7 @@ import {
   LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS,
   LAUNCHER_TURN_HEARTBEAT_TIMEOUT_MS,
   notifyLauncherTurn,
+  releaseLauncherRetainedConversation,
 } from "../../launcher-browser-host";
 import {
   resolvedChatGptWebContextWindow,
@@ -3055,7 +3056,13 @@ export class ChatGptBrowserWorker {
   ): Promise<T> {
     chatGptSuspensionClock.start();
     const startedAt = performance.now();
-    const finishPerf = new BackendPerfTrace(traceId).start(stage);
+    const perf = new BackendPerfTrace(traceId);
+    const finishPerf = perf.start(stage);
+    const phase = stage.startsWith("response_page_rebind_") ? "network_rebind"
+      : stage === "temporary_chat_preparation" ? "fresh_surface_navigation"
+      : stage === "effort_selection" ? "model_state_verify"
+      : stage === "prompt_attachment" ? "connector_state_verify" : undefined;
+    const finishPhase = phase ? perf.start(phase) : () => {};
     const suspendedAtStart = suspensionClock.suspendedMs();
     console.info(`[chatgpt-web] browser turn ${traceId} stage=${stage} started`);
     const controller = new AbortController();
@@ -3082,10 +3089,12 @@ export class ChatGptBrowserWorker {
       actionPromise = action(controller.signal);
       const value = await Promise.race([actionPromise, timeout]);
       finishPerf();
+      finishPhase();
       console.info(`[chatgpt-web] browser turn ${traceId} stage=${stage} completed durationMs=${Math.round(performance.now() - startedAt)}`);
       return value;
     } catch (error) {
       finishPerf("error");
+      finishPhase("error");
       let surfacedError = error;
       if (stageTimedOut && awaitAbortedActionSettlement && actionPromise) {
         try {
@@ -5587,6 +5596,13 @@ export class ChatGptBrowserWorker {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if (this.config.browserHost !== "launcher") return this.runBrowserTurn(turn);
 
+    // No canonical suffix proof means the idle epoch must be retired before acquiring full context.
+    // Running owners are protected by the launcher's release endpoint and never discarded here.
+    if (turn.conversationKey && !turn.prepareResume && !turn.requireRetainedConversation) {
+      await releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey);
+    }
+
+    const acquirePerf = new BackendPerfTrace(turn.traceId).start("retained_conversation_acquire");
     const lease = await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
       phase: "start",
       traceId: turn.traceId,
@@ -5598,6 +5614,7 @@ export class ChatGptBrowserWorker {
         : {}),
       ...(turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
     }, undefined, turn.abortSignal).catch(error => {
+      acquirePerf("error");
       if (error instanceof LauncherBrowserTurnCancelledError) throw chatGptBrowserTabClosedError();
       if (error instanceof LauncherRetainedConversationUnavailableError) {
         throw chatGptRetainedConversationUnavailableError();
@@ -5618,6 +5635,7 @@ export class ChatGptBrowserWorker {
       }
       throw error;
     });
+    acquirePerf("ok", { cache_hit: lease.reused === true });
     const surfaceId = lease.surfaceId;
     const reused = lease.reused === true;
     const reuseConnector = reused && lease.connectorBound === true;

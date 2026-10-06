@@ -80,7 +80,7 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("Only stop before every actionable explicit requirement is complete when a genuine external blocker prevents further execution");
   expect(transportOnly).toContain("call codex_turn_complete directly when it is callable on the current connector surface");
   expect(transportOnly).toContain("remaining_actionable_requirements empty");
-  expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
+  expect(transportOnly).toContain("If any actionable explicit requirement remains unfinished, continue using the available tools");
   expect(transportOnly).toContain("codex_turn_complete or its codex.control.turn_complete stable-ABI fallback has accepted the full-task receipt");
   expect(transportOnly).toContain(`<codex_native_turn_json>\n${JSON.stringify({ turn_token: token })}\n</codex_native_turn_json>`);
   expect(transportOnly).toContain("The task context is complete. Use the exact turn_token from <codex_native_turn_json> unchanged for every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.");

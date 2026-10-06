@@ -12,6 +12,7 @@ const { processRunning } = require("./process-tree.cjs");
 const { validatePasskeyLoginState } = require("./passkey-login-state.cjs");
 const { configureChatGptAnnouncementDismissal } = require("./browser-announcements.cjs");
 const { readChatGptAuthSession } = require("./chatgpt-auth-session.cjs");
+const { captureRetainedSurfaceProof, retainedSurfaceProofMatches } = require("./retained-surface-proof.cjs");
 const {
   refreshTurnLeasesAfterSuspension,
   shouldBlockSleepForTurns,
@@ -831,7 +832,7 @@ class BrowserHost {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        spellcheck: true,
+        spellcheck: false,
         backgroundThrottling: false,
       },
     });
@@ -1104,6 +1105,7 @@ class BrowserHost {
       if (!mainFrame) return;
       tab.url = url;
       tab.loading = true;
+      tab.navigationGeneration = (tab.navigationGeneration ?? 0) + 1;
       if (!inPlace) {
         tab.rendererReady = false;
         tab.deviceEmulationDirty = true;
@@ -2716,8 +2718,21 @@ class BrowserHost {
     if (retainedMatches.length > 1) {
       throw new Error(`ChatGPT retained conversation ${conversationKey} owns multiple browser tabs`);
     }
-    const exactRetained = retainedMatches[0];
-    if (sameTrace?.status === "ready" && sameTrace !== exactRetained) {
+    let exactRetained = retainedMatches[0];
+    if (exactRetained && exactRetained.retainedTerminalState !== "failed") {
+      const currentProof = await captureRetainedSurfaceProof(exactRetained);
+      signal?.throwIfAborted();
+      // Proof capture yields to other lease/release requests; never overwrite a new owner.
+      if (this.turnTabs.get(exactRetained.id) !== exactRetained || exactRetained.status !== "ready") {
+        throw new Error("ChatGPT retained conversation changed owner during verification");
+      }
+      if (!retainedSurfaceProofMatches(exactRetained.retainedSurfaceProof, currentProof)) {
+        this.logger.info("browser.retained_proof_invalidated", { tabId: exactRetained.id, reason: "surface_or_session_changed" });
+        this.removeTurnTab(exactRetained, false);
+        exactRetained = undefined;
+      }
+    }
+    if (sameTrace?.status === "ready" && this.turnTabs.has(sameTrace.id) && sameTrace !== exactRetained) {
       throw new Error(`ChatGPT browser turn ${traceId} is retained under different conversation metadata`);
     }
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
@@ -2808,9 +2823,25 @@ class BrowserHost {
     const cancelledByUser = this.userCancelledTurnOwners.get(traceId) === helperPid;
     const authenticationRequired = tab.authenticationRequired === true;
     if (authenticationRequired && status === "completed") status = "failed";
-    const retainRequested = retain
+    let retainRequested = retain
       && Boolean(tab.conversationKey)
       && (!tab.connectorIdentity || status !== "completed" || connectorBound);
+    if (retainRequested && status === "completed") {
+      const proof = await captureRetainedSurfaceProof(tab);
+      // Closing a tab or replacing its helper while the renderer is being inspected
+      // must not let the old completion publish a retained lease for the new owner.
+      if (this.turnTabs.get(tab.id) !== tab) {
+        const cancelled = this.userCancelledTurnOwners.get(traceId) === helperPid;
+        if (this.closedTurnOwners.get(traceId) === helperPid) this.closedTurnOwners.delete(traceId);
+        return { cancelledByUser: cancelled };
+      }
+      if (tab.traceId !== traceId || tab.helperPid !== helperPid || tab.status !== "running") {
+        throw new Error("ChatGPT browser turn changed owner during completion verification");
+      }
+      tab.retainedSurfaceProof = proof;
+      retainRequested = Boolean(proof);
+    }
+    tab.retainedTerminalState = status;
     // A failed physical response may be retained only when the worker explicitly requested bounded
     // same-turn recovery. Connector proof is deliberately dropped on failure; the replacement
     // helper must reselect Codex Native2 before sending the small recovery prompt.
