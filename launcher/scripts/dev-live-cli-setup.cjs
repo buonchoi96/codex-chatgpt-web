@@ -6,8 +6,10 @@ const {
   CLI_CONNECTOR_NAME,
   CLI_TUNNEL_ALIAS,
   cliLaneEnvironment,
+  mirrorCliCodexToolingConfig,
   normalizeCliLaneConfig,
   readLaneConfig,
+  resolveCliToolingSourceCodexHome,
   resolveLiveLanePaths,
   validateCliLaneConfig,
   writeJsonFileAtomic,
@@ -22,6 +24,7 @@ const bun = process.env.CODEX_WEB_GPT_BUN || process.execPath;
 // Debug/status commands deliberately set CODEX_HOME and CODEX_CHATGPT_WEB_HOME to the CLI lane.
 // Those per-command overrides must not redefine what setup considers the Desktop/default Codex
 // home, otherwise rerunning setup from the same PowerShell session falsely reports a collision.
+const sourceCodexHome = resolveCliToolingSourceCodexHome(process.env);
 const setupEnvironment = { ...process.env };
 delete setupEnvironment.CODEX_HOME;
 delete setupEnvironment.CODEX_CHATGPT_WEB_HOME;
@@ -31,6 +34,38 @@ const setupMarker = path.join(paths.cliHome, "runtime", "setup-in-progress");
 function fail(message) {
   process.stderr.write(`[dev-live-cli-setup] ${message}\n`);
   process.exitCode = 1;
+}
+
+function mirrorCliToolingConfig() {
+  if (process.env.CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING === "0") {
+    process.stdout.write("[dev-live-cli-setup] Codex tooling mirror disabled by CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING=0\n");
+    return;
+  }
+  if (path.resolve(sourceCodexHome).toLowerCase() === path.resolve(paths.cliCodexHome).toLowerCase()) {
+    throw new Error("DEV live CLI tooling source CODEX_HOME must differ from the isolated CLI Codex home");
+  }
+  const sourceConfigPath = path.join(sourceCodexHome, "config.toml");
+  if (!fs.existsSync(sourceConfigPath)) {
+    process.stdout.write(`[dev-live-cli-setup] no source Codex config at ${sourceConfigPath}; leaving CLI tooling unchanged\n`);
+    return;
+  }
+  const targetConfigPath = path.join(paths.cliCodexHome, "config.toml");
+  const sourceText = fs.readFileSync(sourceConfigPath, "utf8");
+  const targetText = fs.existsSync(targetConfigPath) ? fs.readFileSync(targetConfigPath, "utf8") : "";
+  const mirrored = mirrorCliCodexToolingConfig(sourceText, targetText, paths.cliCodexHome);
+  if (!mirrored.changed) {
+    process.stdout.write(
+      `[dev-live-cli-setup] CLI Codex tooling already matches ${sourceCodexHome} `
+      + `(tables=${mirrored.mirroredTables.length}, notify=${mirrored.mirroredNotify})\n`,
+    );
+    return;
+  }
+  fs.mkdirSync(paths.cliCodexHome, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(targetConfigPath, mirrored.text, { encoding: "utf8", mode: 0o600 });
+  process.stdout.write(
+    `[dev-live-cli-setup] mirrored CLI Computer/Browser tooling from ${sourceCodexHome} `
+    + `(tables=${mirrored.mirroredTables.length}, notify=${mirrored.mirroredNotify})\n`,
+  );
 }
 
 async function health(config, timeoutMs = 1_500) {
@@ -226,12 +261,14 @@ async function main() {
     const normalized = normalizeCliLaneConfig(configured);
     writeJsonFileAtomic(paths.cliConfigPath, normalized);
     validateCliLaneConfig(normalized, desktopConfig, paths);
+    mirrorCliToolingConfig();
 
     process.stdout.write(`\nDEV live CLI lane configured.\n`);
     process.stdout.write(`  Connector: ${CLI_CONNECTOR_NAME}\n`);
     process.stdout.write(`  Tunnel alias/profile: ${CLI_TUNNEL_ALIAS}\n`);
     process.stdout.write(`  Home: ${paths.cliHome}\n`);
     process.stdout.write(`  Codex home: ${paths.cliCodexHome}\n`);
+    process.stdout.write(`  Tooling source Codex home: ${sourceCodexHome}\n`);
     process.stdout.write("Create/attach the ChatGPT connector above to the CLI lane's dedicated Tunnel ID, then keep dev:live running.\n");
     process.stdout.write("Run CLI tests with: bun run dev:codex -- <codex arguments>\n");
     process.stdout.write("The CLI lane has an isolated CODEX_HOME; if Codex asks for authentication, run bun run dev:codex -- login once.\n");

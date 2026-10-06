@@ -7,6 +7,12 @@ const CLI_TUNNEL_ALIAS = "codex-chatgpt-web-live-cli";
 const DEFAULT_LIVE_HOME_NAME = ".codex-chatgpt-web-live";
 const DEFAULT_CLI_LANE_DIR = "cli-lane";
 
+const CLI_TOOLING_TABLE_PATTERNS = [
+  /^marketplaces\.openai-bundled$/,
+  /^plugins\."(?:browser|chrome|computer-use|unified-computer-use)@openai-bundled"$/,
+  /^mcp_servers\.(?:node_repl|cua_repl|playwright)(?:\.env)?$/,
+];
+
 function resolveUserPath(value, homeDir = os.homedir()) {
   if (value === "~") return homeDir;
   if (value.startsWith("~/") || value.startsWith("~\\")) return path.resolve(homeDir, value.slice(2));
@@ -18,6 +24,112 @@ function samePath(left, right) {
     ? path.resolve(value).toLowerCase()
     : path.resolve(value);
   return normalize(left) === normalize(right);
+}
+
+function resolveCliToolingSourceCodexHome(environment = process.env, homeDir = os.homedir()) {
+  return resolveUserPath(
+    environment.CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME?.trim()
+      || environment.CODEX_HOME?.trim()
+      || path.join(homeDir, ".codex"),
+    homeDir,
+  );
+}
+
+function tomlLiteralString(value) {
+  return value.includes("'")
+    ? JSON.stringify(value)
+    : `'${value}'`;
+}
+
+function parseTomlLayout(text) {
+  const lineEnding = text.includes("\r\n") ? "\r\n" : "\n";
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const trailingNewline = normalized.endsWith("\n");
+  const lines = normalized.split("\n");
+  if (trailingNewline) lines.pop();
+
+  const headerIndexes = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*\[[^\[\]]+\]\s*(?:#.*)?$/.test(lines[index])) headerIndexes.push(index);
+  }
+  const firstHeader = headerIndexes[0] ?? lines.length;
+  const root = lines.slice(0, firstHeader);
+  const tables = [];
+  for (let index = 0; index < headerIndexes.length; index += 1) {
+    const start = headerIndexes[index];
+    const end = headerIndexes[index + 1] ?? lines.length;
+    const match = /^\s*\[([^\[\]]+)\]/.exec(lines[start]);
+    if (!match) continue;
+    tables.push({ name: match[1].trim(), lines: lines.slice(start, end) });
+  }
+  return { root, tables, lineEnding, trailingNewline };
+}
+
+function serializeTomlLayout(layout) {
+  const lines = [...layout.root];
+  for (const table of layout.tables) lines.push(...table.lines);
+  const text = lines.join(layout.lineEnding);
+  return layout.trailingNewline || lines.length === 0 ? `${text}${layout.lineEnding}` : text;
+}
+
+function rewriteMirroredCodexHome(lines, cliCodexHome) {
+  return lines.map(line => /^\s*CODEX_HOME\s*=/.test(line)
+    ? `CODEX_HOME = ${tomlLiteralString(cliCodexHome)}`
+    : line);
+}
+
+function mirrorCliCodexToolingConfig(sourceText, targetText, cliCodexHome) {
+  const source = parseTomlLayout(sourceText);
+  const target = parseTomlLayout(targetText);
+  let changed = false;
+  let mirroredNotify = false;
+  const sourceNotify = source.root.find(line => /^\s*notify\s*=/.test(line) && /codex-computer-use/i.test(line));
+  if (sourceNotify) {
+    const targetNotifyIndex = target.root.findIndex(line => /^\s*notify\s*=/.test(line));
+    if (targetNotifyIndex >= 0) {
+      if (target.root[targetNotifyIndex] !== sourceNotify) {
+        target.root[targetNotifyIndex] = sourceNotify;
+        changed = true;
+      }
+    } else {
+      let insertAt = target.root.length;
+      while (insertAt > 0 && target.root[insertAt - 1].trim() === "") insertAt -= 1;
+      target.root.splice(insertAt, 0, sourceNotify);
+      changed = true;
+    }
+    mirroredNotify = true;
+  }
+
+  const selected = source.tables.filter(table => CLI_TOOLING_TABLE_PATTERNS.some(pattern => pattern.test(table.name)));
+  const mirroredTables = [];
+  for (const sourceTable of selected) {
+    const lines = rewriteMirroredCodexHome(sourceTable.lines, cliCodexHome);
+    const existingIndex = target.tables.findIndex(table => table.name === sourceTable.name);
+    if (existingIndex >= 0) {
+      const current = target.tables[existingIndex].lines;
+      if (current.join("\n") !== lines.join("\n")) {
+        target.tables[existingIndex] = { name: sourceTable.name, lines };
+        changed = true;
+      }
+    } else {
+      if (target.root.length > 0 && target.tables.length === 0 && target.root[target.root.length - 1].trim() !== "") {
+        target.root.push("");
+      } else if (target.tables.length > 0) {
+        const previous = target.tables[target.tables.length - 1].lines;
+        if (previous.length > 0 && previous[previous.length - 1].trim() !== "") previous.push("");
+      }
+      target.tables.push({ name: sourceTable.name, lines });
+      changed = true;
+    }
+    mirroredTables.push(sourceTable.name);
+  }
+
+  return {
+    text: serializeTomlLayout(target),
+    changed,
+    mirroredNotify,
+    mirroredTables,
+  };
 }
 
 function resolveLiveLanePaths(environment = process.env, homeDir = os.homedir()) {
@@ -182,8 +294,10 @@ module.exports = {
   CLI_TUNNEL_ALIAS,
   activeAutomaticTunnel,
   cliLaneEnvironment,
+  mirrorCliCodexToolingConfig,
   normalizeCliLaneConfig,
   readLaneConfig,
+  resolveCliToolingSourceCodexHome,
   resolveLiveLanePaths,
   samePath,
   validateCliLaneConfig,

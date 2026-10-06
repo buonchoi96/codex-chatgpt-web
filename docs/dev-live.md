@@ -68,6 +68,15 @@ independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop 
    Do not use a plain inherited `codex` process for dual-lane tests; the wrapper pins the CLI
    process to `cli-lane/codex-home`.
 
+   CLI setup also mirrors only the ordinary Codex home's Computer/Browser tooling surface into the
+   isolated CLI `config.toml`: the `codex-computer-use` notify hook, the OpenAI bundled
+   marketplace, Browser/Chrome/Computer Use plugin tables, and `node_repl`/`cua_repl`/Playwright
+   MCP tables. The isolated Web route, auth/session files, tunnel, broker, and unrelated third-party
+   MCPs are not copied. Any mirrored MCP `CODEX_HOME` environment entry is rewritten to the
+   isolated CLI Codex home. By default the source is the `CODEX_HOME` inherited by
+   `dev:live:cli-setup`; override it with `CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME`, or disable
+   the mirror with `CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING=0`.
+
    For a session/exec without an explicit `-m/--model` or `--profile`, the wrapper defaults to
    `chatgpt-web/gpt-5.6-sol` (or `chatgpt-web/gpt-5.6-luna` when the CLI lane account does not
    expose Sol). It also supplies the route-compatible reasoning effort when
@@ -154,6 +163,9 @@ Useful overrides:
 
 - `CODEX_WEB_GPT_LIVE_CLI_HOME`: CLI lane state directory.
 - `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`: isolated Codex home used by `dev:codex`.
+- `CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME`: ordinary Codex home whose Computer/Browser tooling
+  tables are selectively mirrored during `dev:live:cli-setup`.
+- `CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING=0`: opt out of that tooling mirror.
 - `CODEX_WEB_GPT_LIVE_CLI_PORT`: CLI Responses port used during first setup.
 - `CODEX_WEB_GPT_LIVE_CLI_TUNNEL_ID`: optional non-interactive second Tunnel ID.
 - `CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID`: Platform organization ID for an organization-scoped

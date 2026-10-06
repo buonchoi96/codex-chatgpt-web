@@ -7,7 +7,9 @@ const {
   CLI_CONNECTOR_NAME,
   CLI_TUNNEL_ALIAS,
   cliLaneEnvironment,
+  mirrorCliCodexToolingConfig,
   normalizeCliLaneConfig,
+  resolveCliToolingSourceCodexHome,
   resolveLiveLanePaths,
   validateCliLaneConfig,
 } = require("../scripts/dev-live-lanes.cjs");
@@ -53,6 +55,92 @@ test("DEV live resolves an isolated CLI home and Codex home", () => {
   assert.equal(environment.CODEX_HOME, paths.cliCodexHome);
   assert.equal(environment.CODEX_CHATGPT_WEB_HOME, paths.cliHome);
   assert.equal(environment.CODEX_WEB_GPT_LIVE_LANE, "cli");
+});
+
+test("DEV live mirrors Computer/Browser tooling without overwriting the isolated Web route", () => {
+  const source = [
+    'notify = [ "C:\\\\runtime\\\\codex-computer-use.exe", "turn-ended" ]',
+    'openai_base_url = "http://127.0.0.1:17841/v1"',
+    "",
+    "[marketplaces.openai-bundled]",
+    "source_type = \"local\"",
+    "source = 'E:\\Codex\\marketplace'",
+    "",
+    '[plugins."browser@openai-bundled"]',
+    "enabled = true",
+    "",
+    '[plugins."unified-computer-use@openai-bundled"]',
+    "enabled = true",
+    "",
+    '[plugins."computer-use@openai-bundled"]',
+    "enabled = true",
+    "",
+    "[mcp_servers.node_repl]",
+    "command = 'C:\\runtime\\node_repl.exe'",
+    "",
+    "[mcp_servers.node_repl.env]",
+    "CODEX_HOME = 'E:\\Codex'",
+    "SKY_CUA_NATIVE_PIPE = \"1\"",
+    "",
+    "[mcp_servers.playwright]",
+    'command = "npx"',
+    "",
+    "[mcp_servers.unrelated]",
+    'command = "do-not-copy"',
+    "",
+  ].join("\r\n");
+  const target = [
+    'openai_base_url = "http://127.0.0.1:17842/v1"',
+    "",
+    "[features]",
+    "multi_agent = true",
+    "",
+    "[mcp_servers.keep_me]",
+    'command = "keep"',
+    "",
+  ].join("\r\n");
+
+  const merged = mirrorCliCodexToolingConfig(
+    source,
+    target,
+    "C:\\Users\\dev\\.codex-chatgpt-web-live\\cli-lane\\codex-home",
+  );
+  assert.equal(merged.changed, true);
+  assert.equal(merged.mirroredNotify, true);
+  assert.deepEqual(merged.mirroredTables, [
+    "marketplaces.openai-bundled",
+    'plugins."browser@openai-bundled"',
+    'plugins."unified-computer-use@openai-bundled"',
+    'plugins."computer-use@openai-bundled"',
+    "mcp_servers.node_repl",
+    "mcp_servers.node_repl.env",
+    "mcp_servers.playwright",
+  ]);
+  assert.match(merged.text, /openai_base_url = "http:\/\/127\.0\.0\.1:17842\/v1"/);
+  assert.doesNotMatch(merged.text, /17841\/v1/);
+  assert.match(merged.text, /codex-computer-use\.exe/);
+  assert.match(merged.text, /\[mcp_servers\.keep_me\]/);
+  assert.doesNotMatch(merged.text, /\[mcp_servers\.unrelated\]/);
+  assert.match(merged.text, /CODEX_HOME = 'C:\\Users\\dev\\\.codex-chatgpt-web-live\\cli-lane\\codex-home'/);
+
+  const second = mirrorCliCodexToolingConfig(source, merged.text, "C:\\Users\\dev\\.codex-chatgpt-web-live\\cli-lane\\codex-home");
+  assert.equal(second.changed, false);
+  assert.equal(second.text, merged.text);
+});
+
+test("DEV live tooling source follows the ordinary Codex home and supports an explicit override", () => {
+  const home = path.join(os.tmpdir(), "dev-live-tooling-source");
+  assert.equal(
+    resolveCliToolingSourceCodexHome({ CODEX_HOME: path.join(home, "ordinary") }, home),
+    path.join(home, "ordinary"),
+  );
+  assert.equal(
+    resolveCliToolingSourceCodexHome({
+      CODEX_HOME: path.join(home, "ordinary"),
+      CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME: path.join(home, "override"),
+    }, home),
+    path.join(home, "override"),
+  );
 });
 
 test("DEV live normalizes the CLI connector and tunnel identity", () => {
@@ -138,8 +226,10 @@ test("CLI setup ignores per-command CODEX_HOME overrides from CLI diagnostics", 
   const launcherRoot = path.resolve(__dirname, "..");
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-cli-setup.cjs"), "utf8");
   assert.match(source, /const setupEnvironment = \{ \.\.\.process\.env \}/);
+  assert.match(source, /const sourceCodexHome = resolveCliToolingSourceCodexHome\(process\.env\)/);
   assert.match(source, /delete setupEnvironment\.CODEX_HOME/);
   assert.match(source, /delete setupEnvironment\.CODEX_CHATGPT_WEB_HOME/);
+  assert.match(source, /mirrorCliToolingConfig\(\)/);
   assert.match(source, /resolveLiveLanePaths\(setupEnvironment\)/);
 });
 
