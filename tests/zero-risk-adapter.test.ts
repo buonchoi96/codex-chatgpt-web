@@ -565,7 +565,9 @@ test("Zero Risk compaction uses a fresh manual checkpoint without leaking guide 
     expect(manualCompaction).toBeTrue();
     expect(deltas.every(event => event.phase === "final_answer")).toBeTrue();
     expect(deltas.map(event => event.text).join(""))
-      .toContain("Zero Risk checkpoint summary\n\nCODEX_LATEST_USER_PROMPT_JSON");
+      .toStartWith("Zero Risk checkpoint summary\n\nCODEX_COMPACTION_LEDGER_V2\n");
+    expect(deltas.map(event => event.text).join(""))
+      .toContain("CODEX_LATEST_USER_PROMPT_JSON\n\"Inspect the Zero Risk transport.\"");
     expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
   } finally {
     chatGptTurnSessions.clear();

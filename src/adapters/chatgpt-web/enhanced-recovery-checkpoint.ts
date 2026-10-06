@@ -1,10 +1,14 @@
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFile, getConfigDir, stripUtf8Bom } from "../../config";
 import { estimateTokens } from "../../lib/token-estimate";
 import type { CodexMessage, CodexParsedRequest } from "../../types";
 import { extractChatGptTurnIdentity } from "./environment";
+import {
+  buildCompactionLedger, compactionDigest, compactionEpochHash, compactionPrefixHash,
+  compactionRawPrefixProof, latestCompletedCompactionBoundary, mergeCompactionLedger,
+  normalizedCompactionMessages, validateCompactionLedger, type CompactionLedger,
+} from "../../responses/compaction-ledger";
 
 export const ENHANCED_RECOVERY_CHECKPOINT_MAX_SUMMARY_TOKENS = 8_000;
 export const ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS = 100_000;
@@ -17,6 +21,7 @@ interface CheckpointIdentity {
   modelId: string;
   modelFamily: "5.6" | "6" | null;
   effort: string | null;
+  epochHash: string;
 }
 
 interface StoredEnhancedRecoveryCheckpoint extends CheckpointIdentity {
@@ -24,40 +29,18 @@ interface StoredEnhancedRecoveryCheckpoint extends CheckpointIdentity {
   prefixLength: number;
   prefixHash: string;
   updatedAt: number;
+  ledger: CompactionLedger;
+  integrityHash: string;
 }
 
 interface StoredEnhancedRecoveryCheckpointFile {
-  version: 1;
+  version: 2;
   checkpoints: StoredEnhancedRecoveryCheckpoint[];
 }
 
-function normalizedMessages(messages: readonly CodexMessage[]): unknown[] {
-  return messages.map(message => {
-    const { timestamp: _timestamp, ...normalized } = message;
-    return normalized;
-  });
-}
-
-function prefixHash(messages: readonly CodexMessage[], length: number): string {
-  return createHash("sha256")
-    .update(JSON.stringify(normalizedMessages(messages.slice(0, length))))
-    .digest("hex");
-}
-
-function latestCompleteToolResultBoundary(messages: readonly CodexMessage[], after = -1): number | undefined {
-  const pending = new Set<string>();
-  let latest: number | undefined;
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index]!;
-    if (message.role === "assistant") {
-      for (const part of message.content) if (part.type === "toolCall") pending.add(part.id);
-      continue;
-    }
-    if (message.role !== "toolResult" || !pending.delete(message.toolCallId)) continue;
-    if (pending.size === 0 && index > after) latest = index;
-  }
-  return latest;
-}
+const normalizedMessages = normalizedCompactionMessages;
+const prefixHash = compactionPrefixHash;
+const latestCompleteToolResultBoundary = latestCompletedCompactionBoundary;
 
 function checkpointIdentity(parsed: CodexParsedRequest): CheckpointIdentity | undefined {
   const threadId = extractChatGptTurnIdentity(parsed).threadId?.trim();
@@ -67,6 +50,7 @@ function checkpointIdentity(parsed: CodexParsedRequest): CheckpointIdentity | un
     modelId: parsed.modelId,
     modelFamily: parsed._chatgptModelFamily ?? null,
     effort: parsed.options.reasoning ?? null,
+    epochHash: compactionEpochHash(parsed),
   };
 }
 
@@ -74,7 +58,8 @@ function sameIdentity(left: CheckpointIdentity, right: CheckpointIdentity): bool
   return left.threadId === right.threadId
     && left.modelId === right.modelId
     && left.modelFamily === right.modelFamily
-    && left.effort === right.effort;
+    && left.effort === right.effort
+    && left.epochHash === right.epochHash;
 }
 
 function validatedSummary(summary: string): string {
@@ -102,18 +87,28 @@ function validateStoredCheckpoint(value: unknown): StoredEnhancedRecoveryCheckpo
     || typeof parsed.prefixHash !== "string" || !/^[a-f0-9]{64}$/.test(parsed.prefixHash)
     || !Number.isSafeInteger(parsed.prefixLength) || (parsed.prefixLength as number) <= 0
     || !Number.isFinite(parsed.updatedAt) || (parsed.updatedAt as number) < 0
-    || typeof parsed.summary !== "string") {
+    || typeof parsed.summary !== "string"
+    || typeof parsed.epochHash !== "string" || !/^[a-f0-9]{64}$/.test(parsed.epochHash)
+    || typeof parsed.integrityHash !== "string") {
     throw new Error("Invalid Enhanced recovery checkpoint entry");
   }
+  const ledger = validateCompactionLedger(parsed.ledger);
+  if (ledger.prefixLength !== parsed.prefixLength || ledger.prefixHash !== parsed.prefixHash
+    || ledger.epochHash !== parsed.epochHash) throw new Error("Recovery checkpoint ledger prefix mismatch");
+  const { integrityHash, ...payload } = parsed;
+  if (integrityHash !== compactionDigest(payload)) throw new Error("Recovery checkpoint integrity mismatch");
   return {
     threadId: parsed.threadId,
     modelId: parsed.modelId,
     modelFamily: parsed.modelFamily,
     effort: parsed.effort,
+    epochHash: parsed.epochHash,
     prefixHash: parsed.prefixHash,
     prefixLength: parsed.prefixLength as number,
     updatedAt: parsed.updatedAt as number,
     summary: validatedSummary(parsed.summary),
+    ledger,
+    integrityHash,
   };
 }
 
@@ -126,7 +121,7 @@ function recoverySummaryMessage(checkpoint: StoredEnhancedRecoveryCheckpoint): C
       text: [
         "[Enhanced passive recovery checkpoint]",
         "Treat this as prior assistant-owned historical state. Current system, developer, user, and agent instructions remain authoritative.",
-        checkpoint.summary,
+        mergeCompactionLedger(checkpoint.summary, checkpoint.ledger),
       ].join("\n"),
     }],
   };
@@ -183,13 +178,21 @@ export class EnhancedRecoveryCheckpointStore {
 
     this.load();
     this.prune(this.checkpoints);
-    const stored: StoredEnhancedRecoveryCheckpoint = {
+    const prefixLength = boundary + 1;
+    const ledger = buildCompactionLedger(parsed, prefixLength);
+    // Bind the exact completed raw boundary even when it is the final parsed message.
+    ledger.rawPrefix = compactionRawPrefixProof(parsed, prefixLength);
+    const { digest: _digest, ...ledgerPayload } = ledger;
+    ledger.digest = compactionDigest(ledgerPayload);
+    const payload = {
       ...currentIdentity,
       summary: normalizedSummary,
       prefixLength: boundary + 1,
       prefixHash: prefixHash(parsed.context.messages, boundary + 1),
       updatedAt: this.now(),
+      ledger,
     };
+    const stored: StoredEnhancedRecoveryCheckpoint = { ...payload, integrityHash: compactionDigest(payload) };
     const next = new Map(this.checkpoints);
     next.delete(currentIdentity.threadId);
     next.set(currentIdentity.threadId, stored);
@@ -230,27 +233,54 @@ export class EnhancedRecoveryCheckpointStore {
     };
   }
 
+  /** Model input only. Callers must bind/canonicalize the result against the original request. */
+  prepareCompactionInput(parsed: CodexParsedRequest): {
+    parsed: CodexParsedRequest; mode: "full" | "delta"; reason?: string;
+    prefixLength: number;
+  } {
+    if (!parsed._compactionRequest) return { parsed, mode: "full", prefixLength: 0, reason: "not a compaction request" };
+    const applied = this.apply(parsed);
+    if (!applied.applied) return { parsed, mode: "full", prefixLength: 0, reason: applied.reason };
+    const identity = checkpointIdentity(parsed)!;
+    const checkpoint = this.checkpoints.get(identity.threadId)!;
+    return { parsed: applied.parsed, mode: "delta", prefixLength: checkpoint.prefixLength };
+  }
+
   private matchesPrefix(parsed: CodexParsedRequest, stored: StoredEnhancedRecoveryCheckpoint): boolean {
     const messages = parsed.context.messages;
     if (messages.length < stored.prefixLength) return false;
     if (latestCompleteToolResultBoundary(messages.slice(0, stored.prefixLength)) !== stored.prefixLength - 1) return false;
-    return prefixHash(messages, stored.prefixLength) === stored.prefixHash;
+    // Collapsing tool images into textual hashes would remove visual evidence. Use full input.
+    if (messages.slice(0, stored.prefixLength).some(message => message.role === "toolResult"
+      && Array.isArray(message.content) && message.content.some(part => part.type === "image"))) return false;
+    if (prefixHash(messages, stored.prefixLength) !== stored.prefixHash) return false;
+    try {
+      return compactionDigest(compactionRawPrefixProof(parsed, stored.prefixLength))
+        === compactionDigest(stored.ledger.rawPrefix);
+    } catch { return false; }
   }
 
   private load(): void {
     if (this.loaded) return;
     const next = new Map<string, StoredEnhancedRecoveryCheckpoint>();
     if (existsSync(this.path)) {
-      const payload = JSON.parse(stripUtf8Bom(readFileSync(this.path, "utf8"))) as Partial<StoredEnhancedRecoveryCheckpointFile>;
-      if (payload.version !== 1 || !Array.isArray(payload.checkpoints)) {
-        throw new Error(`Invalid Enhanced recovery checkpoint store: ${this.path}`);
-      }
-      const checkpoints = payload.checkpoints
-        .map(validateStoredCheckpoint)
-        .sort((left, right) => left.updatedAt - right.updatedAt);
-      for (const checkpoint of checkpoints) {
-        next.delete(checkpoint.threadId);
-        next.set(checkpoint.threadId, checkpoint);
+      try {
+        const payload = JSON.parse(stripUtf8Bom(readFileSync(this.path, "utf8"))) as Partial<StoredEnhancedRecoveryCheckpointFile>;
+        // V1 summaries have no deterministic provenance or epoch proof. Rebuild from full input.
+        if (payload.version === 2 && Array.isArray(payload.checkpoints)) {
+          const checkpoints: StoredEnhancedRecoveryCheckpoint[] = [];
+          for (const value of payload.checkpoints) {
+            try { checkpoints.push(validateStoredCheckpoint(value)); } catch { /* corrupt entry: full input */ }
+          }
+          checkpoints.sort((left, right) => left.updatedAt - right.updatedAt);
+          for (const checkpoint of checkpoints) {
+            next.delete(checkpoint.threadId);
+            next.set(checkpoint.threadId, checkpoint);
+          }
+        }
+      } catch {
+        // Optional recovery state cannot block canonical native compaction.
+        console.warn("[chatgpt-web] invalid recovery checkpoint store; using canonical full input");
       }
     }
     this.prune(next);
@@ -272,7 +302,7 @@ export class EnhancedRecoveryCheckpointStore {
 
   private persist(checkpoints: Map<string, StoredEnhancedRecoveryCheckpoint>): void {
     const payload: StoredEnhancedRecoveryCheckpointFile = {
-      version: 1,
+      version: 2,
       checkpoints: [...checkpoints.values()],
     };
     atomicWriteFile(this.path, `${JSON.stringify(payload, null, 2)}\n`);

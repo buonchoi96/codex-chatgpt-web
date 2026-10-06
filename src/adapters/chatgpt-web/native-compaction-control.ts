@@ -11,6 +11,7 @@ export function passiveRecoveryCheckpointInstruction(transaction: CompactionTran
     "This is a private recovery checkpoint, not Codex context compaction and not a new user request.",
     "Consume the canonical tool result above. Summarize the current objective, user instructions, verified work, decisions, exact validation probes/IDs/expected values, and pending steps so a fresh page can continue if this page fails.",
     "Preserve exact literals, hashes, sentinel values, file paths, commit SHAs, numeric probes, and user-specified constraints verbatim whenever they are needed for later validation.",
+    "A prior recovery checkpoint is cumulative historical state: merge it with the subsequent canonical delta. Preserve pending, interrupted, error, and completed tool distinctions. Do not infer a full file read from a shell command or partial output. Do not copy or author CODEX_COMPACTION_LEDGER_V2; the bridge supplies canonical provenance separately.",
     "Before another work tool, call codex_tool_call exactly once with the one-shot control binding below:",
     `turn_token ${transaction.token}`,
     `wire_name ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}`,

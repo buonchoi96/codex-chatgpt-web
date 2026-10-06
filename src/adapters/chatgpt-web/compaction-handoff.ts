@@ -5,6 +5,7 @@ import type {
   CodexToolResultMessage,
 } from "../../types";
 import { extractChatGptCompactionSourceRevision } from "./environment";
+import { buildCompactionLedger, mergeCompactionLedger, COMPACTION_LEDGER_MARKER } from "../../responses/compaction-ledger";
 import type { ChatGptBrowserWorker } from "./browser-worker";
 import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "./adapter-error";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
@@ -98,8 +99,30 @@ export function canonicalizeCompactionHandoff(
   parsed: CodexParsedRequest,
   summary: string,
 ): string {
-  const normalized = summary.trim();
+  let normalized = summary.trim();
   if (!normalized) throw new Error("ChatGPT returned an empty structured compaction handoff");
+  const ledgerOffset = normalized.indexOf(`\n\n${COMPACTION_LEDGER_MARKER}\n`);
+  if (normalized.includes(COMPACTION_LEDGER_MARKER)) {
+    // Some fallback routes already canonicalize before returning to the retained route. Accept
+    // only a byte-identical freshly reconstructed appendix; a model cannot forge provenance.
+    const appendixOffset = normalized.lastIndexOf(`\n${LATEST_USER_PROMPT_MARKER}\n`);
+    const ledgerEnd = appendixOffset > ledgerOffset ? appendixOffset : normalized.length;
+    const beforeLedger = normalized.slice(0, ledgerOffset);
+    if (ledgerOffset < 0 || normalized.slice(0, ledgerEnd).trimEnd()
+      !== mergeCompactionLedger(beforeLedger, buildCompactionLedger(parsed))) {
+      throw new Error("Model-authored compaction ledger is not canonical");
+    }
+    normalized = beforeLedger + (appendixOffset > ledgerOffset ? `\n\n${normalized.slice(appendixOffset + 1)}` : "");
+  }
+  const withLedger = (handoff: string): string => {
+    try { return mergeCompactionLedger(handoff, buildCompactionLedger(parsed)); }
+    catch (error) {
+      // Capacity or noncanonical legacy history cannot justify a partial provenance claim.
+      // The full semantic checkpoint is still usable; no delta is trusted without a ledger.
+      console.warn("[chatgpt-web] deterministic compaction ledger unavailable; preserving full semantic handoff");
+      return handoff;
+    }
+  };
   const source = extractChatGptCompactionSourceRevision(parsed);
   const latestUserPrompt = userPromptText(source.content);
   const markerOffset = normalized.lastIndexOf(`\n${LATEST_USER_PROMPT_MARKER}\n`);
@@ -118,15 +141,15 @@ export function canonicalizeCompactionHandoff(
     console.warn(
       "[chatgpt-web] compaction source has no canonical textual latest user prompt; accepting the completed handoff without a latest-user appendix",
     );
-    return normalized;
+    return withLedger(normalized);
   }
 
   const appendix = `${LATEST_USER_PROMPT_MARKER}\n${JSON.stringify(latestUserPrompt)}`;
-  if (markerOffset < 0) return `${normalized}\n\n${appendix}`;
+  if (markerOffset < 0) return `${withLedger(normalized)}\n\n${appendix}`;
   if (normalized.slice(markerOffset + 1).trimEnd() !== appendix) {
     throw new Error("ChatGPT compaction handoff contains a conflicting latest-user marker");
   }
-  return normalized;
+  return `${withLedger(normalized.slice(0, markerOffset).trimEnd())}\n\n${appendix}`;
 }
 
 function currentToolResults(

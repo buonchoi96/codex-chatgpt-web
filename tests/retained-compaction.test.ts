@@ -193,7 +193,7 @@ test("completed compaction accepts a non-text latest native revision instead of 
   }, { type: "compaction_trigger" }];
 
   expect(canonicalizeCompactionHandoff(compact, "  finished checkpoint  "))
-    .toBe("finished checkpoint");
+    .toStartWith("finished checkpoint\n\nCODEX_COMPACTION_LEDGER_V2\n");
 });
 
 test("non-text compaction source still rejects a model-authored latest-user marker it cannot authenticate", () => {
