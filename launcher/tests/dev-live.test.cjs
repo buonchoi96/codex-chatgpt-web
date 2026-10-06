@@ -10,11 +10,13 @@ test("source live mode preserves state while hot-reloading the real Codex runtim
   const rootPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
   const launcherPackage = JSON.parse(fs.readFileSync(path.join(launcherRoot, "package.json"), "utf8"));
   const source = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live.cjs"), "utf8");
+  const lanes = fs.readFileSync(path.join(launcherRoot, "scripts", "dev-live-lanes.cjs"), "utf8");
   const main = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
 
   assert.equal(rootPackage.scripts["dev:live"], "bun run --cwd launcher dev:live");
   assert.equal(launcherPackage.scripts["dev:live"], "bun run scripts/dev-live.cjs");
-  assert.match(source, /\.codex-chatgpt-web-live/);
+  assert.match(source, /resolveLiveLanePaths/);
+  assert.match(lanes, /\.codex-chatgpt-web-live/);
   assert.match(source, /CODEX_CHATGPT_WEB_HOME: liveHome/);
   assert.match(source, /CODEX_WEB_GPT_LAUNCHER_DATA_DIR: liveUserData/);
   assert.match(source, /CODEX_WEB_GPT_LIVE_LANE: "desktop"/);
