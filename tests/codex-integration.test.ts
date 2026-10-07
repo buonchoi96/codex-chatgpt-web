@@ -897,12 +897,12 @@ describe("reversible native Codex route integration", () => {
     const journal = readFileSync(getCodexJournalPath(), "utf8");
     const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
     for (const [current, diagnosis] of [
-      [active.replace("timeout = 3", "timeout = 2"), "command or settings in hooks.Interrupt"],
-      [withoutHook + installed.interruptHook.fragment.split("[[hooks.Interrupt]]")[0], "entry is missing from hooks.Interrupt"],
-      [withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`, "entry is missing from hooks.Interrupt"],
-      [withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n', "command or settings in hooks.Interrupt"],
-      [withoutHook + '\n[hooks]\nInterrupt = []\n', "entry is missing from hooks.Interrupt"],
-      [withoutHook + '\n[hooks]\nstate = "invalid"\n', "entry is missing from hooks.Interrupt"],
+      [active.replace("timeout = 3", "timeout = 2"), "refusing to overwrite it"],
+      [withoutHook + installed.interruptHook.fragment.split("[[hooks.Interrupt]]")[0], "refusing to overwrite it"],
+      [withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`, "refusing to overwrite it"],
+      [withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n', "refusing to overwrite it"],
+      [withoutHook + '\n[hooks]\nInterrupt = []\n', "refusing to overwrite it"],
+      [withoutHook + '\n[hooks]\nstate = "invalid"\n', "refusing to overwrite it"],
       [withoutHook + '\n[mcp_servers.invalid\n', "could not be parsed as TOML"],
     ] as const) {
       writeFileSync(configPath, current);
