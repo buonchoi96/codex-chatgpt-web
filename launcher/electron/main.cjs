@@ -514,19 +514,26 @@ function smokePassedForCurrentVersion(state) {
 }
 
 function syncFreshConversationPreference(stateStore, config) {
+  const biggerContextAvailable = config?.solAvailable === true;
   const useSavedChats = config?.useSavedChats === true;
   const enabled = config?.experimentalFreshConversationPerTurn === true;
   const current = stateStore.read();
   if (runtimeHost?.currentOperation()) return current;
-  if (current.experimentalFreshConversationPerTurn === enabled && current.useSavedChats === useSavedChats) return current;
-  // Runtime restarts leave browser views alive. Retire completed chats when their
-  // persistence policy changes, including changes made by the CLI.
-  const retainedKeys = new Set([...browserHost.turnTabs.values()]
+  const retentionChanged = current.experimentalFreshConversationPerTurn !== enabled
+    || current.useSavedChats !== useSavedChats;
+  if (!retentionChanged && current.biggerContextAvailable === biggerContextAvailable) return current;
+  // Runtime restarts leave browser views alive. Retire completed chats only when their
+  // persistence policy changes; capability-only state refreshes must not discard a valid conversation.
+  const retainedKeys = new Set((retentionChanged ? [...browserHost.turnTabs.values()] : [])
     .filter(tab => tab.status === "ready" && tab.conversationKey
       && (current.useSavedChats !== useSavedChats || tab.interactionMode === "automatic"))
     .map(tab => tab.conversationKey));
   for (const key of retainedKeys) releaseRetainedConversation(browserHost, key);
-  const state = stateStore.update({ experimentalFreshConversationPerTurn: enabled, useSavedChats });
+  const state = stateStore.update({
+    experimentalFreshConversationPerTurn: enabled,
+    useSavedChats,
+    biggerContextAvailable,
+  });
   send("launcher:state-changed", state);
   return state;
 }
@@ -827,6 +834,7 @@ function registerIpc({ logger, stateStore }) {
       coreSetupComplete: true,
       codexCatalogVerified: IS_DEV_PROFILE ? true : false,
       codexRestartRequired: IS_DEV_PROFILE ? false : true,
+      biggerContextAvailable: runtimeHost.runtimeConfigSnapshot().config?.solAvailable === true,
       zeroRiskProEnabled: runtimeHost.runtimeConfigSnapshot().config?.zeroRiskProEnabled === true,
       nativeFullAccess: runtimeHost.runtimeConfigSnapshot().config?.nativeFullAccess === true,
       experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
@@ -871,6 +879,7 @@ function registerIpc({ logger, stateStore }) {
     const state = stateStore.update({
       browserInteractionMode: interactionMode,
       ...(interactionMode === "manual" ? { experimentalBiggerContext: false, experimentalSkillAttachments: false } : {}),
+      biggerContextAvailable: runtimeHost.runtimeConfigSnapshot().config?.solAvailable === true,
       zeroRiskProEnabled: runtimeHost.runtimeConfigSnapshot().config?.zeroRiskProEnabled === true,
       nativeFullAccess: runtimeHost.runtimeConfigSnapshot().config?.nativeFullAccess === true,
       experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
@@ -1026,6 +1035,7 @@ function registerIpc({ logger, stateStore }) {
     );
     const state = stateStore.update({
       browserInteractionMode: mode,
+      biggerContextAvailable: runtimeHost.runtimeConfigSnapshot().config?.solAvailable === true,
       experimentalFreshConversationPerTurn: runtimeHost.runtimeConfigSnapshot().config?.experimentalFreshConversationPerTurn === true,
       useSavedChats: runtimeHost.runtimeConfigSnapshot().config?.useSavedChats === true,
       ...(mode === "manual" ? { experimentalBiggerContext: false, experimentalSkillAttachments: false } : {}),

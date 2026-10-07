@@ -287,6 +287,16 @@ export function reclaimOrphanedCodexInterruptHook(
   return { text: repaired, reclaimed: true };
 }
 
+function invalidConfig(): Error {
+  return new Error("Codex config.toml could not be parsed as TOML. Back up the file, repair its syntax "
+    + "or restore a known-good backup, then retry Setup > Install into Codex > Reinstall. "
+    + "The launcher has not overwritten the file.");
+}
+
+const HOOK_RECOVERY = " Back up Codex config.toml, restore only the launcher's hook sections from a known-good "
+  + "backup made after successful setup, then retry Setup > Install into Codex > Reinstall. "
+  + "Keep unrelated settings and hooks. If no suitable backup exists, export Activity > Export safe log and ask for help.";
+
 function withoutEmptyHookContainers(document: HookDocument): unknown {
   const result = structuredClone(document);
   const hooks = result.hooks;
@@ -306,9 +316,13 @@ function removeRanges(text: string, ranges: SourceRange[]): string {
 }
 
 function locateCodexInterruptHook(text: string, installed: InstalledCodexInterruptHook): SourceRange[] {
-  const changed = () => new Error("Codex interrupt lifecycle hook changed after setup; refusing to overwrite it");
+  const changed = (detail = "The launcher's entries in hooks.Interrupt and hooks.state cannot be safely identified.") =>
+    new Error("Codex interrupt lifecycle hook changed after setup; refusing to overwrite it. " + detail + HOOK_RECOVERY);
+  const invalidJournal = () => new Error("Codex interrupt lifecycle hook journal is invalid. "
+    + "The launcher's saved setup record is inconsistent; this does not establish that config.toml is damaged. "
+    + "Export Activity > Export safe log and ask for help. Do not delete or edit the integration journal.");
   if (codexInterruptHookHash(installed.command) !== installed.trustedHash) {
-    throw new Error("Codex interrupt lifecycle hook journal hash is invalid");
+    throw invalidJournal();
   }
   let document: HookDocument;
   let ast: AST.TOMLProgram;
@@ -319,13 +333,18 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   try {
     const journal = parseHookDocument(installed.fragment);
     if (!equal(journal.hooks?.Interrupt, [expectedGroup])
-      || !equal(journal.hooks?.state, { [installed.stateKey]: expectedState })) throw changed();
+      || !equal(journal.hooks?.state, { [installed.stateKey]: expectedState })) throw invalidJournal();
+    journalAst = parseTOML(installed.fragment.replace(/\r(?!\n)/g, "\n"), { tomlVersion: "1.0" });
+  } catch {
+    throw invalidJournal();
+  }
+  try {
     document = parseHookDocument(text);
     // Normalize bare CR without moving offsets; the parser retains every source range and comment.
     ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
     journalAst = parseTOML(installed.fragment.replace(/\r(?!\n)/g, "\n"), { tomlVersion: "1.0" });
   } catch {
-    throw changed();
+    throw invalidConfig();
   }
   const groups = document.hooks?.Interrupt;
   const state = document.hooks?.state;
@@ -373,7 +392,8 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   for (const marker of [MANAGED_INTERRUPT_HOOK_START, MANAGED_INTERRUPT_HOOK_END]) {
     const comments = ast.comments.filter(comment => text.slice(...comment.range) === marker);
     if (comments.length > 1 || text.split(marker).length - 1 !== comments.length) {
-      throw new Error("Codex interrupt lifecycle hook markers changed after setup; refusing to overwrite them");
+      throw new Error("Codex interrupt lifecycle hook markers changed after setup; refusing to overwrite them. "
+        + "The launcher's identifying comments in Codex config.toml are duplicated or embedded in a value." + HOOK_RECOVERY);
     }
     for (const comment of comments) {
       let start = comment.range[0];

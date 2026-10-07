@@ -896,18 +896,18 @@ describe("reversible native Codex route integration", () => {
     const withoutHook = active.replace(installed.interruptHook.fragment, "");
     const journal = readFileSync(getCodexJournalPath(), "utf8");
     const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
-    for (const current of [
-      active.replace("timeout = 3", "timeout = 2"),
-      withoutHook + installed.interruptHook.fragment.split("[[hooks.Interrupt]]")[0],
-      withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`,
-      withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n',
-      withoutHook + '\n[hooks]\nInterrupt = []\n',
-      withoutHook + '\n[hooks]\nstate = "invalid"\n',
-      withoutHook + '\n[mcp_servers.invalid\n',
-    ]) {
+    for (const [current, diagnosis] of [
+      [active.replace("timeout = 3", "timeout = 2"), "refusing to overwrite it"],
+      [withoutHook + installed.interruptHook.fragment.split("[[hooks.Interrupt]]")[0], "refusing to overwrite it"],
+      [withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`, "refusing to overwrite it"],
+      [withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n', "refusing to overwrite it"],
+      [withoutHook + '\n[hooks]\nInterrupt = []\n', "refusing to overwrite it"],
+      [withoutHook + '\n[hooks]\nstate = "invalid"\n', "refusing to overwrite it"],
+      [withoutHook + '\n[mcp_servers.invalid\n', "TOML"],
+    ] as const) {
       writeFileSync(configPath, current);
-      expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).toThrow();
-      expect(() => installCodexIntegration(config, { replaceExistingRoute: true })).toThrow();
+      expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).toThrow(diagnosis);
+      expect(() => installCodexIntegration(config, { replaceExistingRoute: true })).toThrow(diagnosis);
       expect(readFileSync(configPath, "utf8")).toBe(current);
       expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(journal);
       expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(recovery);

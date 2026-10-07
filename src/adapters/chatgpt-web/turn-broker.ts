@@ -9,6 +9,7 @@ import {
   type CompactionTransactionHandle,
 } from "./compaction-transaction";
 import type { ChatGptTurnEnvironment } from "./environment";
+import { subagentModelObservation } from "./mcp-observation";
 import { nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure,
   sanitizedOperationIntent, type NativeOperationIntent } from "./native-operation";
 
@@ -1973,6 +1974,10 @@ export class TurnBroker implements TurnBrokerOwner {
       console.info(
         `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size} toolsQueued=${binding.channel.toolCallsQueued}${this.diagnosticSuffix()}`,
       );
+      const modelObservation = !toolRequest.freeform && subagentModelObservation(wireName, toolRequest.arguments);
+      if (modelObservation) console.info(`[chatgpt-web] subagent_model_requested ${JSON.stringify({
+        traceId: binding.channel.traceId, callId: callId.slice(0, 17), tool: wireName, ...modelObservation,
+      })}`);
       this.scheduleToolWaiters(binding.channel);
     });
   }

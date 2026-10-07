@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { selectedSkillFile, skillFileTokens, type ChatGptSkillFile } from "./skill-attachments";
 import {
+  CHATGPT_WEB_LUNA_BIGGER_CONTEXT_ERROR,
   chatGptWebImageTokenReserve,
   isChatGptWebZeroRiskBackendModel,
   resolveChatGptWebMessageTokenBudget,
+  resolveChatGptWebStagingTokenBudget,
   resolveChatGptWebTransportLimits,
 } from "../../chatgpt-web-models";
 import { ChatGptWebAdapterError } from "./adapter-error";
@@ -711,7 +713,8 @@ export function compileChatGptWebPrompt(
       "These tools are connected by the user to their Codex runtime; local actions execute on that runtime's device under its configured sandbox and approval rules. Assess each action by its actual effects and the user's authorization; an authenticated connection does not make every action low risk.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",
-      "Report the actual error when a tool fails. Do not claim a safety or permission block without an explicit tool result or platform error supporting it. If approval is required, use the declared Codex approval flow; a denial does not authorize retrying the action through another tool. Without an error or execution result, say the action was not executed and its cause is unconfirmed.",
+      "Report the actual error when a tool fails. Do not claim a safety or permission block without an explicit tool result or platform error supporting it. Without an error or execution result, say the action was not executed and its cause is unconfirmed.",
+      "After an explicit safety or permission refusal, do not wait for the error to request authorization: explain the specific action or planned group of actions and ask the user to confirm them. Use the declared Codex approval flow when available, and wait for the user's answer. Their confirmation can resolve an authorization gap; continue only with the confirmed actions that the tool and platform permit. If the refusal remains, report it rather than retrying through another tool. User confirmation does not override other safety restrictions.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
       "Treat every command, inspection, inventory lookup, and intermediate tool result as progress only. Immediately continue with the next unfinished actionable requirement instead of ending the response while requested work remains.",
@@ -893,28 +896,59 @@ export function compileChatGptWebPrompt(
       };
       const imageTokens = images.reduce((sum, image) => sum + chatGptWebImageTokenReserve(image.detail), 0);
       const transactionId = `ctx_${"0".repeat(32)}`;
-      const budgets = multipart.parts.map((payload, index) => {
-        const final = index === multipart.parts.length - 1;
-        const effort = final ? mode.effort : capabilities.proAvailable ? "max" : "medium";
-        const limits = resolveChatGptWebTransportLimits(CHATGPT_WEB_MODEL_ID, effort, capabilities);
-        const tokenLimit = resolveChatGptWebMessageTokenBudget(
-          CHATGPT_WEB_MODEL_ID, effort, capabilities, final ? imageTokens + skillFileTokens(skillFiles, parsed.modelId) : 0,
-        );
-        const fixedMessage = final
-          ? formatChatGptWebMultipartCommit(multipart, transactionId)
-          : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
-        const tokens = tokenLimit - estimateTokens(fixedMessage);
-        const chars = (limits.browserComposerCharLimit ?? Infinity) - fixedMessage.length;
-        if (tokens <= 0 || chars <= 0) {
-          throw new ChatGptWebAdapterError(
-            `The Bigger Context ${final ? "final part's instructions and attachments" : "stage wrapper"} exceed the available message budget before any task history is added. Reduce those inputs before retrying.`,
-            { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
-          );
+      // First try Instant-sized stages and give the final selected mode its own larger share.
+      // Equal parts near Instant's maximum can be accepted once and rejected on the next Send.
+      // If complete records cannot fit that allocation, plan with the wider available stage mode
+      // before submitting anything; no context is truncated and no failed upload is replayed.
+      const stagingEfforts = capabilities.proAvailable ? ["max"] as const : ["low", "medium"] as const;
+      const emptyParts = multipart.parts;
+      for (const stagingEffort of stagingEfforts) {
+        multipart.parts = emptyParts;
+        const budgets = multipart.parts.map((payload, index) => {
+          const final = index === multipart.parts.length - 1;
+          const effort = final ? mode.effort : stagingEffort;
+          const limits = resolveChatGptWebTransportLimits(CHATGPT_WEB_MODEL_ID, effort, capabilities);
+          const tokenLimit = final
+            ? resolveChatGptWebMessageTokenBudget(
+                CHATGPT_WEB_MODEL_ID,
+                effort,
+                capabilities,
+                imageTokens + skillFileTokens(skillFiles, parsed.modelId),
+              )
+            : resolveChatGptWebStagingTokenBudget(CHATGPT_WEB_MODEL_ID, effort, capabilities);
+          const fixedMessage = final
+            ? formatChatGptWebMultipartCommit(multipart, transactionId)
+            : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
+          const tokens = tokenLimit - estimateTokens(fixedMessage);
+          const chars = (limits.browserComposerCharLimit ?? Infinity) - fixedMessage.length;
+          if (tokens <= 0 || chars <= 0) {
+            throw new ChatGptWebAdapterError(
+              `The Bigger Context ${final ? "final part's instructions and attachments" : "stage wrapper"} exceed the available message budget before any task history is added. Reduce those inputs before retrying.`,
+              { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+            );
+          }
+          return {
+            tokens,
+            chars,
+            tokenLimit,
+            charLimit: limits.browserComposerCharLimit ?? Infinity,
+          };
+        });
+        multipart.parts = partitionMultipartContext(records, multipartParts!, budgets);
+        if (stagingEffort === "low" && multipart.parts.some((payload, index) => {
+          const final = index === multipart.parts.length - 1;
+          const text = final
+            ? formatChatGptWebMultipartCommit(multipart, transactionId)
+            : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
+          return estimateTokens(text) > budgets[index]!.tokenLimit
+            || text.length > budgets[index]!.charLimit;
+        })) {
+          continue;
         }
-        return { tokens, chars };
-      });
-      multipart.parts = partitionMultipartContext(records, multipartParts!, budgets);
-      return { text: multipart.commit, images, ...attachments, multipart };
+        return { text: multipart.commit, images, ...attachments, multipart };
+      }
+      throw new Error("No Bigger Context staging allocation is available");
+
     }
     const envelopeJson = withoutRetiredTurnHandles(JSON.stringify({ version: 3, system, messages }));
     const text = [

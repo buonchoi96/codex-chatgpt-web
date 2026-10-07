@@ -30,6 +30,8 @@ import {
   type CodexModelContextOverride,
 } from "./codex-integration";
 import {
+  CHATGPT_WEB_LUNA_BACKEND_MODEL,
+  CHATGPT_WEB_LUNA_BIGGER_CONTEXT_ERROR,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
   type ChatGptWebModelRoute,
@@ -522,6 +524,9 @@ export async function responseRequest(
   try {
     parsed = parseRequest(expanded);
     route = routeChatGptWebRequest(parsed, config);
+    if (config.experimentalBiggerContext && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
+      throw new Error(CHATGPT_WEB_LUNA_BIGGER_CONTEXT_ERROR);
+    }
     const identity = extractChatGptTurnIdentity(parsed);
     if (identity.threadId && identity.turnId) {
       options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
