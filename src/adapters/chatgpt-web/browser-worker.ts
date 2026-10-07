@@ -908,7 +908,8 @@ export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<
   return visible.some(Boolean);
 }
 
-const CHATGPT_NETWORK_ERROR = /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?|connecting interrupted\.\s*waiting for complete answer\.?)$/i;
+const CHATGPT_NETWORK_ERROR = /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
+const CHATGPT_NETWORK_INTERRUPTED = /^(?:(?:connecting|connection|network)\s+interrupted|interrupted\s+(?:connection|network))\.?\s*waiting for (?:the )?(?:complete|final) answer\.?$/i;
 
 function chatGptNetworkErrorLabel(page: Page): Locator {
   const getByText = (page as Page & {
@@ -916,18 +917,33 @@ function chatGptNetworkErrorLabel(page: Page): Locator {
   }).getByText;
   return (typeof getByText === "function"
     ? getByText.call(page, CHATGPT_NETWORK_ERROR, { exact: true })
-    : page.locator('text=/^(?:network error|a network error occurred\\.?\\s*please check your connection and try again\\.?|connecting interrupted\\.\\s*waiting for complete answer\\.?)$/i'))
+    : page.locator('text=/^(?:network error|a network error occurred\\.?\\s*please check your connection and try again\\.?)$/i'))
     .filter({ visible: true })
     .last();
 }
 
-/**
- * ChatGPT currently renders some backend/network failures outside the assistant turn subtree.
- * Observe the exact page-level failure text even when the current Web build exposes no Retry
- * button. This visibility signal owns the five-minute frontend-error watchdog.
- */
+function chatGptNetworkInterruptedLabel(page: Page): Locator {
+  const getByText = (page as Page & {
+    getByText?: Page["getByText"];
+  }).getByText;
+  return (typeof getByText === "function"
+    ? getByText.call(page, CHATGPT_NETWORK_INTERRUPTED, { exact: true })
+    : page.locator('text=/^(?:(?:connecting|connection|network)\\s+interrupted|interrupted\\s+(?:connection|network))\\.?\\s*waiting for (?:the )?(?:complete|final) answer\\.?$/i'))
+    .filter({ visible: true })
+    .last();
+}
+
+/** Hard/red page-level backend/network failures use the short error watchdog. */
 export async function chatGptNetworkErrorVisible(page: Page): Promise<boolean> {
   return chatGptNetworkErrorLabel(page).isVisible().catch(() => false);
+}
+
+/**
+ * A non-red interrupted connection that is still waiting for the final/complete answer is a softer
+ * recovery state. It gets the longer soft watchdog and must never trigger a blind Retry.
+ */
+export async function chatGptNetworkInterruptedVisible(page: Page): Promise<boolean> {
+  return chatGptNetworkInterruptedLabel(page).isVisible().catch(() => false);
 }
 
 /**
@@ -2144,20 +2160,29 @@ export const CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS = 15 * 60_000;
  */
 export const CHATGPT_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 /**
- * Ordinary turns keep the historical long-form safety horizon. The five-minute cutoff is reserved
- * for an exact page-level "Message delivery timed out" condition and is not active during normal
- * thinking.
+ * Ordinary turns keep the historical long-form safety horizon. Specialized Web recovery states
+ * below use shorter progress-aware budgets without changing normal long-running model/tool work.
  */
 export const CHATGPT_PROVEN_PROGRESS_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 /** Near-1M compaction can spend materially longer in backend reasoning than an ordinary turn. */
 export const CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS = 15 * 60_000;
 /**
- * Once ChatGPT Web reports an exact message-delivery timeout, allow the still-connected backend to
- * keep thinking and using Codex Native. Only after every native tool call has finished and no
- * semantic progress has occurred for this long may the bridge retire the turn.
+ * Hard/red ChatGPT response errors (Retry UI, message-delivery timeout, terminal red alerts) are
+ * retired after one minute of total semantic/native silence. Soft interrupted-network and
+ * long-thinking states are allowed three minutes.
  */
-export const CHATGPT_FRONTEND_ERROR_STALL_MS = 5 * 60_000;
+export const CHATGPT_FRONTEND_ERROR_STALL_MS = 60_000;
 export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_STALL_MS = CHATGPT_FRONTEND_ERROR_STALL_MS;
+export const CHATGPT_SOFT_RECOVERY_STALL_MS = 3 * 60_000;
+
+const CHATGPT_LONG_THINKING_STATUS = /^(?:our|the)\s+model\s+(?:is\s+)?(?:thinking|taking)\s+longer\b.*$/i;
+
+export function chatGptLongThinkingStatusVisible(
+  traceBlocks: readonly ChatGptVisibleTraceBlock[],
+): boolean {
+  return traceBlocks.some(block => block.kind === "status"
+    && CHATGPT_LONG_THINKING_STATUS.test(block.text.replace(/\s+/g, " ").trim()));
+}
 
 export class ChatGptMessageDeliveryTimeoutTracker {
   private signature?: string;
@@ -2206,13 +2231,13 @@ export class ChatGptMessageDeliveryTimeoutTracker {
       this.alertSince = now;
     }
 
-    // An in-flight native command is authoritative proof that the bridge/backend path is still
-    // doing useful work. Never retire a delivery-timeout turn while any command remains active.
+    // An in-flight native tool/command is authoritative proof that the bridge/backend path is still
+    // doing useful work. Never retire a watched state while any native operation remains active.
     if (state.externalToolCallsInFlight) return false;
 
-    // The delivery-timeout budget is not accumulated during normal operation. It begins only when
-    // the exact frontend alert is visible, then resets to every later reasoning/commentary/activity
-    // change or native tool batch/result timestamp.
+    // The watchdog budget is not accumulated during normal operation. It begins only when the
+    // watched UI state is visible, then resets to every later reasoning/commentary/activity change
+    // or native tool batch/result timestamp.
     const baseline = Math.max(
       this.alertSince ?? now,
       this.lastSemanticProgressAt ?? this.alertSince ?? now,
@@ -4695,7 +4720,8 @@ export class ChatGptBrowserWorker {
       CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
     );
     const responseDomCache: ChatGptResponseDomCache = {};
-    const frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker();
+    const frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_FRONTEND_ERROR_STALL_MS);
+    const softRecoveryTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_SOFT_RECOVERY_STALL_MS);
     let responseTurn = initialResponseTurn;
     for (;;) {
       if (page.isClosed()) throw chatGptBrowserTabClosedError();
@@ -4711,16 +4737,20 @@ export class ChatGptBrowserWorker {
       }
       await throwIfChatGptSessionFailureAlert(page);
       const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-      const networkErrorVisible = deliveryTimeoutVisible
+      const networkInterruptedVisible = deliveryTimeoutVisible
+        ? false
+        : await chatGptNetworkInterruptedVisible(page);
+      const networkErrorVisible = deliveryTimeoutVisible || networkInterruptedVisible
         ? false
         : await chatGptNetworkErrorVisible(page);
       const networkErrorRetry = networkErrorVisible
         ? await chatGptNetworkErrorRetryButton(page)
         : undefined;
-      const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+      const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkInterruptedVisible && !networkErrorVisible
         ? await chatGptPageRetryErrorVisible(page)
         : false;
-      const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible && !pageRetryErrorVisible
+      const terminalErrorVisible = !deliveryTimeoutVisible && !networkInterruptedVisible
+        && !networkErrorVisible && !pageRetryErrorVisible
         ? await chatGptTerminalErrorVisible(responseTurn.locator)
         : false;
       const frontendErrorVisible = deliveryTimeoutVisible
@@ -4744,7 +4774,9 @@ export class ChatGptBrowserWorker {
       }
       const externalProgressSnapshot = externalProgress?.snapshot();
       const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-      if (!frontendErrorVisible && snapshot.stoppedThinkingVisible) {
+      const softRecoveryVisible = networkInterruptedVisible
+        || chatGptLongThinkingStatusVisible(snapshot.traceBlocks);
+      if (!frontendErrorVisible && !softRecoveryVisible && snapshot.stoppedThinkingVisible) {
         throw chatGptStoppedThinkingError();
       }
       if (externalProgress
@@ -4773,7 +4805,7 @@ export class ChatGptBrowserWorker {
         externalToolCallsInFlight,
       })) {
         throw new ChatGptWebAdapterError(
-          "ChatGPT kept a response-level error visible for five minutes without backend reasoning, ChatGPT activity, or Codex Native tool progress, and no native command remained in flight.",
+          "ChatGPT kept a red/retry response-level error visible for one minute with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
           {
             status: 504,
             errorType: "server_error",
@@ -4782,9 +4814,26 @@ export class ChatGptBrowserWorker {
           },
         );
       }
-      if (!snapshot.responsePresent && (externalProgressLive || frontendErrorVisible)) {
-        // Proven MCP activity outranks a momentarily unavailable staging DOM. Recognized transient
-        // frontend error UI is governed by the progress-aware five-minute watchdog instead.
+      if (softRecoveryTracker.update({
+        alertVisible: softRecoveryVisible,
+        visibleText: snapshot.visibleText,
+        traceBlocks: snapshot.traceBlocks,
+        externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+        externalToolCallsInFlight,
+      })) {
+        throw new ChatGptWebAdapterError(
+          "ChatGPT remained in an interrupted-network or long-thinking recovery state for three minutes with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
+          {
+            status: 504,
+            errorType: "server_error",
+            code: "browser_response_stalled",
+            retryable: true,
+          },
+        );
+      }
+      if (!snapshot.responsePresent && (externalProgressLive || frontendErrorVisible || softRecoveryVisible)) {
+        // Proven MCP activity outranks a momentarily unavailable staging DOM. Recognized hard and
+        // soft recovery UI is governed by the dedicated progress-aware watchdogs instead.
         domHealthTracker.clearMissingResponse();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
@@ -4800,7 +4849,7 @@ export class ChatGptBrowserWorker {
         currentText: snapshot.visibleText,
         completionActionVisible: snapshot.completionActionVisible,
         composerReady,
-        externalProgressLive: externalProgressLive || frontendErrorVisible,
+        externalProgressLive: externalProgressLive || frontendErrorVisible || softRecoveryVisible,
       });
       if (domError) throw chatGptResponseIncompleteError(domError);
       if (completionTracker.update({
@@ -6663,7 +6712,8 @@ export class ChatGptBrowserWorker {
           ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
           : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
       );
-      const frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker();
+      const frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_FRONTEND_ERROR_STALL_MS);
+      const softRecoveryTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_SOFT_RECOVERY_STALL_MS);
       const networkErrorRecovery = new ChatGptNetworkErrorRecoveryTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
@@ -6694,16 +6744,20 @@ export class ChatGptBrowserWorker {
         }
         await throwIfChatGptSessionFailureAlert(page);
         const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-        const networkErrorVisible = deliveryTimeoutVisible
+        const networkInterruptedVisible = deliveryTimeoutVisible
+          ? false
+          : await chatGptNetworkInterruptedVisible(page);
+        const networkErrorVisible = deliveryTimeoutVisible || networkInterruptedVisible
           ? false
           : await chatGptNetworkErrorVisible(page);
         const networkErrorRetry = networkErrorVisible
           ? await chatGptNetworkErrorRetryButton(page)
           : undefined;
-        const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible
+        const pageRetryErrorVisible = !deliveryTimeoutVisible && !networkInterruptedVisible && !networkErrorVisible
           ? await chatGptPageRetryErrorVisible(page)
           : false;
-        const terminalErrorVisible = !deliveryTimeoutVisible && !networkErrorVisible && !pageRetryErrorVisible
+        const terminalErrorVisible = !deliveryTimeoutVisible && !networkInterruptedVisible
+          && !networkErrorVisible && !pageRetryErrorVisible
           ? await chatGptTerminalErrorVisible(responseTurn.locator)
           : false;
         const frontendErrorVisible = deliveryTimeoutVisible
@@ -6769,9 +6823,11 @@ export class ChatGptBrowserWorker {
         }
         const externalProgressSnapshot = turn.externalProgress?.snapshot();
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-        // Recognized response-level error UI owns the five-minute progress-aware grace. Do not let
-        // secondary stopped-thinking/stream-recovery UI retire the turn before that watchdog does.
-        if (!frontendErrorVisible) {
+        const softRecoveryVisible = networkInterruptedVisible
+          || chatGptLongThinkingStatusVisible(snapshot.traceBlocks);
+        // Dedicated hard/soft recovery UI owns its progress-aware grace. Do not let secondary
+        // stopped-thinking/stream-recovery UI retire the turn before the matching watchdog does.
+        if (!frontendErrorVisible && !softRecoveryVisible) {
           if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
           if (chatGptStreamRecoveryPollingTimedOut(snapshot.visibleText, snapshot.traceBlocks)) {
             await diagnostics.capture(page, "stream-recovery-polling-timeout").catch(() => {});
@@ -6861,8 +6917,9 @@ export class ChatGptBrowserWorker {
           continue;
         }
         // After semantic/native progress, never click Retry because it could replay side effects.
-        // All recognized response-level errors instead share the same progress-aware five-minute
-        // watchdog below. Any response/reasoning/Activity/command/MCP progress resets the timer.
+        // Hard/red errors use a one-minute silence budget. Soft interrupted-network and long-
+        // thinking states use three minutes. Any response/reasoning/Activity/command/MCP progress
+        // resets the matching timer, and an active native tool/command suspends it entirely.
         if (frontendErrorTracker.update({
           alertVisible: frontendErrorVisible,
           visibleText: snapshot.visibleText,
@@ -6872,7 +6929,25 @@ export class ChatGptBrowserWorker {
         })) {
           await diagnostics.capture(page, "frontend-error-semantic-stall").catch(() => {});
           throw new ChatGptWebAdapterError(
-            "ChatGPT kept a response-level error visible for five minutes with no backend reasoning, ChatGPT activity, or Codex Native tool progress, and no native command remained in flight.",
+            "ChatGPT kept a red/retry response-level error visible for one minute with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
+            {
+              status: 504,
+              errorType: "server_error",
+              code: "browser_response_stalled",
+              retryable: true,
+            },
+          );
+        }
+        if (softRecoveryTracker.update({
+          alertVisible: softRecoveryVisible,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          externalToolCallsInFlight,
+        })) {
+          await diagnostics.capture(page, "soft-recovery-semantic-stall").catch(() => {});
+          throw new ChatGptWebAdapterError(
+            "ChatGPT remained in an interrupted-network or long-thinking recovery state for three minutes with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
             {
               status: 504,
               errorType: "server_error",
@@ -6885,17 +6960,17 @@ export class ChatGptBrowserWorker {
         if (!snapshot.responsePresent && (
           externalProgressLive
           || frontendErrorVisible
+          || softRecoveryVisible
         )) {
-          // Proven MCP activity outranks a momentarily unavailable response DOM. Recognized
-          // response-level error UI is governed by the five-minute progress watchdog rather than
-          // the ordinary missing-DOM horizon.
+          // Proven MCP activity outranks a momentarily unavailable response DOM. Recognized hard
+          // and soft recovery UI is governed by dedicated watchdogs rather than missing-DOM grace.
           domHealthTracker.clearMissingResponse();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
         const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
         const stopVisible = await stop.isVisible().catch(() => false);
-        const running = stopVisible || frontendErrorVisible;
+        const running = stopVisible || frontendErrorVisible || softRecoveryVisible;
         const composerReady = !running && snapshot.responsePresent && snapshot.visibleText.length > 0
           ? await this.composerReadyForNextMessage(page)
           : false;
