@@ -246,10 +246,14 @@ export function resolveChatGptWebStagingTokenBudget(
   // A first near-maximum Instant message can succeed while the next is rejected (#777).
   // Reuse normal Instant's input headroom, including the existing platform reserve;
   // this changes staging allocation, not the selected model's advertised context window.
-  const { autoCompactTokenLimit } = resolveChatGptWebContextLimits(backendModel, effort, {
-    ...capabilities, experimentalBiggerContext: false,
-  });
-  return Math.min(messageBudget, Math.max(0, autoCompactTokenLimit - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - 1));
+  // Keep this transport-specific limit independent from the fork's much later semantic
+  // auto-compaction threshold. Upstream measured repeated Plus Instant staging against the
+  // ordinary 32k input target; the visible payload therefore tops out at 23,807 tokens.
+  const instantStagingAutoCompactTarget = 32_000;
+  return Math.min(
+    messageBudget,
+    Math.max(0, instantStagingAutoCompactTarget - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - 1),
+  );
 }
 
 interface ChatGptWebModelRouteBase {
