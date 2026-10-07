@@ -984,9 +984,12 @@ export class ChatGptNetworkErrorRecoveryTracker {
 // an old response, another tab, or a background endpoint cannot classify this turn.
 export class ChatGptSubmissionRejectionObserver {
   private page?: Page;
+  private generation = 0;
   private readonly requests = new Set<Request>();
   private readonly streams = new Map<Request, Response>();
   private checks: Array<Promise<ChatGptWebAdapterError | undefined>> = [];
+
+  constructor(private readonly onRejected?: (error: ChatGptWebAdapterError) => void) {}
 
   private readonly onRequest = (request: Request): void => {
     if (!this.page || request.method() !== "POST"
@@ -996,14 +999,57 @@ export class ChatGptSubmissionRejectionObserver {
   };
 
   private readonly onResponse = (response: Response): void => {
-    if (!this.requests.delete(response.request()) || response.status() !== 413
-      || !response.headers()["content-type"]?.includes("application/json")) return;
-    this.checks.push(withChatGptBrowserObservationTimeout(response.json(), 3_000)
-      .then(body => body?.detail?.code === "message_length_exceeds_limit"
-        ? new ChatGptWebAdapterError(
+    if (!this.requests.delete(response.request())) return;
+    const contentType = response.headers()["content-type"];
+    if (response.status() === 200 && contentType?.includes("text/event-stream")) {
+      this.streams.set(response.request(), response);
+      return;
+    }
+    if (response.status() !== 413 || !contentType?.includes("application/json")) return;
+    this.observeRejection(response.json().then(body => body?.detail?.code === "message_length_exceeds_limit"));
+  };
+
+  private readonly onRequestFinished = (request: Request): void => {
+    const response = this.streams.get(request);
+    this.streams.delete(request);
+    this.requests.delete(request);
+    if (!response) return;
+    // Read only after the stream ends. A long-running successful response must not hold up
+    // failure() or run into a response-body timeout while it is still generating.
+    this.observeRejection(response.text().then(body => body.split(/\r?\n\r?\n/).some(block => {
+      const data = block.split(/\r?\n/)
+        .filter(line => line.startsWith("data:"))
+        .map(line => line.slice(5).replace(/^ /, ""))
+        .join("\n");
+      if (!data || data === "[DONE]") return false;
+      try {
+        const event = JSON.parse(data);
+        // These are top-level service fields, not model text or a localized error message.
+        return event?.error_code === "input_too_large" && event?.error_reason === "last_user_message"
+          && typeof event?.error === "string" && event.error.length > 0;
+      } catch {
+        return false;
+      }
+    })));
+  };
+
+  private readonly onRequestFailed = (request: Request): void => {
+    this.requests.delete(request);
+    this.streams.delete(request);
+  };
+
+  private observeRejection(check: Promise<boolean>): void {
+    const generation = this.generation;
+    this.checks.push(withChatGptBrowserObservationTimeout(check, 3_000)
+      .then(rejected => {
+        if (generation !== this.generation || !rejected) return undefined;
+        const error = new ChatGptWebAdapterError(
           "ChatGPT rejected this message because it exceeds the selected mode's input-size limit. Compact the task before retrying.",
-          { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
-        ) : undefined)
+          { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+        );
+        this.onRejected?.(error);
+        return error;
+      })
       // Unreadable or unfamiliar responses do not establish a size rejection. The normal
       // bound-response DOM error remains authoritative in that case.
       .catch(() => undefined));
@@ -1024,6 +1070,7 @@ export class ChatGptSubmissionRejectionObserver {
   }
 
   dispose(): void {
+    this.generation += 1;
     this.page?.off("request", this.onRequest);
     this.page?.off("response", this.onResponse);
     this.page?.off("requestfinished", this.onRequestFinished);
@@ -1668,6 +1715,12 @@ export function chatGptFinalIndicatesDeveloperMcpUnavailable(text: string): bool
     || normalized.includes("this conversation does not support developer mcp");
 }
 
+interface ChatGptAcknowledgedMultipartStage {
+  text: string;
+  acknowledgement: string;
+  identities: string[];
+}
+
 interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
@@ -1965,6 +2018,10 @@ export class ChatGptTurnDomHealthTracker {
     this.missingResponseSince = undefined;
     this.emptyCompletionSince = undefined;
     this.missingCompletionAction = undefined;
+  }
+
+  clearMissingResponse(): void {
+    this.missingResponseSince = undefined;
   }
 
   update(state: {
@@ -3745,16 +3802,75 @@ export class ChatGptBrowserWorker {
     return (await this.responseDomSnapshot(locator, {})).visibleText;
   }
 
+  private async reconcileMultipartHistory(
+    page: Page,
+    baseline: ChatGptSubmissionBaseline,
+    state: ChatGptSubmissionDomState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const stages = baseline.acknowledgedStages;
+    if (!stages?.length) return;
+    for (const stage of stages) {
+      if (stage.identities.filter(identity => state.turnIdentities.includes(identity)).length > 1) {
+        throw new Error("ChatGPT duplicated an acknowledged Bigger Context exchange");
+      }
+    }
+    const known = new Set(baseline.initialTurnIdentities);
+    const candidates = state.turnIdentities.filter(identity => identity.startsWith("group:assistant:")
+      && !known.has(identity));
+    for (const identity of candidates) {
+      const previousStage = stages.find(stage => stage.identities.includes(identity));
+      if (previousStage) {
+        known.add(identity);
+        known.add(`group:user:${identity.slice("group:assistant:".length)}`);
+        continue;
+      }
+      // A newly submitted group already has a user bubble while its assistant area may
+      // not exist yet. Inspect the existing group; waiting for an assistant here turns
+      // normal response startup into repeated DOM observation timeouts.
+      const locator = page.locator(`[data-turn-key=${JSON.stringify(identity.slice("group:assistant:".length))}]`);
+      const text = await withChatGptBrowserObservationTimeout(withBrowserTurnAbort(locator.evaluate(group => {
+        const bubbles = group.querySelectorAll<HTMLElement>("[data-user-message-bubble]");
+        const contents = bubbles.length === 1
+          ? bubbles[0]!.querySelectorAll<HTMLElement>("[data-search-result-target]") : [];
+        return contents.length === 1 ? contents[0]!.innerText.replace(/\r\n?/g, "\n") : undefined;
+      }), signal));
+      // Only this transaction's already completed stages may acquire a new identity. A
+      // matching acknowledgement alone cannot prove that the uploaded context survived.
+      const snapshot = await this.responseDomSnapshot(locator, {});
+      const stage = stages.find(candidate => candidate.text.replace(/\r\n?/g, "\n") === text);
+      const ackStage = stages.find(candidate => candidate.acknowledgement === snapshot.visibleText.trim());
+      if (!stage && !ackStage) continue;
+      if (!stage || stage !== ackStage || !snapshot.completionActionVisible) {
+        throw new Error("ChatGPT changed an acknowledged Bigger Context exchange");
+      }
+      if (stage.identities.some(previous => state.turnIdentities.includes(previous))) {
+        throw new Error("ChatGPT duplicated an acknowledged Bigger Context exchange");
+      }
+      stage.identities.push(identity);
+      known.add(identity);
+      known.add(`group:user:${identity.slice("group:assistant:".length)}`);
+    }
+    baseline.initialTurnIdentities = [...known];
+  }
+
   private async captureSubmissionBaseline(
     page: Page,
     submittedText?: string,
+    acknowledgedStagesOrSignal: readonly ChatGptAcknowledgedMultipartStage[] | AbortSignal = [],
     signal?: AbortSignal,
   ): Promise<ChatGptSubmissionBaseline> {
+    const acknowledgedStages = Array.isArray(acknowledgedStagesOrSignal)
+      ? acknowledgedStagesOrSignal as readonly ChatGptAcknowledgedMultipartStage[]
+      : [];
+    const observationSignal = Array.isArray(acknowledgedStagesOrSignal)
+      ? signal
+      : acknowledgedStagesOrSignal as AbortSignal;
     const userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
     const responseTurns = page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR);
     const domCache: ChatGptSubmissionDomCache = {};
-    const state = await this.submissionDomState(page, domCache, signal);
-    return {
+    const state = await this.submissionDomState(page, domCache, observationSignal);
+    const baseline: ChatGptSubmissionBaseline = {
       userTurns,
       responseTurns,
       initialTurnIdentities: [],
@@ -3762,8 +3878,7 @@ export class ChatGptBrowserWorker {
       submittedText,
       acknowledgedStages: [...acknowledgedStages],
     };
-    // A stage can persist under its new key before the next baseline is captured.
-    await this.reconcileMultipartHistory(page, baseline, state);
+    await this.reconcileMultipartHistory(page, baseline, state, observationSignal);
     baseline.initialTurnIdentities = state.turnIdentities;
     return baseline;
   }
@@ -6024,6 +6139,7 @@ export class ChatGptBrowserWorker {
       const captureSubmissionBaselineWithRecovery = async (
         stage: string,
         submittedText?: string,
+        acknowledgedStages: readonly ChatGptAcknowledgedMultipartStage[] = [],
       ): Promise<ChatGptSubmissionBaseline> => this.runStage(
         turn.traceId,
         stage,
@@ -6035,7 +6151,7 @@ export class ChatGptBrowserWorker {
           let rebindAttempts = 0;
           for (;;) {
             try {
-              return await this.captureSubmissionBaseline(page, submittedText, signal);
+              return await this.captureSubmissionBaseline(page, submittedText, acknowledgedStages, signal);
             } catch (error) {
               if (!(error instanceof ChatGptBrowserObservationTimeoutError)
                 || !launcherObservationRecovery
@@ -6150,6 +6266,7 @@ export class ChatGptBrowserWorker {
           let stageBaseline = await captureSubmissionBaselineWithRecovery(
             `multipart_stage_${index + 1}_baseline`,
             stage.text,
+            acknowledgedStages,
           );
           await this.runStage(
             turn.traceId,
@@ -6270,6 +6387,7 @@ export class ChatGptBrowserWorker {
       let submissionBaseline = await captureSubmissionBaselineWithRecovery(
         "submission_baseline",
         finalPrompt,
+        acknowledgedStages,
       );
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
