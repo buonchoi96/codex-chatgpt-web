@@ -2178,10 +2178,10 @@ export const CHATGPT_SOFT_RECOVERY_STALL_MS = 3 * 60_000;
 const CHATGPT_LONG_THINKING_STATUS = /^(?:our|the)\s+model\s+(?:is\s+)?(?:thinking|taking)\s+longer\b.*$/i;
 
 export function chatGptLongThinkingStatusVisible(
-  traceBlocks: readonly ChatGptVisibleTraceBlock[],
+  traceBlocks: readonly ChatGptVisibleTraceBlock[] | undefined,
 ): boolean {
-  return traceBlocks.some(block => block.kind === "status"
-    && CHATGPT_LONG_THINKING_STATUS.test(block.text.replace(/\s+/g, " ").trim()));
+  return traceBlocks?.some(block => block.kind === "status"
+    && CHATGPT_LONG_THINKING_STATUS.test(block.text.replace(/\s+/g, " ").trim())) ?? false;
 }
 
 export class ChatGptMessageDeliveryTimeoutTracker {
