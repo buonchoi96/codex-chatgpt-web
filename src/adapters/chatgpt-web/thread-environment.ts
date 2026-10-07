@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { atomicWriteFile } from "../../config";
@@ -273,25 +274,61 @@ export class ChatGptThreadEnvironmentStore {
     this.persist();
   }
 
-  private persistedEntries(now = this.now()): Array<readonly [string, StoredThreadEnvironment]> {
-    if (!this.path || !existsSync(this.path)) return [];
-    const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<StoredThreadEnvironmentFile>;
-    const rawThreads = record(parsed.threads);
-    if (parsed.version !== 1 || !rawThreads) {
-      throw new Error(`Invalid ChatGPT thread environment store: ${this.path}`);
-    }
-    const cutoff = now - THREAD_ENVIRONMENT_TTL_MS;
-    return Object.entries(rawThreads)
-      .map(([threadId, value]) => [threadId, validateStoredEnvironment(value)] as const)
-      .filter(([, environment]) => environment.updatedAt >= cutoff)
-      .sort((left, right) => left[1].updatedAt - right[1].updatedAt)
-      .slice(-MAX_THREAD_ENVIRONMENTS);
+  private invalidState(reason: string): ChatGptWebAdapterError {
+    return new ChatGptWebAdapterError(
+      `The saved Codex task environment file (thread-environments.json) ${reason}. `
+      + "Its contents have not been overwritten. Start a fresh Codex task to supply its current workspace and permissions. "
+      + "If that also fails, export Activity > Export safe log; do not delete your launcher settings.",
+      { status: 409, errorType: "invalid_request_error", code: "thread_environment_state_invalid", retryable: false },
+    );
   }
 
-  private load(): void {
+  private persistedEntries(
+    now = this.now(),
+    verifiedEnvironment = false,
+  ): Array<readonly [string, StoredThreadEnvironment]> {
+    if (!this.path || !existsSync(this.path)) return [];
+    const source = readFileSync(this.path, "utf8");
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(source);
+    } catch {
+      if (!verifiedEnvironment) throw this.invalidState("contains invalid JSON");
+      // Recovery is authorized only by a verified current Codex environment. Preserve the exact
+      // damaged bytes and never infer permissions from them.
+      if (readFileSync(this.path, "utf8") !== source) {
+        throw this.invalidState("changed during recovery");
+      }
+      const backup = `${this.path}.corrupt-${randomUUID()}`;
+      renameSync(this.path, backup);
+      console.warn(
+        "[chatgpt-web] preserved corrupt thread-environments.json beside the original; "
+        + "rebuilding from a verified current Codex environment",
+      );
+      return [];
+    }
+    const parsed = record(decoded);
+    const rawThreads = record(parsed?.threads);
+    if (parsed?.version !== 1 || !rawThreads) {
+      throw this.invalidState("has an unsupported or invalid format");
+    }
+    try {
+      const cutoff = now - THREAD_ENVIRONMENT_TTL_MS;
+      return Object.entries(rawThreads)
+        .map(([threadId, value]) => [threadId, validateStoredEnvironment(value)] as const)
+        .filter(([, environment]) => environment.updatedAt >= cutoff)
+        .sort((left, right) => left[1].updatedAt - right[1].updatedAt)
+        .slice(-MAX_THREAD_ENVIRONMENTS);
+    } catch {
+      throw this.invalidState("contains invalid workspace or permission records");
+    }
+  }
+
+  private load(verifiedEnvironment = false): void {
     if (this.loaded) return;
+    const entries = this.persistedEntries(this.now(), verifiedEnvironment);
     this.loaded = true;
-    for (const [threadId, environment] of this.persistedEntries()) {
+    for (const [threadId, environment] of entries) {
       this.threads.set(threadId, environment);
     }
   }
