@@ -540,12 +540,14 @@ test("fresh-conversation snapshot uses runtime configuration and mode switching 
   const vm = require("node:vm");
   const handlers = new Map();
   const state = { browserInteractionMode: "automatic", experimentalFreshConversationPerTurn: false };
-  let config = { browserInteractionMode: "automatic", experimentalFreshConversationPerTurn: true };
+  const runtimeSnapshot = {
+    config: { browserInteractionMode: "automatic", experimentalFreshConversationPerTurn: true },
+  };
   const runtimeHost = {
     currentOperation: () => null,
-    runtimeConfigSnapshot: () => ({ config }), browserConnectorName: () => "Codex Native2",
+    runtimeConfigSnapshot: () => runtimeSnapshot, browserConnectorName: () => "Codex Native2",
     setupConnectorName: () => "Codex Native2", mcpCredentialsConfigured: () => true,
-    setBrowserInteractionMode: async mode => { config.browserInteractionMode = mode; return { configured: true }; },
+    setBrowserInteractionMode: async mode => { runtimeSnapshot.config.browserInteractionMode = mode; return { configured: true }; },
   };
   const sandbox = {
     handle: (name, handler) => handlers.set(name, handler), runtimeHost,
@@ -574,12 +576,13 @@ test("fresh-conversation snapshot uses runtime configuration and mode switching 
     assert.equal(changed.state.experimentalFreshConversationPerTurn, true);
     assert.equal((await snapshot()).state.experimentalFreshConversationPerTurn, true);
   }
-  config = {};
+  runtimeSnapshot.config = {};
   assert.equal((await snapshot()).state.experimentalFreshConversationPerTurn, false);
   assert.equal((await snapshot()).state.biggerContextAvailable, false);
-  config.solAvailable = true;
+  runtimeSnapshot.config.solAvailable = true;
+  assert.equal(runtimeHost.runtimeConfigSnapshot().config.solAvailable, true);
   assert.equal((await snapshot()).state.biggerContextAvailable, true);
-  config.solAvailable = false;
+  runtimeSnapshot.config.solAvailable = false;
   assert.equal((await snapshot()).state.biggerContextAvailable, false);
 });
 
