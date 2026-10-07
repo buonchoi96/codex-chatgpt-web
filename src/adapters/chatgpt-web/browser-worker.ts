@@ -4839,7 +4839,7 @@ export class ChatGptBrowserWorker {
         continue;
       }
       const stopVisible = await page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last().isVisible().catch(() => false);
-      const running = stopVisible || frontendErrorVisible;
+      const running = stopVisible || frontendErrorVisible || softRecoveryVisible;
       const composerReady = !running && snapshot.responsePresent && snapshot.visibleText.length > 0
         ? await this.composerReadyForNextMessage(page)
         : false;
