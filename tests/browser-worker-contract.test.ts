@@ -4139,7 +4139,7 @@ test("unrelated ChatGPT alerts are not terminal", async () => {
 
 function toolConfirmationPage(options: {
   disappearAfterReads?: number;
-  surface?: "dialog" | "card";
+  surface?: "dialog" | "card" | "current";
   allowLabel?: "Allow once" | "Allow";
 } = {}): {
   page: Page;
@@ -4217,14 +4217,14 @@ test("an unanswered ChatGPT connector approval is denied instead of aborting the
   const fixture = toolConfirmationPage();
 
   expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", false, undefined, 2)).toBeTrue();
-  expect(fixture.pressed).toEqual(["Deny:Enter"]);
+  expect(fixture.pressed).toEqual(["Deny:click"]);
 });
 
 test("explicit connector auto-approval still selects Allow once", async () => {
   const fixture = toolConfirmationPage();
 
   expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", true)).toBeTrue();
-  expect(fixture.pressed).toEqual(["Allow once:Enter"]);
+  expect(fixture.pressed).toEqual(["Allow once:click"]);
 });
 
 test("connector auto-approval accepts the current shortened Allow action", async () => {
