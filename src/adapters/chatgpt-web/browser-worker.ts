@@ -1124,6 +1124,7 @@ export async function resolveChatGptToolConfirmation(
   signal?: AbortSignal,
   timeoutMs = CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS,
   onVisible?: () => Promise<void>,
+  onApprovalPending?: (pending: boolean) => Promise<void>,
 ): Promise<boolean> {
   const dialogs = page.locator('[role="dialog"], [data-testid="tool-approval-card"], [data-codex-approval-surface="true"]')
     .filter({ has: page.getByText(`Allow ChatGPT to use ${appName}?`, { exact: true }) })
@@ -1133,6 +1134,7 @@ export async function resolveChatGptToolConfirmation(
   if (dialogCount !== 1) throw new Error("ChatGPT exposed multiple approvals for the selected connector");
   const dialog = dialogs.first();
   await onVisible?.();
+  if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
 
   if (autoApprove) {
     // ChatGPT exposes either "Allow once" or the shorter "Allow" for the
@@ -1140,25 +1142,51 @@ export async function resolveChatGptToolConfirmation(
     // actions such as "Always allow" cannot match.
     const allowCurrentAction = dialog
       .getByRole("button", { name: /^Allow(?: once)?$/ })
-      .last();
-    await allowCurrentAction.waitFor({ state: "visible", timeout: 10_000 });
-    await allowCurrentAction.press("Enter");
+      .filter({ visible: true });
+    const deny = dialog.getByRole("button", { name: "Deny", exact: true }).filter({ visible: true });
+    await allowCurrentAction.waitFor({ state: "visible", timeout: 10_000, signal });
+    await deny.waitFor({ state: "visible", timeout: 10_000, signal });
+    if (await allowCurrentAction.count() !== 1 || await deny.count() !== 1) {
+      throw new Error("ChatGPT approval does not expose a unique one-time Allow and Deny action");
+    }
+    if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+    await allowCurrentAction.click({ timeout: 10_000, signal });
+    await dialog.waitFor({ state: "hidden", timeout: 10_000, signal });
     return true;
   }
 
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  let approvalError: unknown;
+  try {
+    await onApprovalPending?.(true);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+      if (!await dialog.isVisible().catch(() => false)) return true;
+      await new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, Math.max(1, deadline - Date.now()))));
+    }
+
     if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if (!await dialog.isVisible().catch(() => false)) return true;
-    await new Promise(resolveSleep => setTimeout(resolveSleep, Math.min(100, Math.max(1, deadline - Date.now()))));
+    const deny = dialog.getByRole("button", { name: "Deny", exact: true }).filter({ visible: true });
+    if (await deny.count() !== 1) throw new Error("ChatGPT approval does not expose a unique Deny action");
+    await deny.waitFor({ state: "visible", timeout: 5_000 });
+    if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+    await deny.click({ timeout: 5_000, signal });
+    await dialog.waitFor({ state: "hidden", timeout: 10_000 });
+    return true;
+  } catch (error) {
+    approvalError = error;
+    throw error;
+  } finally {
+    try {
+      await onApprovalPending?.(false);
+    } catch (error) {
+      if (approvalError === undefined) throw error;
+      // A closed tab can reject the final update. Preserve the original failure;
+      // releasing the turn also removes its pending-approval state.
+      console.warn(`[chatgpt-web] could not clear tool approval status: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-
-  if (!await dialog.isVisible().catch(() => false)) return true;
-  const deny = dialog.getByRole("button", { name: "Deny", exact: true }).last();
-  await deny.waitFor({ state: "visible", timeout: 5_000 });
-  await deny.press("Enter");
-  await dialog.waitFor({ state: "hidden", timeout: 10_000 });
-  return true;
 }
 
 export function assertChatGptWebInputWithinLimits(
