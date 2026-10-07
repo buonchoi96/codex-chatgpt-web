@@ -9,6 +9,7 @@ import {
   type CompactionTransactionHandle,
 } from "./compaction-transaction";
 import type { ChatGptTurnEnvironment } from "./environment";
+import { subagentModelObservation } from "./mcp-observation";
 import { nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure,
   sanitizedOperationIntent, type NativeOperationIntent } from "./native-operation";
 
