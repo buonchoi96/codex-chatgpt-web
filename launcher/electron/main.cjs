@@ -519,12 +519,12 @@ function syncFreshConversationPreference(stateStore, config) {
   const enabled = config?.experimentalFreshConversationPerTurn === true;
   const current = stateStore.read();
   if (runtimeHost?.currentOperation()) return current;
-  if (current.experimentalFreshConversationPerTurn === enabled
-    && current.useSavedChats === useSavedChats
-    && current.biggerContextAvailable === biggerContextAvailable) return current;
-  // Runtime restarts leave browser views alive. Retire completed chats when their
-  // persistence policy changes, including changes made by the CLI.
-  const retainedKeys = new Set([...browserHost.turnTabs.values()]
+  const retentionChanged = current.experimentalFreshConversationPerTurn !== enabled
+    || current.useSavedChats !== useSavedChats;
+  if (!retentionChanged && current.biggerContextAvailable === biggerContextAvailable) return current;
+  // Runtime restarts leave browser views alive. Retire completed chats only when their
+  // persistence policy changes; capability-only state refreshes must not discard a valid conversation.
+  const retainedKeys = new Set((retentionChanged ? [...browserHost.turnTabs.values()] : [])
     .filter(tab => tab.status === "ready" && tab.conversationKey
       && (current.useSavedChats !== useSavedChats || tab.interactionMode === "automatic"))
     .map(tab => tab.conversationKey));
