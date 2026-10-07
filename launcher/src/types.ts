@@ -32,6 +32,8 @@ export interface LauncherState {
   showBrowserDuringTurns: boolean;
   browserInteractionMode: BrowserInteractionMode;
   experimentalBiggerContext: boolean;
+  /** Whether the currently verified ChatGPT account exposes Sol, and therefore Bigger Context. */
+  biggerContextAvailable?: boolean;
   nativeFullAccess: boolean;
   autoCompactPercent: number;
   experimentalSkillAttachments: boolean;
