@@ -5927,7 +5927,12 @@ export class ChatGptBrowserWorker {
     let managedPage: Page | undefined;
     let diagnosticPage: Page | undefined;
     const usageWrites: Promise<void>[] = [];
-    const submissionRejection = new ChatGptSubmissionRejectionObserver();
+    const originalAbortSignal = turn.abortSignal;
+    const rejectionAbort = new AbortController();
+    const submissionRejection = new ChatGptSubmissionRejectionObserver(error => rejectionAbort.abort(error));
+    turn = { ...turn, abortSignal: originalAbortSignal
+      ? AbortSignal.any([originalAbortSignal, rejectionAbort.signal])
+      : rejectionAbort.signal };
     try {
       if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
       // Validate only the selected physical message, not canonical history used for usage estimates.
@@ -7245,7 +7250,10 @@ export class ChatGptBrowserWorker {
       );
       return finalText;
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")
+      if (rejectionAbort.signal.aborted && !originalAbortSignal?.aborted
+        && !(error instanceof ChatGptWebAdapterError && error.code === "client_cancelled")) {
+        error = rejectionAbort.signal.reason;
+      } else if (!(error instanceof DOMException && error.name === "AbortError")
         && !(error instanceof ChatGptWebAdapterError && error.code === "client_cancelled")) {
         error = await submissionRejection.failure() ?? error;
       }
