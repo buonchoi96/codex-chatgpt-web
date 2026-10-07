@@ -1249,7 +1249,8 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
     },
     captureSubmissionBaseline: async () => ({}),
     attachPrompt: async () => {}, attachPromptWithCompactionRetry: async () => {}, attachFiles: async () => {},
-    waitForNewAssistantTurn: async () => ({}), waitForMultipartAcknowledgement: async () => {},
+    waitForNewAssistantTurn: async () => ({}),
+    waitForMultipartAcknowledgement: async () => ({ identity: "stage:1" }),
     sendAttachedPrompt: async (_page: unknown, _baseline: unknown, _capture: unknown, _signal: unknown,
       _progress: unknown, lifecycle: { onSendActivated(): Promise<void> }) => {
       await lifecycle.onSendActivated();
@@ -3239,7 +3240,7 @@ function thinkButtonFixture() {
     press: async () => {},
   };
   const composerForm = { getByRole: () => ({ filter: () => controls }), locator: () => composer, page: () => page };
-  return { state, composer, composerForm, page };
+  return { state, composer, composerForm, page, control };
 }
 
 test("modern app-mention connector pills are connector state, not Think prompt draft text", () => {
@@ -3817,6 +3818,65 @@ test("only a size rejection of the current owned browser submission is non-retry
   expect(page.listenerCount("response")).toBe(0);
 });
 
+test("completed SSE size errors reject only their current submission, not model text or stale streams", async () => {
+  const frame = {};
+  const page = Object.assign(new EventEmitter(), { mainFrame: () => frame });
+  const rejected: unknown[] = [];
+  const observer = new ChatGptSubmissionRejectionObserver(error => rejected.push(error));
+  const error = { error: "Localized service error", error_code: "input_too_large", error_reason: "last_user_message" };
+  let reads = 0;
+  const stream = (body: string | Promise<string>, owner = frame,
+    url = "https://chatgpt.com/backend-api/f/conversation") => {
+    const request = { method: () => "POST", url: () => url, frame: () => owner };
+    page.emit("request", request);
+    page.emit("response", {
+      request: () => request, status: () => 200, headers: () => ({ "content-type": "text/event-stream; charset=utf-8" }),
+      text: async () => { reads += 1; return body; },
+    });
+    return request;
+  };
+  const sse = (event: unknown) => `data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`;
+  const old = stream(sse(error));
+  observer.begin(page as unknown as Page);
+  for (const request of [old, stream(sse(error), {}), stream(sse(error), frame, "https://other.example/conversation")]) {
+    page.emit("requestfinished", request);
+  }
+  expect(reads).toBe(0);
+  const running = stream(sse(error));
+  expect(await observer.failure()).toBeUndefined();
+  expect(reads).toBe(0);
+  page.emit("requestfailed", running);
+  page.emit("requestfinished", running);
+  expect(reads).toBe(0);
+  for (const body of [
+    sse({ message: { content: { parts: [JSON.stringify(error)] } } }),
+    sse({ v: error }), sse({ ...error, error_code: "unknown_error" }),
+    sse({ ...error, error_reason: "unknown_reason" }), sse(null), "data: malformed\n\n",
+  ]) {
+    page.emit("requestfinished", stream(body));
+  }
+  expect(await observer.failure()).toBeUndefined();
+  expect(rejected).toHaveLength(0);
+  // Use actual SSE framing, including CRLF and a multiline data event.
+  page.emit("requestfinished", stream(`event: message\r\ndata: ${JSON.stringify(error, null, 2).replaceAll("\n", "\r\ndata: ")}\r\n\r\ndata: [DONE]\r\n\r\n`));
+  expect(await observer.failure()).toMatchObject({ code: "context_length_exceeded", retryable: false });
+  expect(rejected).toHaveLength(1);
+  let finish!: (body: string) => void;
+  page.emit("requestfinished", stream(new Promise<string>(resolve => { finish = resolve; })));
+  const pending = observer.failure();
+  observer.begin(page as unknown as Page);
+  finish(sse(error));
+  await pending;
+  expect(rejected).toHaveLength(1);
+  const disposed = stream(sse(error));
+  observer.dispose();
+  page.emit("requestfinished", disposed);
+  expect(rejected).toHaveLength(1);
+  for (const event of ["request", "response", "requestfinished", "requestfailed"]) {
+    expect(page.listenerCount(event)).toBe(0);
+  }
+});
+
 test("effort readback rejects a changed selection or surface before activating Send", async () => {
   const selection = { url: "https://chatgpt.com/?temporary-chat=true", label: "Alto" };
   const state = { url: selection.url, label: "Alto", expanded: "false", editable: true, count: 1 };
@@ -4094,23 +4154,22 @@ function toolConfirmationPage(options: {
       typeof name === "string" ? candidate === name : name.test(candidate)
     ));
     return {
-      last: () => button(name),
+      filter: () => button(name),
+      count: async () => actualName ? 1 : 0,
       waitFor: async () => {
         if (!actualName) throw new Error(`Approval button not found: ${String(name)}`);
       },
-      press: async (key: string) => {
+      click: async () => {
         if (!actualName) throw new Error(`Approval button not found: ${String(name)}`);
-        pressed.push(`${actualName}:${key}`);
+        pressed.push(`${actualName}:click`);
         visible = false;
       },
     };
   };
   const dialog = {
-    filter: ({ hasText }: { hasText: string }) => {
-      expect(hasText).toBe("Allow ChatGPT to use Codex Native?");
-      return dialog;
-    },
-    last: () => dialog,
+    filter: () => dialog,
+    first: () => dialog,
+    count: async () => visible ? 1 : 0,
     isVisible: async () => {
       reads += 1;
       if (options.disappearAfterReads !== undefined && reads >= options.disappearAfterReads) visible = false;
@@ -4122,16 +4181,23 @@ function toolConfirmationPage(options: {
       expect(visible).toBeFalse();
     },
   };
-  const surfaceSelector = options.surface === "card"
+  const surfaceSelector = options.surface === "current"
+    ? '[data-codex-approval-surface="true"]'
+    : options.surface === "card"
     ? '[data-testid="tool-approval-card"]'
     : '[role="dialog"]';
   const hiddenDialog = {
     filter: () => hiddenDialog,
-    last: () => hiddenDialog,
+    count: async () => 0,
     isVisible: async () => false,
   };
   return {
     page: {
+      getByText: (text: string, options: { exact: boolean }) => {
+        expect(text).toBe("Allow ChatGPT to use Codex Native?");
+        expect(options.exact).toBeTrue();
+        return {};
+      },
       locator: (selector: string) => selector.includes(surfaceSelector)
         ? dialog
         : hiddenDialog,
@@ -4165,14 +4231,14 @@ test("connector auto-approval accepts the current shortened Allow action", async
   const fixture = toolConfirmationPage({ allowLabel: "Allow" });
 
   expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", true)).toBeTrue();
-  expect(fixture.pressed).toEqual(["Allow:Enter"]);
+  expect(fixture.pressed).toEqual(["Allow:click"]);
 });
 
 test("auto-approval recognizes the observed non-dialog approval card", async () => {
   const fixture = toolConfirmationPage({ surface: "card" });
 
   expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", true)).toBeTrue();
-  expect(fixture.pressed).toEqual(["Allow once:Enter"]);
+  expect(fixture.pressed).toEqual(["Allow once:click"]);
 });
 
 test("browser preflight separates model context from one-message transport limits", () => {
@@ -4373,7 +4439,10 @@ test("Bigger Context keeps the hard model window fixed and enforces transport bo
 test("Bigger Context stages use the lowest account mode that can carry the stage", () => {
   const plus = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false };
   const pro = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 30_000, 200_000).effort).toBe("low");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 20_000, 200_000).effort).toBe("low");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 23_807, 200_000).effort).toBe("low");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 23_808, 200_000).effort).toBe("medium");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 30_000, 200_000).effort).toBe("medium");
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 30_000, 300_000).effort).toBe("medium");
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 80_000, 300_000).effort).toBe("medium");
   // The same text must have the same transport budget inline, staged or in the final part.
@@ -4739,6 +4808,30 @@ test("visible generation suspends DOM health and restarts its grace when Stop di
   expect(tracker.update(absent, 62_000)).toContain("did not create a response DOM");
 });
 
+test("an idle empty response without completion controls cannot keep the turn alive indefinitely", () => {
+  // #760: a response shell exists, but the page shows an error instead of an answer or Retry.
+  const health = new ChatGptTurnDomHealthTracker(1_000, 500, 750);
+  const stalled = { responsePresent: true, running: false, currentText: "", completionActionVisible: false,
+    activityText: "Last tool completed" };
+  expect(health.update(stalled, 0)).toBeUndefined();
+  expect(health.update(stalled, 749)).toBeUndefined();
+  expect(health.update(stalled, 750)).toContain("without a final answer");
+
+  // Genuine visible activity, generation, and MCP progress each restart the grace period.
+  const progressing = { ...stalled, activityText: "Research continues" };
+  expect(health.update(progressing, 800)).toBeUndefined();
+  expect(health.update(progressing, 1549)).toBeUndefined();
+  expect(health.update({ ...progressing, running: true }, 1550)).toBeUndefined();
+  expect(health.update({ ...progressing, running: true }, 100_000)).toBeUndefined();
+  expect(health.update(progressing, 100_100)).toBeUndefined();
+  health.suspendForProgress();
+  expect(health.update({ ...progressing, externalProgressLive: true }, 200_000)).toBeUndefined();
+  expect(health.update(progressing, 300_000)).toBeUndefined();
+  expect(health.update(progressing, 300_749)).toBeUndefined();
+  expect(health.update(progressing, 300_750)).toContain("without a final answer");
+  expect(health.update({ ...progressing, currentText: "Final answer", completionActionVisible: true }, 301_000)).toBeUndefined();
+});
+
 test("stalled-turn diagnostics record DOM metrics without response or overlay content", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const start = workerSource.indexOf("private async stalledTurnDiagnostic");
@@ -4793,7 +4886,7 @@ test("suspending DOM health for proven MCP progress restarts the missing-respons
 
   // Proven tool-call activity suspends the check. Charging that suspended stretch against the
   // grace period is what let a live turn be cancelled the moment liveness lapsed.
-  tracker.clearMissingResponse();
+  tracker.suspendForProgress();
 
   expect(tracker.update(absent, 10_000)).toBeUndefined();
   expect(tracker.update(absent, 10_999)).toBeUndefined();
@@ -4812,7 +4905,7 @@ test("clearing the missing-response window preserves whether a response was ever
 
   expect(tracker.update(present, 1_000)).toBeUndefined();
   expect(tracker.update(absent, 1_500)).toBeUndefined();
-  tracker.clearMissingResponse();
+  tracker.suspendForProgress();
   expect(tracker.update(absent, 5_000)).toBeUndefined();
   expect(tracker.update(absent, 6_000)).toContain("response DOM disappeared");
 });

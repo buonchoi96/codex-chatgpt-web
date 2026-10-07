@@ -38,7 +38,10 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
       actions.push(`effort:${effort}`);
       return resolveChatGptWebModelMode(model, effort, capabilities);
     },
-    captureSubmissionBaseline: async () => ({}),
+    captureSubmissionBaseline: async (_page: unknown, _text: string, acknowledged: unknown[] = []) => {
+      expect(acknowledged).toHaveLength(actions.filter(action => action === "ack").length);
+      return {};
+    },
     attachPrompt: async (_page: unknown, _text: string, localTools: boolean) => {
       expect(localTools).toBe(false);
       actions.push("attach:plain");
@@ -59,9 +62,12 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
         const request = { method: () => "POST", url: () => "https://chatgpt.com/backend-api/f/conversation", frame: () => frame };
         page.emit("request", request);
         page.emit("response", {
-          request: () => request, status: () => 413, headers: () => ({ "content-type": "application/json" }),
+          request: () => request, status: () => sseRejection ? 200 : 413,
+          headers: () => ({ "content-type": sseRejection ? "text/event-stream" : "application/json" }),
           json: async () => ({ detail: { code: "message_length_exceeds_limit" } }),
+          text: async () => 'data: {"error":"The message you submitted was too long, please edit it and resubmit.","error_code":"input_too_large","error_reason":"last_user_message"}\n\ndata: [DONE]\n\n',
         });
+        page.emit("requestfinished", request);
       }
       recoveryCallbacks.push(args[7]);
       actions.push("send");
@@ -74,7 +80,7 @@ test.each([[true, false, true], [false, false, true], [true, true, true], [true,
       if (stage === "send") throw finalResponse;
       return {};
     },
-    waitForMultipartAcknowledgement: async () => { actions.push("ack"); },
+    waitForMultipartAcknowledgement: async () => { actions.push("ack"); return { identity: `stage:${actions.length}` }; },
   });
   try {
     await expect(worker.runBrowserTurn({
