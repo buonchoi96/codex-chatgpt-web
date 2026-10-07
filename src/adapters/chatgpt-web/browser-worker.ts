@@ -2048,6 +2048,14 @@ export class ChatGptTurnDomHealthTracker {
     this.missingCompletionAction = undefined;
   }
 
+  /**
+   * Reset only the missing-response grace. Transport recovery uses this narrower reset so
+   * unrelated finalization timers are not silently extended.
+   */
+  clearMissingResponse(): void {
+    this.missingResponseSince = undefined;
+  }
+
   update(state: {
     responsePresent: boolean;
     running: boolean;
@@ -2092,7 +2100,6 @@ export class ChatGptTurnDomHealthTracker {
 
     const missingCompletionAction = state.responsePresent
       && !state.running
-      && state.currentText.length > 0
       && !terminalUiReady;
     if (!missingCompletionAction) {
       this.missingCompletionAction = undefined;
@@ -4754,7 +4761,7 @@ export class ChatGptBrowserWorker {
         Date.now(),
       );
       if (networkErrorRetry && externalToolCallsInFlight) {
-        domHealthTracker.suspendForProgress();
+        domHealthTracker.clearMissingResponse();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
       }
@@ -4778,7 +4785,7 @@ export class ChatGptBrowserWorker {
       if (!snapshot.responsePresent && (externalProgressLive || frontendErrorVisible)) {
         // Proven MCP activity outranks a momentarily unavailable staging DOM. Recognized transient
         // frontend error UI is governed by the progress-aware five-minute watchdog instead.
-        domHealthTracker.suspendForProgress();
+        domHealthTracker.clearMissingResponse();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
       }
@@ -6809,7 +6816,7 @@ export class ChatGptBrowserWorker {
         if (networkErrorDecision === "wait") {
           // The browser transport failed, but the native operation is authoritative live work.
           // Let its result reach the broker before deciding whether this response must be resumed.
-          domHealthTracker.suspendForProgress();
+          domHealthTracker.clearMissingResponse();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
@@ -6882,7 +6889,7 @@ export class ChatGptBrowserWorker {
           // Proven MCP activity outranks a momentarily unavailable response DOM. Recognized
           // response-level error UI is governed by the five-minute progress watchdog rather than
           // the ordinary missing-DOM horizon.
-          domHealthTracker.suspendForProgress();
+          domHealthTracker.clearMissingResponse();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
