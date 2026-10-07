@@ -896,28 +896,59 @@ export function compileChatGptWebPrompt(
       };
       const imageTokens = images.reduce((sum, image) => sum + chatGptWebImageTokenReserve(image.detail), 0);
       const transactionId = `ctx_${"0".repeat(32)}`;
-      const budgets = multipart.parts.map((payload, index) => {
-        const final = index === multipart.parts.length - 1;
-        const effort = final ? mode.effort : capabilities.proAvailable ? "max" : "medium";
-        const limits = resolveChatGptWebTransportLimits(CHATGPT_WEB_MODEL_ID, effort, capabilities);
-        const tokenLimit = resolveChatGptWebMessageTokenBudget(
-          CHATGPT_WEB_MODEL_ID, effort, capabilities, final ? imageTokens + skillFileTokens(skillFiles, parsed.modelId) : 0,
-        );
-        const fixedMessage = final
-          ? formatChatGptWebMultipartCommit(multipart, transactionId)
-          : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
-        const tokens = tokenLimit - estimateTokens(fixedMessage);
-        const chars = (limits.browserComposerCharLimit ?? Infinity) - fixedMessage.length;
-        if (tokens <= 0 || chars <= 0) {
-          throw new ChatGptWebAdapterError(
-            `The Bigger Context ${final ? "final part's instructions and attachments" : "stage wrapper"} exceed the available message budget before any task history is added. Reduce those inputs before retrying.`,
-            { status: 400, errorType: "invalid_request_error", code: "message_length_exceeds_limit", retryable: false },
-          );
+      // First try Instant-sized stages and give the final selected mode its own larger share.
+      // Equal parts near Instant's maximum can be accepted once and rejected on the next Send.
+      // If complete records cannot fit that allocation, plan with the wider available stage mode
+      // before submitting anything; no context is truncated and no failed upload is replayed.
+      const stagingEfforts = capabilities.proAvailable ? ["max"] as const : ["low", "medium"] as const;
+      const emptyParts = multipart.parts;
+      for (const stagingEffort of stagingEfforts) {
+        multipart.parts = emptyParts;
+        const budgets = multipart.parts.map((payload, index) => {
+          const final = index === multipart.parts.length - 1;
+          const effort = final ? mode.effort : stagingEffort;
+          const limits = resolveChatGptWebTransportLimits(CHATGPT_WEB_MODEL_ID, effort, capabilities);
+          const tokenLimit = final
+            ? resolveChatGptWebMessageTokenBudget(
+                CHATGPT_WEB_MODEL_ID,
+                effort,
+                capabilities,
+                imageTokens + skillFileTokens(skillFiles, parsed.modelId),
+              )
+            : resolveChatGptWebStagingTokenBudget(CHATGPT_WEB_MODEL_ID, effort, capabilities);
+          const fixedMessage = final
+            ? formatChatGptWebMultipartCommit(multipart, transactionId)
+            : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
+          const tokens = tokenLimit - estimateTokens(fixedMessage);
+          const chars = (limits.browserComposerCharLimit ?? Infinity) - fixedMessage.length;
+          if (tokens <= 0 || chars <= 0) {
+            throw new ChatGptWebAdapterError(
+              `The Bigger Context ${final ? "final part's instructions and attachments" : "stage wrapper"} exceed the available message budget before any task history is added. Reduce those inputs before retrying.`,
+              { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+            );
+          }
+          return {
+            tokens,
+            chars,
+            tokenLimit,
+            charLimit: limits.browserComposerCharLimit ?? Infinity,
+          };
+        });
+        multipart.parts = partitionMultipartContext(records, multipartParts!, budgets);
+        if (stagingEffort === "low" && multipart.parts.some((payload, index) => {
+          const final = index === multipart.parts.length - 1;
+          const text = final
+            ? formatChatGptWebMultipartCommit(multipart, transactionId)
+            : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!).text;
+          return estimateTokens(text) > budgets[index]!.tokenLimit
+            || text.length > budgets[index]!.charLimit;
+        })) {
+          continue;
         }
-        return { tokens, chars };
-      });
-      multipart.parts = partitionMultipartContext(records, multipartParts!, budgets);
-      return { text: multipart.commit, images, ...attachments, multipart };
+        return { text: multipart.commit, images, ...attachments, multipart };
+      }
+      throw new Error("No Bigger Context staging allocation is available");
+
     }
     const envelopeJson = withoutRetiredTurnHandles(JSON.stringify({ version: 3, system, messages }));
     const text = [
