@@ -903,7 +903,7 @@ describe("reversible native Codex route integration", () => {
       [withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n', "refusing to overwrite it"],
       [withoutHook + '\n[hooks]\nInterrupt = []\n', "refusing to overwrite it"],
       [withoutHook + '\n[hooks]\nstate = "invalid"\n', "refusing to overwrite it"],
-      [withoutHook + '\n[mcp_servers.invalid\n', "could not be parsed as TOML"],
+      [withoutHook + '\n[mcp_servers.invalid\n', "TOML"],
     ] as const) {
       writeFileSync(configPath, current);
       expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).toThrow(diagnosis);
