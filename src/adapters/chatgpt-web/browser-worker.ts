@@ -1668,6 +1668,12 @@ export function chatGptFinalIndicatesDeveloperMcpUnavailable(text: string): bool
     || normalized.includes("this conversation does not support developer mcp");
 }
 
+interface ChatGptAcknowledgedMultipartStage {
+  text: string;
+  acknowledgement: string;
+  identities: string[];
+}
+
 interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
@@ -3745,16 +3751,64 @@ export class ChatGptBrowserWorker {
     return (await this.responseDomSnapshot(locator, {})).visibleText;
   }
 
+  private async reconcileMultipartHistory(
+    page: Page,
+    baseline: ChatGptSubmissionBaseline,
+    state: ChatGptSubmissionDomState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const stages = baseline.acknowledgedStages;
+    if (!stages?.length) return;
+    for (const stage of stages) {
+      if (stage.identities.filter(identity => state.turnIdentities.includes(identity)).length > 1) {
+        throw new Error("ChatGPT duplicated an acknowledged Bigger Context exchange");
+      }
+    }
+    const known = new Set(baseline.initialTurnIdentities);
+    const candidates = state.turnIdentities.filter(identity => identity.startsWith("group:assistant:")
+      && !known.has(identity));
+    for (const identity of candidates) {
+      const previousStage = stages.find(stage => stage.identities.includes(identity));
+      if (previousStage) {
+        known.add(identity);
+        known.add(`group:user:${identity.slice("group:assistant:".length)}`);
+        continue;
+      }
+      const locator = page.locator(`[data-turn-key=${JSON.stringify(identity.slice("group:assistant:".length))}]`);
+      const text = await withChatGptBrowserObservationTimeout(withBrowserTurnAbort(locator.evaluate(group => {
+        const bubbles = group.querySelectorAll<HTMLElement>("[data-user-message-bubble]");
+        const contents = bubbles.length === 1
+          ? bubbles[0]!.querySelectorAll<HTMLElement>("[data-search-result-target]") : [];
+        return contents.length === 1 ? contents[0]!.innerText.replace(/\r\n?/g, "\n") : undefined;
+      }), signal));
+      const snapshot = await this.responseDomSnapshot(locator, {});
+      const stage = stages.find(candidate => candidate.text.replace(/\r\n?/g, "\n") === text);
+      const ackStage = stages.find(candidate => candidate.acknowledgement === snapshot.visibleText.trim());
+      if (!stage && !ackStage) continue;
+      if (!stage || stage !== ackStage || !snapshot.completionActionVisible) {
+        throw new Error("ChatGPT changed an acknowledged Bigger Context exchange");
+      }
+      if (stage.identities.some(previous => state.turnIdentities.includes(previous))) {
+        throw new Error("ChatGPT duplicated an acknowledged Bigger Context exchange");
+      }
+      stage.identities.push(identity);
+      known.add(identity);
+      known.add(`group:user:${identity.slice("group:assistant:".length)}`);
+    }
+    baseline.initialTurnIdentities = [...known];
+  }
+
   private async captureSubmissionBaseline(
     page: Page,
     submittedText?: string,
+    acknowledgedStages: readonly ChatGptAcknowledgedMultipartStage[] = [],
     signal?: AbortSignal,
   ): Promise<ChatGptSubmissionBaseline> {
     const userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
     const responseTurns = page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR);
     const domCache: ChatGptSubmissionDomCache = {};
     const state = await this.submissionDomState(page, domCache, signal);
-    return {
+    const baseline: ChatGptSubmissionBaseline = {
       userTurns,
       responseTurns,
       initialTurnIdentities: [],
@@ -3763,7 +3817,7 @@ export class ChatGptBrowserWorker {
       acknowledgedStages: [...acknowledgedStages],
     };
     // A stage can persist under its new key before the next baseline is captured.
-    await this.reconcileMultipartHistory(page, baseline, state);
+    await this.reconcileMultipartHistory(page, baseline, state, signal);
     baseline.initialTurnIdentities = state.turnIdentities;
     return baseline;
   }
@@ -4625,7 +4679,7 @@ export class ChatGptBrowserWorker {
         Date.now(),
       );
       if (networkErrorRetry && externalToolCallsInFlight) {
-        domHealthTracker.clearMissingResponse();
+        domHealthTracker.suspendForProgress();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
       }
@@ -4649,7 +4703,7 @@ export class ChatGptBrowserWorker {
       if (!snapshot.responsePresent && (externalProgressLive || frontendErrorVisible)) {
         // Proven MCP activity outranks a momentarily unavailable staging DOM. Recognized transient
         // frontend error UI is governed by the progress-aware five-minute watchdog instead.
-        domHealthTracker.clearMissingResponse();
+        domHealthTracker.suspendForProgress();
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
       }
@@ -6024,6 +6078,7 @@ export class ChatGptBrowserWorker {
       const captureSubmissionBaselineWithRecovery = async (
         stage: string,
         submittedText?: string,
+        acknowledgedStages: readonly ChatGptAcknowledgedMultipartStage[] = [],
       ): Promise<ChatGptSubmissionBaseline> => this.runStage(
         turn.traceId,
         stage,
@@ -6035,7 +6090,7 @@ export class ChatGptBrowserWorker {
           let rebindAttempts = 0;
           for (;;) {
             try {
-              return await this.captureSubmissionBaseline(page, submittedText, signal);
+              return await this.captureSubmissionBaseline(page, submittedText, acknowledgedStages, signal);
             } catch (error) {
               if (!(error instanceof ChatGptBrowserObservationTimeoutError)
                 || !launcherObservationRecovery
@@ -6150,6 +6205,7 @@ export class ChatGptBrowserWorker {
           let stageBaseline = await captureSubmissionBaselineWithRecovery(
             `multipart_stage_${index + 1}_baseline`,
             stage.text,
+            acknowledgedStages,
           );
           await this.runStage(
             turn.traceId,
@@ -6270,6 +6326,7 @@ export class ChatGptBrowserWorker {
       let submissionBaseline = await captureSubmissionBaselineWithRecovery(
         "submission_baseline",
         finalPrompt,
+        acknowledgedStages,
       );
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
@@ -6325,7 +6382,7 @@ export class ChatGptBrowserWorker {
                 trackUsage,
                 turn.modelFamily,
               );
-              submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt);
+              submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, acknowledgedStages);
             },
           );
           await diagnostics.capture(page, "connector-catalog-refreshed");
@@ -6672,7 +6729,7 @@ export class ChatGptBrowserWorker {
         if (networkErrorDecision === "wait") {
           // The browser transport failed, but the native operation is authoritative live work.
           // Let its result reach the broker before deciding whether this response must be resumed.
-          domHealthTracker.clearMissingResponse();
+          domHealthTracker.suspendForProgress();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
@@ -6745,7 +6802,7 @@ export class ChatGptBrowserWorker {
           // Proven MCP activity outranks a momentarily unavailable response DOM. Recognized
           // response-level error UI is governed by the five-minute progress watchdog rather than
           // the ordinary missing-DOM horizon.
-          domHealthTracker.clearMissingResponse();
+          domHealthTracker.suspendForProgress();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
