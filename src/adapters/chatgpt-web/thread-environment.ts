@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { atomicWriteFile } from "../../config";
 import { getCodexHome } from "../../codex-integration-shared";
@@ -21,6 +21,7 @@ import {
   type ChatGptTurnEnvironment,
 } from "./environment";
 import { resolveCurrentCodexRolloutEnvironment } from "./codex-rollout-environment";
+import { ChatGptWebAdapterError } from "./adapter-error";
 
 interface StoredThreadEnvironment {
   cwd: string;
@@ -259,7 +260,9 @@ export class ChatGptThreadEnvironmentStore {
   }
 
   private set(threadId: string, environment: ChatGptTurnEnvironment): void {
-    this.load();
+    // Only this path has already verified authority from the current request, native
+    // rollout, or a successfully loaded parent. A cache read alone may never recover it.
+    this.load(true);
     this.threads.delete(threadId);
     this.threads.set(threadId, authority(environment, this.now()));
     while (this.threads.size > MAX_THREAD_ENVIRONMENTS) {
@@ -319,6 +322,6 @@ export class ChatGptThreadEnvironmentStore {
       version: 1,
       threads: Object.fromEntries(entries),
     };
-    atomicWriteFile(this.path, `${JSON.stringify(payload, null, 2)}\n`);
+    atomicWriteFile(this.path, `${JSON.stringify(payload, null, 2)}\n`, { durable: true });
   }
 }
