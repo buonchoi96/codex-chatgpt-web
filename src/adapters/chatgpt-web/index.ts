@@ -1969,6 +1969,11 @@ export function createChatGptWebAdapter(
             // owned DOM observer can continue proving the same accepted ChatGPT submission.
             throw error;
           }
+          // A browser failure can retire its capability before the pending broker wait wakes.
+          // When that exact browser already settled while this round was awaiting runtime work,
+          // its semantic failure is authoritative over the cleanup's token-expired error.
+          const settledFailure = awaitingRuntime ? session.settledOutcome() : undefined;
+          if (settledFailure?.type === "error") error = settledFailure.error;
           console.error(
             `[chatgpt-web] observer_failure ${JSON.stringify({
               traceId,
