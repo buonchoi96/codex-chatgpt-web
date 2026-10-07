@@ -3807,7 +3807,7 @@ test("only a size rejection of the current owned browser submission is non-retry
   expect(await observer.failure()).toBeUndefined();
   const current = makeRequest(); page.emit("request", current); respond(current);
   expect(await observer.failure()).toMatchObject({
-    status: 400, code: "message_length_exceeds_limit", errorType: "invalid_request_error", retryable: false,
+    status: 400, code: "context_length_exceeded", errorType: "invalid_request_error", retryable: false,
   });
   observer.begin(page as unknown as Page);
   expect(await observer.failure()).toBeUndefined();
@@ -4207,9 +4207,11 @@ function toolConfirmationPage(options: {
 }
 
 test("manual ChatGPT connector approval pauses and resumes the same browser turn", async () => {
-  const fixture = toolConfirmationPage({ disappearAfterReads: 3 });
-
-  expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", false, undefined, 100)).toBeTrue();
+  const fixture = toolConfirmationPage({ disappearAfterReads: 2 });
+  const pending: boolean[] = [];
+  expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", false, undefined, 100,
+    undefined, async value => { pending.push(value); })).toBeTrue();
+  expect(pending).toEqual([true, false]);
   expect(fixture.pressed).toEqual([]);
 });
 
