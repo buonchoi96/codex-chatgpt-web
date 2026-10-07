@@ -514,11 +514,14 @@ function smokePassedForCurrentVersion(state) {
 }
 
 function syncFreshConversationPreference(stateStore, config) {
+  const biggerContextAvailable = config?.solAvailable === true;
   const useSavedChats = config?.useSavedChats === true;
   const enabled = config?.experimentalFreshConversationPerTurn === true;
   const current = stateStore.read();
   if (runtimeHost?.currentOperation()) return current;
-  if (current.experimentalFreshConversationPerTurn === enabled && current.useSavedChats === useSavedChats) return current;
+  if (current.experimentalFreshConversationPerTurn === enabled
+    && current.useSavedChats === useSavedChats
+    && current.biggerContextAvailable === biggerContextAvailable) return current;
   // Runtime restarts leave browser views alive. Retire completed chats when their
   // persistence policy changes, including changes made by the CLI.
   const retainedKeys = new Set([...browserHost.turnTabs.values()]
@@ -526,7 +529,11 @@ function syncFreshConversationPreference(stateStore, config) {
       && (current.useSavedChats !== useSavedChats || tab.interactionMode === "automatic"))
     .map(tab => tab.conversationKey));
   for (const key of retainedKeys) releaseRetainedConversation(browserHost, key);
-  const state = stateStore.update({ experimentalFreshConversationPerTurn: enabled, useSavedChats });
+  const state = stateStore.update({
+    experimentalFreshConversationPerTurn: enabled,
+    useSavedChats,
+    biggerContextAvailable,
+  });
   send("launcher:state-changed", state);
   return state;
 }
