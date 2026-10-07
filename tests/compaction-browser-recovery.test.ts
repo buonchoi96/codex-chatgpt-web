@@ -105,9 +105,14 @@ test.each([
     // Exercise the real attachment path: the previous Send cleared its mention,
     // even though this conversation still belongs to the same launcher task.
     let connectorSelected = false;
+    const absentSelection = {
+      filter: () => absentSelection,
+      evaluateAll: async () => [],
+    };
     const composer = {
       fill: async () => { connectorSelected = false; },
       focus: async () => {}, press: async () => {},
+      locator: () => absentSelection,
     };
     const absentDialog = { filter: () => absentDialog, last: () => absentDialog, isVisible: async () => false };
     Object.assign(page, { locator: () => absentDialog });
