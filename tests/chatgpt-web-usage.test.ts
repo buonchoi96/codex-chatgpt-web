@@ -90,18 +90,19 @@ test("GPT-6 Sol on Plus keeps standard context while Pro can stage the same comp
   expect(() => compileChatGptWebPrompt(parsed, plus, undefined, { experimentalMultipartParts: 2 }))
     .toThrow("GPT-6 Sol uses standard context");
   expect(parsed).toEqual(original);
-  // The fork's automatic transport chooses a complete ZIP, not forced multipart.
-  // Explicit multipart is still supported on Pro and must preserve all records.
+  // GPT-5.6's custom 1M model still uses automatic ZIP transport. GPT-6 Pro
+  // selects a two-part transaction at the lower measured reasoning-mode threshold.
   expect(resolveBiggerContextMultipartParts({ ...parsed, _chatgptModelFamily: "5.6" }, capabilities)).toBeUndefined();
-  expect(resolveBiggerContextMultipartParts(parsed, capabilities)).toBeUndefined();
+  const parts = resolveBiggerContextMultipartParts(parsed, capabilities);
+  expect(parts).toBe(2);
   const archivedPro = compileChatGptWebPrompt(parsed, capabilities);
   const proContext = archivedPro.archive?.contextText ?? archivedPro.contextFile?.text ?? archivedPro.text;
   for (const message of parsed.context.messages) expect(proContext).toContain(message.content as string);
-  const staged = compileChatGptWebPrompt(parsed, capabilities, undefined, { experimentalMultipartParts: 2 });
+  const staged = compileChatGptWebPrompt(parsed, capabilities, undefined, { experimentalMultipartParts: parts });
   expect(staged.multipart!.parts.flatMap(part => JSON.parse(part).records).map(record => record.message.content))
     .toEqual(parsed.context.messages.map(message => message.content));
-  expect(estimateChatGptWebUsage(parsed, { answer: "done" }, capabilities, true))
-    .toEqual(estimateChatGptWebUsage(parsed, { answer: "done" }, capabilities, false));
+  expect(estimateChatGptWebUsage(parsed, { answer: "done" }, capabilities, true).inputTokens)
+    .toBe(estimateCompiledChatGptWebInputTokens(staged, parsed.modelId));
 }, 30_000);
 
 test("GPT-6 compaction respects the selected account and effort", () => {
