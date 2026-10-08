@@ -3278,6 +3278,7 @@ function thinkButtonFixture() {
     getByRole: () => ({ filter: () => controls }),
   };
   const composer = {
+    page: () => page,
     filter: () => composer, first: () => composer, last: () => composer, locator: () => composerForm,
     evaluate: async () => ({ text: state.draft.trim(), connectors: [...state.connectors] }),
     focus: async () => {},
@@ -3308,7 +3309,7 @@ test("modern app-mention connector pills are connector state, not Think prompt d
 });
 
 test("Think button toggles only when needed, preserves connectors, and normal Luna clears it", async () => {
-  const { state, composerForm } = thinkButtonFixture();
+  const { state, composer } = thinkButtonFixture();
   state.connectors = ["Codex Native2"];
   const checkpoints: string[] = [];
 
@@ -3316,9 +3317,9 @@ test("Think button toggles only when needed, preserves connectors, and normal Lu
   expect(state.pressed).toBeTrue();
   expect(state.clicks).toBe(1);
   expect(state.connectors).toEqual(["Codex Native2"]);
-  await setChatGptThinkMode(composerForm as never, true);
+  await setChatGptThinkMode(composer as never, true);
   expect(state.clicks).toBe(1);
-  await setChatGptThinkMode(composerForm as never, false, async checkpoint => { checkpoints.push(checkpoint); });
+  await setChatGptThinkMode(composer as never, false, async checkpoint => { checkpoints.push(checkpoint); });
   expect(state.pressed).toBeFalse();
   expect(state.clicks).toBe(2);
   expect(state.draft).toBe("");
@@ -3331,7 +3332,7 @@ test("Think button toggles only when needed, preserves connectors, and normal Lu
 test("Think activation fails closed when the visible semantic button is unavailable", async () => {
   const ui = thinkButtonFixture();
   ui.state.controlPresent = false;
-  await expect(setChatGptThinkMode(ui.composerForm as never, true))
+  await expect(setChatGptThinkMode(ui.composer as never, true))
     .rejects.toThrow("Think button is unavailable");
   expect(ui.state.clicks).toBe(0);
 });
