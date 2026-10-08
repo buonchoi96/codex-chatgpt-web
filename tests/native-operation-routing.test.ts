@@ -13,6 +13,14 @@ const repl: CodexTool = { name: "js", namespace: "mcp__node_repl", description: 
 const gateway: CodexTool = { name: "exec", freeform: true, description: "Native gateway", parameters: {} };
 const ok: BrokerToolResult = { content: [{ type: "text", text: "ok" }] };
 
+// Native nested inventories require the unpredictable marker of this exact request.
+function nestedCatalogFor(input: string, tools: { name: string; description: string }[]): BrokerToolResult {
+  const marker = /codex-tool-catalog:[a-f0-9]{32}:/.exec(input)?.[0];
+  if (!marker) throw new Error("Missing inventory marker in gateway program");
+  return { content: [{ type: "text", text: marker + JSON.stringify({ tools, total: tools.length }) }] };
+}
+
+
 async function harness(tools: CodexTool[], run: (context: { client: Client; broker: TurnBroker; token: string }) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), "cgw-operation-"));
   const socket = defaultBrokerEndpoint(root);
@@ -101,16 +109,16 @@ test("indeterminate results permit no automatic or identical retries", async () 
 test("successful nested discovery is reused and a changed outer registry invalidates it", async () => {
   await harness([gateway], async ({ client, broker, token }) => {
     const args = { turn_token: token, query: "node_repl" };
-    const catalog = { content: [{ type: "text", text: JSON.stringify({ tools: [{ name: "mcp__node_repl__js", description: "Persistent REPL" }], total: 1 }) }] };
+    const entries = [{ name: "mcp__node_repl__js", description: "Persistent REPL" }];
     const first = client.callTool({ name: "codex_tool_inventory", arguments: args });
-    const [request] = await broker.nextToolBatch(token); broker.completeTool(token, request!.callId, catalog); await first;
+    const [request] = await broker.nextToolBatch(token); broker.completeTool(token, request!.callId, nestedCatalogFor(request!.input!, entries)); await first;
     expect((await client.callTool({ name: "codex_tool_inventory", arguments: args })).structuredContent).toMatchObject({ total: 1 });
     // The exact same environment is required, while registry metadata is allowed to advance.
     const claim = await import("../src/adapters/chatgpt-web/turn-broker");
     const binding = await claim.callTurnBroker<{ bindingId: string; environment: any }>(broker.socketPath, { method: "claim", token });
     broker.updateEnvironment(token, { ...binding.environment, tools: [{ ...gateway, description: "Changed registry revision" }] });
     const third = client.callTool({ name: "codex_tool_inventory", arguments: args });
-    const [refresh] = await broker.nextToolBatch(token); broker.completeTool(token, refresh!.callId, catalog);
+    const [refresh] = await broker.nextToolBatch(token); broker.completeTool(token, refresh!.callId, nestedCatalogFor(refresh!.input!, entries));
     expect((await third).structuredContent).toMatchObject({ total: 1 });
   });
 }, 30_000);
@@ -120,7 +128,8 @@ test("namespace discovery includes deferred siblings even with one direct capabi
     const pending = client.callTool({ name: "codex_tool_inventory", arguments: { turn_token: token, query: "node_repl" } });
     const abort = new AbortController();
     const outcome = await Promise.race([pending.then(() => []), broker.nextToolBatch(token, abort.signal).catch(() => [])]);
-    for (const request of outcome) broker.completeTool(token, request.callId, { content: [{ type: "text", text: JSON.stringify({ tools: [{ name: "mcp__node_repl__reset", description: "Reset REPL" }], total: 1 }) }] });
+    for (const request of outcome) broker.completeTool(token, request.callId,
+      nestedCatalogFor(request.input!, [{ name: "mcp__node_repl__reset", description: "Reset REPL" }]));
     abort.abort();
     const result = await pending;
     expect(outcome).toHaveLength(1);
