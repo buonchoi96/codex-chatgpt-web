@@ -83,6 +83,8 @@ import {
   releaseLauncherRetainedConversation,
 } from "../../launcher-browser-host";
 import {
+  CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_ERROR,
+  CHATGPT_WEB_MODEL_CONTEXT_WINDOW,
   resolvedChatGptWebContextWindow,
   resolveChatGptWebContextLimits,
   resolveChatGptWebMessageTokenBudget,
