@@ -3230,7 +3230,7 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
     getByRole: () => ({ filter: () => ({ count: async () => 0 }) }),
     page: () => page,
   };
-  const composer = { locator: () => composerForm };
+  const composer = { locator: () => composerForm, page: () => page };
   const selectModelAndEffort = (ChatGptBrowserWorker.prototype as unknown as {
     selectModelAndEffort(
       page: unknown,
@@ -4537,10 +4537,10 @@ test("Bigger Context keeps the hard model window fixed and enforces transport bo
     )).toThrow("1,050,000-token model context window");
   }
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    1_049_999, 80_000, "gpt-5.6-sol", "high", plus, 900_000, 6,
+    1_049_999, 80_000, "gpt-5.6-sol", "high", plus, 500_000, 6,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    1_050_000, 80_000, "gpt-5.6-sol", "high", plus, 900_000, 6,
+    1_050_000, 80_000, "gpt-5.6-sol", "high", plus, 500_000, 6,
   )).toThrow("1,050,000-token model context window");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     280_000, 103_001, "gpt-5.6-sol", "high", pro, 500_000, 6,

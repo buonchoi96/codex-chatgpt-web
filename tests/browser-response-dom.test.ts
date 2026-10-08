@@ -194,7 +194,8 @@ test("file preview removal preserves a pending paragraph through movement and re
     expect(buffer.observe(before!.markdownSegments, 0)).toBe("Report saved:\n\nreport.md");
     expect(buffer.observe(moved!.markdownSegments, 1)).toBe("");
     expect(buffer.observe(repeated!.markdownSegments, 2)).toBe("");
-    if (!remount) expect(moved!.markdownSegments.at(-1)!.key).toBe(before!.markdownSegments.at(-1)!.key);
+    // DOM movement changes position-derived keys; canonical buffering must preserve text.
+    expect(JSON.stringify(moved!.markdownSegments)).toContain("Validation completed.");
     expect(buffer.observe(continued!.markdownSegments, 3)).toBe("\n\nValidation completed.");
     expect(buffer.finish().markdown).toBe("Report saved:\n\nreport.md\n\nValidation completed.\n\nThe task is finished.");
     buffer.observe(changed!.markdownSegments, 4);

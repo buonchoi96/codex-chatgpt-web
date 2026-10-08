@@ -78,7 +78,7 @@ describe("native /models augmentation", () => {
     expect(web.map(model => model.display_name)).toEqual(CHATGPT_WEB_MODEL_ROUTES.map(route => route.displayName));
     for (const [index, model] of web.entries()) {
       const route = CHATGPT_WEB_MODEL_ROUTES[index]!;
-      const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config);
+      const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config, route.modelFamily);
       expect(model).toMatchObject({
         slug: route.slug,
         display_name: route.displayName,
@@ -334,6 +334,7 @@ describe("native /models augmentation", () => {
         route.backendModel,
         route.adapterEffort,
         config,
+        route.modelFamily,
       );
       expect(model.context_window).toBe(limits.contextWindow);
       expect(model.max_context_window).toBe(limits.contextWindow);
