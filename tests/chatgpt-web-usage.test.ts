@@ -81,7 +81,10 @@ test("GPT-6 Sol on Plus keeps standard context while Pro can stage the same comp
   expect(resolveBiggerContextMultipartParts(parsed, plus)).toBeUndefined();
   const compiled = compileChatGptWebPrompt(parsed, plus);
   expect(compiled.multipart).toBeUndefined();
-  for (const message of parsed.context.messages) expect(compiled.text).toContain(message.content as string);
+  // The fork moves oversized task history into context.txt inside a ZIP instead of
+  // pasting the complete payload into ChatGPT's constrained inline composer.
+  const completeContext = compiled.archive?.contextText ?? compiled.contextFile?.text ?? compiled.text;
+  for (const message of parsed.context.messages) expect(completeContext).toContain(message.content as string);
   expect(estimateChatGptWebUsage(parsed, { answer: "done" }, plus, true))
     .toEqual(estimateChatGptWebUsage(parsed, { answer: "done" }, plus, false));
   expect(() => compileChatGptWebPrompt(parsed, plus, undefined, { experimentalMultipartParts: 2 }))
