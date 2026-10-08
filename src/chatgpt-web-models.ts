@@ -142,19 +142,6 @@ export function supportsChatGptWebBiggerContext(
 /** Measured GPT-6 Sol staged-context ceiling when Pro enables Bigger Context. */
 export const CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_WINDOW = 240_000;
 export const CHATGPT_WEB_GPT6_SOL_BIGGER_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
-/**
- * Experimental GPT-6 Sol Plus Medium/High context advertisement (including an explicitly
- * available Extra High route). This is a Codex-side compaction target, NOT a verified
- * ChatGPT Web backend context entitlement. Browser message limits remain unchanged.
- *
- * Codex also clamps the requested compact limit to 90% of the raw catalog window:
- * 90% of 320K = 288K, so the 272K target survives; the 95% effective window is
- * 304K, leaving 32K of Codex-side headroom after the planned checkpoint.
- */
-export const CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW = 320_000;
-export const CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT = 272_000;
-export const CHATGPT_WEB_GPT6_PLUS_REASONING_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 95;
-
 export function chatGptWebAutoCompactTokenLimit(percent = CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT): number {
   if (!Number.isInteger(percent)
     || percent < CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN
@@ -205,9 +192,9 @@ export function resolveChatGptWebContextLimits(
   if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
     return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
-  // GPT-6 uses account/effort-specific profiles; the Plus reasoning extension is
-  // experimental, not a measured browser context window. Preserve GPT-5.6/Luna's
-  // existing 1M profile independently of the GPT-6 route.
+  // GPT-6 retains account/effort-specific profiles. Plus reasoning experimentally
+  // advertises the same calibrated 1.05M Codex window as GPT-5.6/Luna and uses the
+  // global launcher slider for compaction; this is not a measured Plus backend limit.
   if (modelFamily === "6" && backendModel === CHATGPT_WEB_BACKEND_MODEL) {
     let window: number;
     let compact: number;
@@ -220,8 +207,14 @@ export function resolveChatGptWebContextLimits(
       compact = 32_000;
     } else if (effort === "medium" || effort === "high"
       || (effort === "xhigh" && capabilities.extraHighAvailable)) {
-      window = CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW;
-      compact = CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT;
+      // Bigger Context is not available for GPT-6 Sol Plus. Its standard-context
+      // Codex advertisement still uses the launcher-global 5–95% compact slider.
+      // The calibrated raw window keeps Codex's 90% compaction clamp above 996K.
+      return contextLimits(
+        CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
+        autoCompactTokenLimit,
+        CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
+      );
     } else {
       throw new Error(`ChatGPT Plus context limit is not defined for unavailable effort: ${effort}`);
     }
@@ -235,13 +228,8 @@ export function resolveChatGptWebContextLimits(
         compact *= 3;
       }
     }
-    // Plus reasoning needs enough effective-window headroom beyond its checkpoint;
-    // deriving the percentage from compact/window would make the two limits identical.
-    // Other GPT-6 plans/efforts retain their existing measured profile.
-    const effectivePercent = !capabilities.proAvailable && effort !== "low"
-      ? CHATGPT_WEB_GPT6_PLUS_REASONING_EFFECTIVE_CONTEXT_WINDOW_PERCENT
-      : Math.round(compact / window * 100);
-    return contextLimits(window, compact, effectivePercent);
+    // Other GPT-6 plans/efforts retain their measured account-specific profile.
+    return contextLimits(window, compact, Math.round(compact / window * 100));
   }
   if (!capabilities.proAvailable
     && effort !== "low" && effort !== "medium" && effort !== "high"

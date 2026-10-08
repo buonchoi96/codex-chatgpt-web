@@ -24,8 +24,8 @@ import {
   resolveChatGptWebContextLimits,
   resolveChatGptWebTransportLimits,
   resolvedChatGptWebContextWindow,
-  CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW,
-  CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT,
+  CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
+  CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
 } from "../src/chatgpt-web-models";
 import { defaultConfig } from "../src/config";
 import { routeChatGptWebRequest } from "../src/server";
@@ -69,22 +69,28 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName).toBe("Luna (Web)");
   });
 
-  test("GPT-6 Plus reasoning advertises an experimental 272K compact target without changing transport or other families", () => {
-    for (const effort of ["medium", "high", "xhigh"] as const) {
-      const limits = resolveChatGptWebContextLimits(
-        CHATGPT_WEB_BACKEND_MODEL, effort,
-        { ...plus, extraHighAvailable: effort === "xhigh" }, "6",
-      );
-      expect(limits).toEqual({
-        contextWindow: CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW,
-        effectiveContextWindowPercent: 95,
-        autoCompactTokenLimit: CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT,
-      });
-      expect(Math.floor(limits.contextWindow * 0.9)).toBeGreaterThanOrEqual(limits.autoCompactTokenLimit);
-      expect(resolvedChatGptWebContextWindow(limits) - limits.autoCompactTokenLimit).toBe(32_000);
-      expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, plus))
-        .toEqual({ browserComposerCharLimit: 500_000 });
+  test("GPT-6 Sol Plus reasoning follows the launcher 1.05M profile and persisted slider threshold", () => {
+    expect(defaultConfig("full").autoCompactPercent).toBe(26);
+    for (const percent of [5, 26, 95] as const) {
+      for (const effort of ["medium", "high", "xhigh"] as const) {
+        const limits = resolveChatGptWebContextLimits(
+          CHATGPT_WEB_BACKEND_MODEL, effort,
+          { ...plus, extraHighAvailable: effort === "xhigh", autoCompactPercent: percent }, "6",
+        );
+        expect(limits).toEqual({
+          contextWindow: CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
+          effectiveContextWindowPercent: CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
+          autoCompactTokenLimit: chatGptWebAutoCompactTokenLimit(percent),
+        });
+        expect(resolvedChatGptWebContextWindow(limits)).toBe(1_050_000);
+        expect(Math.floor(limits.contextWindow * 0.9)).toBeGreaterThanOrEqual(limits.autoCompactTokenLimit);
+        expect(limits.autoCompactTokenLimit).toBeLessThan(resolvedChatGptWebContextWindow(limits));
+        expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, plus))
+          .toEqual({ browserComposerCharLimit: 500_000 });
+      }
     }
+    expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", plus, "6"))
+      .toEqual({ contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", plus, "6"))
       .toEqual({ contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", pro, "6"))

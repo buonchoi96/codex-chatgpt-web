@@ -136,7 +136,7 @@ describe("native /models augmentation", () => {
       const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
       for (const [suffix, window, compact] of [
         ["sol-instant", proAvailable ? 111_193 : 41_000, proAvailable ? 95_000 : 32_000],
-        ["sol", proAvailable ? 111_193 : 320_000, proAvailable ? 95_000 : 272_000],
+        ["sol", proAvailable ? 111_193 : 1_117_022, proAvailable ? 95_000 : 272_000],
       ] as const) {
         const six = models.find(model => model.slug === `chatgpt-web/gpt-6-${suffix}`)!;
         const expanded = proAvailable && suffix === "sol";
@@ -156,6 +156,21 @@ describe("native /models augmentation", () => {
           context_window: 336_579, auto_compact_token_limit: 285_000,
         });
       }
+    }
+  });
+
+  test("GPT-6 Plus catalog honors 5%, 26%, and 95% launcher slider values", () => {
+    for (const [percent, compact] of [[5, 52_000], [26, 272_000], [95, 996_000]] as const) {
+      const config = { ...defaultConfig("full"), proAvailable: false, autoCompactPercent: percent };
+      const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
+      const six = models.find(model => model.slug === "chatgpt-web/gpt-6-sol")!;
+      expect(six).toMatchObject({
+        context_window: 1_117_022,
+        max_context_window: 1_117_022,
+        effective_context_window_percent: 94,
+        auto_compact_token_limit: compact,
+      });
+      expect(Math.floor(Number(six.context_window) * .9)).toBeGreaterThanOrEqual(compact);
     }
   });
 
@@ -247,7 +262,7 @@ describe("native /models augmentation", () => {
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
       { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 320_000, effectiveContextWindowPercent: 95, autoCompactTokenLimit: 272_000 },
+      { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
