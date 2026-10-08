@@ -73,9 +73,11 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(defaultConfig("full").autoCompactPercent).toBe(26);
     for (const percent of [5, 26, 95] as const) {
       for (const effort of ["medium", "high", "xhigh"] as const) {
+        // Context and transport must use the same authenticated account capabilities:
+        // the xhigh case represents Plus only when that effort is explicitly available.
+        const capabilities = { ...plus, extraHighAvailable: effort === "xhigh", autoCompactPercent: percent };
         const limits = resolveChatGptWebContextLimits(
-          CHATGPT_WEB_BACKEND_MODEL, effort,
-          { ...plus, extraHighAvailable: effort === "xhigh", autoCompactPercent: percent }, "6",
+          CHATGPT_WEB_BACKEND_MODEL, effort, capabilities, "6",
         );
         expect(limits).toEqual({
           contextWindow: CHATGPT_WEB_CODEX_CONTEXT_WINDOW,
@@ -85,10 +87,12 @@ describe("fixed ChatGPT Web model routes", () => {
         expect(resolvedChatGptWebContextWindow(limits)).toBe(1_050_000);
         expect(Math.floor(limits.contextWindow * 0.9)).toBeGreaterThanOrEqual(limits.autoCompactTokenLimit);
         expect(limits.autoCompactTokenLimit).toBeLessThan(resolvedChatGptWebContextWindow(limits));
-        expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, plus))
+        expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, capabilities))
           .toEqual({ browserComposerCharLimit: 500_000 });
       }
     }
+    expect(() => resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, "xhigh", plus))
+      .toThrow("unavailable effort");
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", plus, "6"))
       .toEqual({ contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 });
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", plus, "6"))
