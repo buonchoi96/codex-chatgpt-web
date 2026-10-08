@@ -3586,10 +3586,12 @@ export class ChatGptBrowserWorker {
     // ?temporary-chat=true route; the top-right pill's aria-label is not a stable active-state API.
     const requestedUrl = chatGptNewChatUrl(useSavedChats);
     if (page.url() !== requestedUrl) {
-      await page.goto(requestedUrl, {
+      // Navigation can outlive a cancelled turn. Abort the wait immediately rather than
+      // holding the shared browser helper until Playwright's navigation deadline.
+      await withBrowserTurnAbort(page.goto(requestedUrl, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
-      });
+      }), abortSignal);
       await captureDiagnostic?.(
         useSavedChats ? "saved-chat-navigation-complete" : "temporary-chat-navigation-complete",
       );
