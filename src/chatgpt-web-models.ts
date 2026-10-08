@@ -193,6 +193,39 @@ export function resolveChatGptWebContextLimits(
   if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
     return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
+  // GPT-6 uses verified account/effort-specific browser limits. Leave the fork's custom
+  // 1M-token GPT-5.6/Luna profile unchanged so upgrading model routes cannot regress it.
+  if (modelFamily === "6" && backendModel === CHATGPT_WEB_BACKEND_MODEL) {
+    let window: number;
+    let compact: number;
+    if (capabilities.proAvailable) {
+      window = (effort === "max" ? CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT
+        : CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT) + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
+      compact = 95_000;
+    } else if (effort === "low") {
+      window = 41_000;
+      compact = 32_000;
+    } else if (effort === "medium" || effort === "high"
+      || (effort === "xhigh" && capabilities.extraHighAvailable)) {
+      window = 90_000;
+      compact = 80_000;
+    } else {
+      throw new Error(`ChatGPT Plus context limit is not defined for unavailable effort: ${effort}`);
+    }
+    if (capabilities.experimentalBiggerContext
+      && supportsChatGptWebBiggerContext(backendModel, effort, capabilities, modelFamily)) {
+      if (effort !== "max") {
+        window = CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_WINDOW;
+        compact = CHATGPT_WEB_GPT6_SOL_BIGGER_AUTO_COMPACT_TOKEN_LIMIT;
+      } else {
+        window *= 3;
+        compact *= 3;
+      }
+    }
+    // Unlike legacy 1M Web routes, GPT-6 must advertise its measured usable context
+    // rather than the inflated Codex calibration window.
+    return contextLimits(window, compact, Math.round(compact / window * 100));
+  }
   if (!capabilities.proAvailable
     && effort !== "low" && effort !== "medium" && effort !== "high"
     && !(effort === "xhigh" && capabilities.extraHighAvailable)) {
