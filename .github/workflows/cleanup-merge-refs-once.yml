@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   cleanup:
-    if: startsWith(github.event.head_commit.message, 'chore: cleanup temporary merge refs')
+    if: "startsWith(github.event.head_commit.message, 'chore: cleanup temporary merge refs')"
     runs-on: ubuntu-latest
     steps:
       - name: Delete superseded merge and ops refs
