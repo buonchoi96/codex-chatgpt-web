@@ -1881,7 +1881,7 @@ export async function setChatGptThinkMode(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   throwIfPromptAttachmentAborted(abortSignal);
-  const page = composerForm.page();
+  const page = composer.page();
   // Free/Go can render the selected connector pill on a composer surface that is no longer
   // enclosed by the pre-selection <form>. Resolve Think and the editor from the live page rather
   // than from that ancestor so connector reconciliation cannot strand Medium on a stale form.
