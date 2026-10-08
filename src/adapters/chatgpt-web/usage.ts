@@ -83,6 +83,7 @@ export function resolveBiggerContextMultipartParts(
     CHATGPT_WEB_BACKEND_MODEL,
     mode.effort,
     { ...capabilities, experimentalBiggerContext: false },
+    parsed._chatgptModelFamily,
   );
   const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(
     parsed, capabilities, mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
@@ -109,7 +110,11 @@ export function resolveBiggerContextMultipartParts(
       if (estimateTokens(text, parsed.modelId) > budget) return false;
     }
     // Multipart changes transport shape only; it never multiplies the underlying model context.
-    return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId) < contextWindow;
+    const modelLimit = parsed._chatgptModelFamily === "6"
+      ? capabilities.proAvailable ? (mode.effort === "max" ? 336_579 : 240_000)
+        : mode.effort === "low" ? 41_000 : 90_000
+      : CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
+    return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId) < Math.min(contextWindow, modelLimit);
   };
   if (initialParts === undefined && fits(inline)) return undefined;
   return fits(compile(2)) ? 2 : CHATGPT_BIGGER_CONTEXT_PARTS;

@@ -1279,11 +1279,13 @@ export function assertChatGptWebMultipartInputWithinLimits(
   if (modelId !== CHATGPT_WEB_MODEL_ID) {
     throw new Error(`ChatGPT Bigger Context limit is not defined for model: ${modelId}`);
   }
-  const baseContextWindow = resolvedChatGptWebContextWindow(resolveChatGptWebContextLimits(
-    modelId,
-    effort,
-    { ...capabilities, experimentalBiggerContext: false },
-  ));
+  if (modelFamily === "6" && !supportsChatGptWebBiggerContext(modelId, effort, capabilities, modelFamily)) {
+    throw new ChatGptWebAdapterError(CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_ERROR,
+      { status: 400, errorType: "invalid_request_error", code: "unsupported_feature", retryable: false });
+  }
+  const baseContextWindow = modelFamily === "6"
+    ? effort === "max" ? 336_579 : partCount === 2 ? 222_386 : 240_000
+    : CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
   const assertMessageBoundary = (
     label: "stage" | "final part",
     messageTokens: number,
@@ -1339,8 +1341,11 @@ export function assertChatGptWebMultipartInputWithinLimits(
   const experimentalContextWindow = baseContextWindow;
   if (estimatedInputTokens < experimentalContextWindow) return;
   const partLabel = partCount === 2 ? "two-part" : "six-part";
+  const boundaryLabel = modelFamily === "6"
+    ? `${experimentalContextWindow.toLocaleString("en-US")}-token ${partLabel} ceiling`
+    : `${experimentalContextWindow.toLocaleString("en-US")}-token model context window`;
   throw new ChatGptWebAdapterError(
-    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds the underlying ${experimentalContextWindow.toLocaleString("en-US")}-token model context window even when transported as a ${partLabel} transaction. Run /compact, then retry.`,
+    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds the underlying ${boundaryLabel} even when transported as a ${partLabel} transaction. Run /compact, then retry.`,
     { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
   );
 }
@@ -6330,7 +6335,7 @@ export class ChatGptBrowserWorker {
           browserCapabilities,
           checkpoint => diagnostics.capture(page, checkpoint),
           trackUsage,
-          turn.modelFamily,
+          stagingFamily,
         );
         return retryTransientChatGptModelControlSelection(select, async () => {
           // A reconnect/helper restart can leave a proven picker surface in a transient React

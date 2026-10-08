@@ -659,6 +659,12 @@ export function compileChatGptWebPrompt(
   if (multipartParts !== undefined && !isChatGptWebMultipartPartCount(multipartParts)) {
     throw new Error("Bigger Context requires two or six context parts");
   }
+  if (multipartEnabled && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID && !supportsChatGptWebBiggerContext(
+    parsed.modelId, mode.effort, capabilities, parsed._chatgptModelFamily,
+  )) {
+    throw new ChatGptWebAdapterError(CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_ERROR,
+      { status: 400, errorType: "invalid_request_error", code: "unsupported_feature", retryable: false });
+  }
   if (multipartEnabled && parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new Error("Bigger Context is unavailable for Luna because Luna already owns the native 1.05M-token Web model window; multipart staging is not enabled for this route");
   }
