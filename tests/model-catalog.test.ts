@@ -103,7 +103,9 @@ describe("native /models augmentation", () => {
     expect((web[1]!.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
       .toEqual(["medium", "high", "xhigh"]);
     const grouped = buildChatGptWebModel(originalModels[1], {
-      ...CHATGPT_WEB_MODEL_ROUTES[1]!, supportedCodexEfforts: ["low", "medium"],
+      // Only legacy GPT-5.6 can group low/medium under the same calibrated 1M window.
+      // GPT-6 Sol Instant and reasoning have separate measured context limits.
+      ...CHATGPT_WEB_MODEL_ROUTES[3]!, supportedCodexEfforts: ["low", "medium"],
     }, { ...config, proAvailable: false });
     expect(grouped.auto_compact_token_limit).toBe(272_000);
     // The calibrated catalog window leaves enough Codex 90% headroom for the slider maximum.
