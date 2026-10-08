@@ -944,7 +944,7 @@ test("visible turn tabs keep an explicit viewport across background transitions"
   BrowserHost.prototype.syncViewVisibility.call(fixture);
 
   assert.deepEqual(events, [
-    ["home-bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
+    ["home-bounds", { x: 1121, y: 721, width: 840, height: 656 }],
     ["home-visible", true],
     ["bounds", { x: 280, y: 64, width: 840, height: 656 }],
     ["visible", true],
