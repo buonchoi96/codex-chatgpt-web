@@ -3358,6 +3358,7 @@ describe("ChatGPT outer-native harness v4", () => {
       expect((await firstExec).structuredContent).toEqual({ output: tempRoot, exit_code: 0 });
       expect((await secondExec).structuredContent).toEqual({ output: "clean", exit_code: 0 });
 
+      let inventoryProbeNonce = 0;
       const inventoryThroughGateway = async (
         query: string,
         includeSchema: boolean,
@@ -3366,7 +3367,10 @@ describe("ChatGPT outer-native harness v4", () => {
       ) => {
         const pending = call("codex_tool_inventory", {
           turn_token: token,
-          query,
+          // Force a fresh nonce-bound gateway response for each malformed-result case.
+          // The real catalog query is whitespace-normalized, while the cache key retains
+          // the literal query to distinguish each adversarial inventory response.
+          query: query + " ".repeat(inventoryProbeNonce++),
           include_schema: includeSchema,
         });
         const abort = new AbortController();
