@@ -1362,9 +1362,10 @@ export async function runChatGptMcpServer(options: {
                 limit: nestedLimit,
                 // Never reopen outer tools deliberately hidden by the contract.
                 excludedNames: excludedGatewayNames,
+                marker,
               }),
             }, extra.signal);
-            catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames));
+            catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames), marker);
             if (cache.pages.size < 64) cache.pages.set(cacheKey, catalog);
           }
           nestedTotal = catalog.total;
