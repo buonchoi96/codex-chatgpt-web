@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { estimateChatGptWebInputTokens, resolveBiggerContextMultipartParts } from "../src/adapters/chatgpt-web/usage";
+import { estimateChatGptWebInputTokens, estimateChatGptWebUsage, resolveBiggerContextMultipartParts } from "../src/adapters/chatgpt-web/usage";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
 import { compiledChatGptWebMessages, estimateChatGptWebImageTokens, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import { assertChatGptWebMultipartInputWithinLimits, chatGptPromptFilePayloads, resolveChatGptWebMultipartStagingMode } from "../src/adapters/chatgpt-web/browser-worker";
@@ -68,6 +68,59 @@ test("Bigger Context compaction selects six parts before the legacy inline byte 
   expect(compiled.trimmedCompactionMessages).toBeUndefined();
   expect(compiled.multipart!.parts.flatMap(part => JSON.parse(part).records).map(record => record.message.content))
     .toEqual([parsed.context.messages[0]!.content]);
+});
+
+test("GPT-6 Sol on Plus keeps standard context while Pro can stage the same complete input", () => {
+  const plus = { ...capabilities, proAvailable: false };
+  const parsed = request("");
+  parsed._chatgptModelFamily = "6";
+  parsed.context.messages = Array.from({ length: 4 }, (_, index) => ({
+    role: "user", content: `record-${index}: ${"word ".repeat(24_000)}`, timestamp: index + 1,
+  }));
+  const original = structuredClone(parsed);
+  expect(resolveBiggerContextMultipartParts(parsed, plus)).toBeUndefined();
+  const compiled = compileChatGptWebPrompt(parsed, plus);
+  expect(compiled.multipart).toBeUndefined();
+  for (const message of parsed.context.messages) expect(compiled.text).toContain(message.content as string);
+  expect(estimateChatGptWebUsage(parsed, { answer: "done" }, plus, true))
+    .toEqual(estimateChatGptWebUsage(parsed, { answer: "done" }, plus, false));
+  expect(() => compileChatGptWebPrompt(parsed, plus, undefined, { experimentalMultipartParts: 2 }))
+    .toThrow("GPT-6 Sol uses standard context");
+  expect(parsed).toEqual(original);
+  expect(resolveBiggerContextMultipartParts({ ...parsed, _chatgptModelFamily: "5.6" }, capabilities)).toBe(2);
+  const parts = resolveBiggerContextMultipartParts(parsed, capabilities);
+  expect(parts).toBe(2);
+  const staged = compileChatGptWebPrompt(parsed, capabilities, undefined, { experimentalMultipartParts: parts });
+  expect(staged.multipart!.parts.flatMap(part => JSON.parse(part).records).map(record => record.message.content))
+    .toEqual(parsed.context.messages.map(message => message.content));
+  expect(estimateChatGptWebUsage(parsed, { answer: "done" }, capabilities, true).inputTokens)
+    .toBe(estimateCompiledChatGptWebInputTokens(staged, parsed.modelId));
+}, 30_000);
+
+test("GPT-6 compaction respects the selected account and effort", () => {
+  const parsed = { ...request("Summarize this task."), _chatgptModelFamily: "6" as const, _compactionRequest: true };
+  for (const proAvailable of [false, true]) {
+    const caps = { ...capabilities, proAvailable };
+    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+      parsed.options.reasoning = effort;
+      const supported = proAvailable && effort !== "low";
+      const parts = resolveBiggerContextMultipartParts(parsed, caps);
+      if (supported) {
+        expect(parts).toBe(6);
+        expect(compileChatGptWebPrompt(parsed, caps, undefined, { experimentalMultipartParts: parts }).multipart!.parts).toHaveLength(6);
+      } else {
+        expect(parts).toBeUndefined();
+        expect(estimateChatGptWebUsage(parsed, { answer: "summary" }, caps, true))
+          .toEqual(estimateChatGptWebUsage(parsed, { answer: "summary" }, caps, false));
+        expect(() => compileChatGptWebPrompt(parsed, caps, undefined, { experimentalMultipartParts: 6 }))
+          .toThrow("GPT-6 Sol uses standard context");
+      }
+    }
+  }
+  parsed.options.reasoning = "max";
+  const parts = resolveBiggerContextMultipartParts(parsed, capabilities);
+  expect(parts).toBe(6);
+  expect(compileChatGptWebPrompt(parsed, capabilities, undefined, { experimentalMultipartParts: parts }).multipart!.parts).toHaveLength(6);
 });
 
 test("Plus history is rebalanced into smaller Instant uploads and a larger selected-mode final message", () => {
