@@ -136,7 +136,7 @@ describe("native /models augmentation", () => {
       const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
       for (const [suffix, window, compact] of [
         ["sol-instant", proAvailable ? 111_193 : 41_000, proAvailable ? 95_000 : 32_000],
-        ["sol", proAvailable ? 111_193 : 90_000, proAvailable ? 95_000 : 80_000],
+        ["sol", proAvailable ? 111_193 : 320_000, proAvailable ? 95_000 : 272_000],
       ] as const) {
         const six = models.find(model => model.slug === `chatgpt-web/gpt-6-${suffix}`)!;
         const expanded = proAvailable && suffix === "sol";
@@ -247,7 +247,7 @@ describe("native /models augmentation", () => {
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
       { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 320_000, effectiveContextWindowPercent: 95, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },
       { contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 },

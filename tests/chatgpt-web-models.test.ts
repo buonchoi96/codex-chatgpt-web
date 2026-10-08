@@ -23,6 +23,9 @@ import {
   chatGptWebAutoCompactTokenLimit,
   resolveChatGptWebContextLimits,
   resolveChatGptWebTransportLimits,
+  resolvedChatGptWebContextWindow,
+  CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW,
+  CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT,
 } from "../src/chatgpt-web-models";
 import { defaultConfig } from "../src/config";
 import { routeChatGptWebRequest } from "../src/server";
@@ -64,6 +67,30 @@ describe("fixed ChatGPT Web model routes", () => {
       "GPT-5.6 Sol Instant (Web)", "GPT-5.6 Sol (Web)", "GPT-5.6 Pro (Web)", "GPT-6 Pro (Web)",
     ]);
     expect(CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName).toBe("Luna (Web)");
+  });
+
+  test("GPT-6 Plus reasoning advertises an experimental 272K compact target without changing transport or other families", () => {
+    for (const effort of ["medium", "high", "xhigh"] as const) {
+      const limits = resolveChatGptWebContextLimits(
+        CHATGPT_WEB_BACKEND_MODEL, effort,
+        { ...plus, extraHighAvailable: effort === "xhigh" }, "6",
+      );
+      expect(limits).toEqual({
+        contextWindow: CHATGPT_WEB_GPT6_PLUS_REASONING_CONTEXT_WINDOW,
+        effectiveContextWindowPercent: 95,
+        autoCompactTokenLimit: CHATGPT_WEB_GPT6_PLUS_REASONING_AUTO_COMPACT_TOKEN_LIMIT,
+      });
+      expect(Math.floor(limits.contextWindow * 0.9)).toBeGreaterThanOrEqual(limits.autoCompactTokenLimit);
+      expect(resolvedChatGptWebContextWindow(limits) - limits.autoCompactTokenLimit).toBe(32_000);
+      expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, plus))
+        .toEqual({ browserComposerCharLimit: 500_000 });
+    }
+    expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", plus, "6"))
+      .toEqual({ contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 });
+    expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", pro, "6"))
+      .toEqual({ contextWindow: 111_193, effectiveContextWindowPercent: 85, autoCompactTokenLimit: 95_000 });
+    expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "high", plus, "5.6"))
+      .toEqual({ contextWindow: 1_117_022, effectiveContextWindowPercent: 94, autoCompactTokenLimit: 272_000 });
   });
 
   test("exposes only Plus-eligible routes without the Pro account capability", () => {
