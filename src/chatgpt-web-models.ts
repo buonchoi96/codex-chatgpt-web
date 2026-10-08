@@ -127,6 +127,22 @@ export interface ChatGptWebTransportLimits {
   browserComposerCharLimit?: number;
 }
 
+/** GPT-6 Sol multipart requires a Pro account and Medium/High/Extra High (or Pro model). */
+export function supportsChatGptWebBiggerContext(
+  backendModel: string,
+  effort: ChatGptWebAdapterEffort,
+  capabilities: Pick<ChatGptWebAccountCapabilities, "proAvailable">,
+  modelFamily?: ChatGptWebModelFamily,
+): boolean {
+  return backendModel === CHATGPT_WEB_BACKEND_MODEL && (
+    modelFamily !== "6" || effort === "max" || (capabilities.proAvailable && effort !== "low")
+  );
+}
+
+/** Measured GPT-6 Sol staged-context ceiling when Pro enables Bigger Context. */
+export const CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_WINDOW = 240_000;
+export const CHATGPT_WEB_GPT6_SOL_BIGGER_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
+
 export function chatGptWebAutoCompactTokenLimit(percent = CHATGPT_WEB_AUTO_COMPACT_PERCENT_DEFAULT): number {
   if (!Number.isInteger(percent)
     || percent < CHATGPT_WEB_AUTO_COMPACT_PERCENT_MIN
