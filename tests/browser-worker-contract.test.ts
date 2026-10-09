@@ -4350,9 +4350,12 @@ test("browser preflight separates model context from one-message transport limit
     "1,050,000-token context window",
   );
   expect(() => assertChatGptWebInputWithinLimits(28_000, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(191_584, 183_392, "gpt-5.6-luna", "low", luna)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(1_049_999, 1_041_807, "gpt-5.6-luna", "low", luna)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(1_050_000, 1_041_808, "gpt-5.6-luna", "low", luna)).toThrow(
+  // Canonical context can be long, but a single visible Luna browser message
+  // must stay inside its independently measured 19,808-token transport cap.
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(191_584, 19_809, "gpt-5.6-luna", "low", luna)).toThrow("browser message boundary");
+  expect(() => assertChatGptWebInputWithinLimits(1_049_999, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
+  expect(() => assertChatGptWebInputWithinLimits(1_050_000, 19_808, "gpt-5.6-luna", "low", luna)).toThrow(
     "1,050,000-token context window",
   );
 

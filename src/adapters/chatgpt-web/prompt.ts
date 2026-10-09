@@ -667,9 +667,6 @@ export function compileChatGptWebPrompt(
   if (multipartEnabled && captureLunaCheckpoint) {
     throw new Error("Bigger Context uses native compaction, not Luna rolling checkpoints");
   }
-  if (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && parsed._compactionRequest && !multipartEnabled) {
-    throw new Error("ChatGPT Luna uses rolling checkpoints and does not accept a separate compaction turn");
-  }
   if (captureLunaCheckpoint && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || parsed._compactionRequest)) {
     throw new Error("Rolling checkpoints are supported only for normal ChatGPT Luna turns");
   }
@@ -924,7 +921,7 @@ export function compileChatGptWebPrompt(
           const limits = resolveChatGptWebTransportLimits(backendModel, effort, capabilities);
           const tokenLimit = final
             ? resolveChatGptWebMessageTokenBudget(
-                CHATGPT_WEB_MODEL_ID,
+                backendModel,
                 effort,
                 capabilities,
                 imageTokens + skillFileTokens(skillFiles, parsed.modelId),

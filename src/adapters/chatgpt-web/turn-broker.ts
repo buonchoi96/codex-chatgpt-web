@@ -798,7 +798,7 @@ export class TurnBroker implements TurnBrokerOwner {
       );
     }
     console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} toolsCompleted=${channel.toolCallsCompleted}${this.diagnosticSuffix()}`,
+      `[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} isError=${result.isError === true}${this.diagnosticSuffix()}`,
     );
     if (isComputerUseTelemetryTool(invocation.request.wireName)) {
       channel.lastComputerUseCompletedAt = Date.now();

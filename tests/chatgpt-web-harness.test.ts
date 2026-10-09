@@ -615,7 +615,10 @@ describe("ChatGPT outer-native harness v4", () => {
         expect(turn.prepareResume).toBeUndefined();
         expect(turn.retainConversation).not.toBe(true);
       }
-      expect(turn.captureLunaCheckpoint).toBeUndefined();
+      // Luna can save a visible rolling checkpoint while preserving retained
+      // browser conversation; Sol does not activate the Luna checkpoint route.
+      if (modelId === "gpt-5.6-luna") expect(turn.captureLunaCheckpoint).toBe(true);
+      else expect(turn.captureLunaCheckpoint).toBeUndefined();
       const prepared = browserMessages === 0 || freshConversation ? await turn.prepare() : await turn.prepareResume!();
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);

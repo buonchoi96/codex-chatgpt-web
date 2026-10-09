@@ -1341,7 +1341,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
   const experimentalContextWindow = baseContextWindow;
   if (estimatedInputTokens < experimentalContextWindow) return;
   const partLabel = partCount === 2 ? "two-part" : "six-part";
-  const boundaryLabel = modelFamily === "6"
+  const boundaryLabel = modelId === CHATGPT_WEB_LUNA_MODEL_ID || modelFamily === "6"
     ? `${experimentalContextWindow.toLocaleString("en-US")}-token ${partLabel} ceiling`
     : `${experimentalContextWindow.toLocaleString("en-US")}-token model context window`;
   throw new ChatGptWebAdapterError(
