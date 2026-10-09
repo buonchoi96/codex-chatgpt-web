@@ -207,82 +207,101 @@ export function reclaimOrphanedCodexInterruptHook(
   const startCount = managedMarkerCount(text);
   const endCount = text.split(MANAGED_INTERRUPT_HOOK_END).length - 1;
   if (startCount === 0 && endCount === 0) return { text, reclaimed: false };
-  if (startCount > 1 || endCount !== 1) {
-    throw new Error("Codex config contains an ambiguous stale codex-chatgpt-web interrupt hook; refusing automatic repair");
-  }
+
   let document: HookDocument;
+  let ast: AST.TOMLProgram;
   try {
     document = parseHookDocument(text);
+    ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
   } catch {
     throw new Error("Codex config contains a malformed stale codex-chatgpt-web interrupt hook; refusing automatic repair");
   }
+
+  // Codex can preserve old comments after normalizing/reinstalling hook tables.
+  // Treat only actual TOML comments as markers: a marker inside a string is never
+  // evidence of ownership. Never remove a foreign hook or an unverified trust entry.
+  const markers = [MANAGED_INTERRUPT_HOOK_START, MANAGED_INTERRUPT_HOOK_END];
+  const comments = ast.comments.filter(comment =>
+    markers.some(marker => text.slice(...comment.range) === marker));
+  if (comments.length !== startCount + endCount) {
+    throw new Error("Codex config contains an ambiguous stale codex-chatgpt-web interrupt hook; refusing automatic repair");
+  }
+
   const groups = document.hooks?.Interrupt;
   const state = document.hooks?.state;
   if (!Array.isArray(groups) || !state || typeof state !== "object" || Array.isArray(state)) {
     throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
   }
-
-  const statePrefix = `${canonicalConfigPath(configPath)}:interrupt:`;
-  const pathEntries = Object.entries(state).filter(([key]) => key.startsWith(statePrefix) && key.endsWith(":0"));
+  const statePrefix = canonicalConfigPath(configPath) + ":interrupt:";
+  const pathEntries = Object.entries(state).filter(([key]) =>
+    key.startsWith(statePrefix) && /^\d+:0$/.test(key.slice(statePrefix.length)));
   if (pathEntries.length === 0) {
     throw new Error("Codex config stale interrupt hook belongs to a different config path; refusing automatic repair");
   }
-  if (pathEntries.length !== 1) {
-    throw new Error("Codex config contains an ambiguous stale codex-chatgpt-web interrupt hook; refusing automatic repair");
-  }
-  const [stateKey, rawState] = pathEntries[0]!;
-  const groupIndex = Number(stateKey.slice(statePrefix.length, -2));
-  if (!Number.isSafeInteger(groupIndex) || groupIndex < 0 || groupIndex >= groups.length) {
-    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
-  }
-  if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
-    throw new Error("Codex config stale interrupt hook trust state changed; refusing automatic repair");
-  }
-  const stateEntry = rawState as Record<string, unknown>;
-  if (Object.keys(stateEntry).length !== 1 || typeof stateEntry.trusted_hash !== "string") {
-    throw new Error("Codex config stale interrupt hook trust state changed; refusing automatic repair");
+
+  const candidates: InstalledCodexInterruptHook[] = [];
+  for (const [stateKey, rawState] of pathEntries) {
+    const groupIndex = Number(stateKey.slice(statePrefix.length, -2));
+    if (!Number.isSafeInteger(groupIndex) || groupIndex < 0 || groupIndex >= groups.length) {
+      throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
+    }
+    if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
+      throw new Error("Codex config stale interrupt hook trust state changed; refusing automatic repair");
+    }
+    const entry = rawState as Record<string, unknown>;
+    if (Object.keys(entry).length !== 1 || typeof entry.trusted_hash !== "string") {
+      throw new Error("Codex config stale interrupt hook trust state changed; refusing automatic repair");
+    }
+    const group = groups[groupIndex];
+    const hooks = group && typeof group === "object" && !Array.isArray(group)
+      ? (group as { hooks?: unknown }).hooks : undefined;
+    if (!Array.isArray(hooks) || hooks.length !== 1
+      || !hooks[0] || typeof hooks[0] !== "object" || Array.isArray(hooks[0])) {
+      throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
+    }
+    const hook = hooks[0] as Record<string, unknown>;
+    if (JSON.stringify(Object.keys(hook).sort()) !== JSON.stringify(["command", "timeout", "type"])
+      || hook.type !== "command" || typeof hook.command !== "string" || !hook.command
+      || hook.timeout !== 3) {
+      throw new Error("Codex config stale interrupt hook contains unexpected fields; refusing automatic repair");
+    }
+    const trustedHash = entry.trusted_hash;
+    if (trustedHash !== codexInterruptHookHash(hook.command)) {
+      throw new Error("Codex config stale interrupt hook trust hash changed; refusing automatic repair");
+    }
+    const fragment = [
+      MANAGED_INTERRUPT_HOOK_START,
+      "[[hooks.Interrupt]]",
+      "",
+      "[[hooks.Interrupt.hooks]]",
+      'type = "command"',
+      "command = " + JSON.stringify(hook.command),
+      "timeout = 3",
+      "",
+      "[hooks.state." + JSON.stringify(stateKey) + "]",
+      "trusted_hash = " + JSON.stringify(trustedHash),
+      MANAGED_INTERRUPT_HOOK_END,
+    ].join(lineEnding(text));
+    candidates.push({ command: hook.command, groupIndex, stateKey, trustedHash, fragment });
   }
 
-  const group = groups[groupIndex];
-  if (!group || typeof group !== "object" || Array.isArray(group)) {
-    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
+  // Remove only full-line, parser-confirmed comments; then the existing semantic
+  // restoration path validates the precise command/group/hash before removing it.
+  const ranges: SourceRange[] = comments.map(comment => {
+    const start = Math.max(text.lastIndexOf("\n", comment.range[0] - 1), text.lastIndexOf("\r", comment.range[0] - 1)) + 1;
+    const prefix = text.slice(start, comment.range[0]);
+    const rest = text.slice(comment.range[1]);
+    const suffix = /^[ \t]*(?:\r\n|\n|\r|$)/.exec(rest);
+    if (!/^[ \t]*$/.test(prefix) || !suffix) {
+      throw new Error("Codex config contains an ambiguous stale codex-chatgpt-web interrupt hook; refusing automatic repair");
+    }
+    return { start, end: comment.range[1] + suffix[0].length };
+  });
+  let repaired = removeRanges(text, ranges);
+  // Highest group first: its original index remains stable while it is removed.
+  for (const installed of candidates.sort((a, b) => b.groupIndex - a.groupIndex)) {
+    repaired = restoreCodexInterruptHook(repaired, installed);
   }
-  const hooks = (group as { hooks?: unknown }).hooks;
-  if (!Array.isArray(hooks) || hooks.length !== 1) {
-    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
-  }
-  const rawHook = hooks[0];
-  if (!rawHook || typeof rawHook !== "object" || Array.isArray(rawHook)) {
-    throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
-  }
-  const hookRecord = rawHook as Record<string, unknown>;
-  if (JSON.stringify(Object.keys(hookRecord).sort()) !== JSON.stringify(["command", "timeout", "type"])) {
-    throw new Error("Codex config stale interrupt hook contains unexpected fields; refusing automatic repair");
-  }
-  const command = hookRecord.command;
-  if (hookRecord.type !== "command" || typeof command !== "string" || command.length === 0 || hookRecord.timeout !== 3) {
-    throw new Error("Codex config stale interrupt hook no longer matches the managed command; refusing automatic repair");
-  }
-  const trustedHash = stateEntry.trusted_hash;
-  if (trustedHash !== codexInterruptHookHash(command)) {
-    throw new Error("Codex config stale interrupt hook trust hash changed; refusing automatic repair");
-  }
-
-  const fragment = [
-    MANAGED_INTERRUPT_HOOK_START,
-    "[[hooks.Interrupt]]",
-    "",
-    "[[hooks.Interrupt.hooks]]",
-    'type = "command"',
-    `command = ${JSON.stringify(command)}`,
-    "timeout = 3",
-    "",
-    `[hooks.state.${JSON.stringify(stateKey)}]`,
-    `trusted_hash = ${JSON.stringify(trustedHash)}`,
-    MANAGED_INTERRUPT_HOOK_END,
-  ].join(lineEnding(text));
-  const installed: InstalledCodexInterruptHook = { command, groupIndex, stateKey, trustedHash, fragment };
-  const repaired = restoreCodexInterruptHook(text, installed);
   verifyCodexInterruptHookRestored(repaired);
   return { text: repaired, reclaimed: true };
 }

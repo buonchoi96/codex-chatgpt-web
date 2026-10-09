@@ -52,9 +52,7 @@
     "launcher:build": "bun run --cwd launcher build",
     "launcher:test": "bun run --cwd launcher test",
     "verify": "bun run scripts/verify.ts",
-    "dev:live": "bun run --cwd launcher dev:live",
-    "dev:live:cli-setup": "bun run launcher/scripts/dev-live-cli-setup.cjs",
-    "dev:codex": "bun run launcher/scripts/dev-codex.cjs"
+    "dev:live": "bun run --cwd launcher dev:live"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

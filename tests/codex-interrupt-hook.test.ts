@@ -173,10 +173,39 @@ test("orphaned hook recovery remains fail-closed for modified or foreign managed
       installed.text,
       join(directory, "other-config.toml"),
     )).toThrow("different config path");
-    expect(() => reclaimOrphanedCodexInterruptHook(
-      installed.text + "\n" + MANAGED_INTERRUPT_HOOK_END + "\n",
-      configPath,
-    )).toThrow("ambiguous stale");
+    const duplicateMarker = installed.text + "\n" + MANAGED_INTERRUPT_HOOK_END + "\n";
+    expect(Bun.TOML.parse(reclaimOrphanedCodexInterruptHook(duplicateMarker, configPath).text))
+      .toEqual(Bun.TOML.parse('model = "gpt-5.6-sol"\n'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reclaims multiple trust-verified stale hooks without touching foreign hooks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-orphaned-multiple-"));
+  try {
+    const configPath = join(directory, "config.toml");
+    const original = 'model = "example"\n\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "foreign-user-hook"\n';
+    const first = installCodexInterruptHookCommand(original, configPath, "old-bridge-hook-1");
+    const markerless = first.text.replaceAll(MANAGED_INTERRUPT_HOOK_START, "").replaceAll(MANAGED_INTERRUPT_HOOK_END, "");
+    const second = installCodexInterruptHookCommand(markerless, configPath, "old-bridge-hook-2");
+    const duplicates = second.text + "\n" + MANAGED_INTERRUPT_HOOK_START + "\n" + MANAGED_INTERRUPT_HOOK_END + "\n";
+    const recovered = reclaimOrphanedCodexInterruptHook(duplicates, configPath);
+    expect(recovered.reclaimed).toBe(true);
+    expect(Bun.TOML.parse(recovered.text)).toEqual(Bun.TOML.parse(original));
+    expect(recovered.text).toContain("foreign-user-hook");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects a stale marker hidden inside a TOML string", () => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-orphaned-instring-"));
+  try {
+    const configPath = join(directory, "config.toml");
+    const installed = installCodexInterruptHookCommand('model = "example"\n', configPath, "bridge-hook");
+    const forged = installed.text + "\n[notes]\ntext = " + JSON.stringify(MANAGED_INTERRUPT_HOOK_END) + "\n";
+    expect(() => reclaimOrphanedCodexInterruptHook(forged, configPath)).toThrow("ambiguous stale");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

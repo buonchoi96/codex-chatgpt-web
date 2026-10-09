@@ -5,7 +5,6 @@ const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { createLiveTunnelLease, removeLiveTunnelLease } = require("../electron/live-tunnel-lease.cjs");
-const { readLaneConfig, resolveLiveLanePaths } = require("./dev-live-lanes.cjs");
 
 const launcherRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(launcherRoot, "..");
@@ -32,9 +31,9 @@ function samePath(left, right) {
   return normalize(left) === normalize(right);
 }
 
-const liveLanePaths = resolveLiveLanePaths(process.env, os.homedir());
-const liveHome = liveLanePaths.desktopHome;
-const liveCliHome = liveLanePaths.cliHome;
+const liveHome = resolveUserPath(
+  process.env.CODEX_WEB_GPT_LIVE_HOME || path.join(os.homedir(), ".codex-chatgpt-web-live"),
+);
 const productionHome = resolveUserPath(
   process.env.CODEX_CHATGPT_WEB_HOME || path.join(os.homedir(), ".codex-chatgpt-web"),
 );
@@ -50,8 +49,6 @@ const idleRestartTimeoutMs = Number(process.env.CODEX_WEB_GPT_LIVE_RESTART_TIMEO
 
 let vite;
 let electron;
-let cliLaneSupervisor;
-let cliLaneRetryTimer;
 let stopped = false;
 let ownsLiveLease = false;
 let electronRestarting = false;
@@ -76,7 +73,6 @@ function liveEnvironment(extra = {}) {
     CODEX_CHATGPT_WEB_HOME: liveHome,
     CODEX_WEB_GPT_LAUNCHER_DATA_DIR: liveUserData,
     CODEX_WEB_GPT_LIVE_MODE: "1",
-    CODEX_WEB_GPT_LIVE_LANE: "desktop",
     CODEX_WEB_GPT_LIVE_TUNNEL_LEASE: liveTunnelLeasePath,
     CODEX_WEB_GPT_BUN: bun,
     CODEX_CHATGPT_WEB_BUN: bun,
@@ -236,49 +232,6 @@ function startElectron() {
   return child;
 }
 
-function startCliLaneSupervisor() {
-  if (stopped || cliLaneSupervisor) return;
-  const child = spawn(bun, [
-    "run",
-    path.join(launcherRoot, "scripts", "dev-live-cli-lane.cjs"),
-    "supervise",
-  ], {
-    cwd: launcherRoot,
-    stdio: "inherit",
-    windowsHide: true,
-    env: {
-      ...process.env,
-      CODEX_WEB_GPT_LIVE_HOME: liveHome,
-      CODEX_WEB_GPT_LIVE_CLI_HOME: liveCliHome,
-      CODEX_WEB_GPT_BUN: bun,
-      CODEX_CHATGPT_WEB_BUN: bun,
-    },
-  });
-  cliLaneSupervisor = child;
-  child.once("error", error => {
-    warn(`CLI lane supervisor failed to start: ${error.message}`);
-  });
-  child.once("exit", code => {
-    if (cliLaneSupervisor === child) cliLaneSupervisor = undefined;
-    if (stopped) return;
-    warn(`CLI lane supervisor exited (${code ?? 0}); restarting it without touching the Desktop tunnel`);
-    clearTimeout(cliLaneRetryTimer);
-    cliLaneRetryTimer = setTimeout(() => {
-      cliLaneRetryTimer = undefined;
-      startCliLaneSupervisor();
-    }, 1_000);
-  });
-}
-
-async function stopCliLaneSupervisor() {
-  clearTimeout(cliLaneRetryTimer);
-  cliLaneRetryTimer = undefined;
-  const child = cliLaneSupervisor;
-  cliLaneSupervisor = undefined;
-  if (!child) return;
-  await waitForElectronExit(child, 15_000);
-}
-
 async function waitForElectronExit(child, timeoutMs = 10_000, { forceKill = true } = {}) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return true;
   const exited = await new Promise(resolve => {
@@ -367,35 +320,7 @@ function scheduleElectronRestartRetry() {
 async function restartElectron() {
   if (stopped || electronReloadInFlight) return false;
   electronReloadInFlight = true;
-  let cliConfigBeforeReload;
-  let cliAdmissionDrained = false;
   try {
-    cliConfigBeforeReload = liveCliConfig();
-    const cliStateBeforeReload = cliConfigBeforeReload ? await health(cliConfigBeforeReload) : undefined;
-    if (cliStateBeforeReload?.status === "ok") {
-      if (cliStateBeforeReload.accepting_turns !== true || !Number.isSafeInteger(cliStateBeforeReload.pid)) {
-        warn("Electron reload deferred because the isolated CLI lane is not accepting new turns cleanly");
-        scheduleElectronRestartRetry();
-        return false;
-      }
-      const cliDrained = await drainRuntimeForElectronRestart({
-        config: cliConfigBeforeReload,
-        expectedDaemonPid: cliStateBeforeReload.pid,
-        health,
-        control,
-        timeoutMs: Math.max(1_000, idleRestartTimeoutMs),
-      });
-      if (!cliDrained.allowed) {
-        warn(
-          `Electron reload deferred; isolated CLI lane admission ${cliDrained.resumed ? "was resumed" : "could not be confirmed resumed"}: `
-          + cliDrained.reason,
-        );
-        scheduleElectronRestartRetry();
-        return false;
-      }
-      cliAdmissionDrained = true;
-    }
-
     const configPresent = fs.existsSync(path.join(liveHome, "config.json"));
     const config = liveConfig();
     if (configPresent && !config) {
@@ -496,12 +421,6 @@ async function restartElectron() {
       : `replacement launcher is ready; verified tunnel PID ${readiness.tunnelPid ?? "none"}`);
     return true;
   } finally {
-    if (cliAdmissionDrained && cliConfigBeforeReload && !stopped) {
-      const resumed = await control(cliConfigBeforeReload, "resume")
-        .then(value => value?.status === "ok" && value.accepting_turns === true)
-        .catch(() => false);
-      if (!resumed) warn("isolated CLI lane admission could not be confirmed resumed after Electron reload");
-    }
     electronReloadInFlight = false;
   }
 }
@@ -521,10 +440,6 @@ function liveConfig() {
   } catch {
     return undefined;
   }
-}
-
-function liveCliConfig() {
-  return readLaneConfig(liveLanePaths.cliConfigPath);
 }
 
 async function health(config, timeoutMs = 1_500) {
@@ -600,41 +515,6 @@ async function restartDaemonFromSource() {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   throw new Error("source launcher did not recover the Responses daemon within 20 seconds");
-}
-
-async function restartCliLaneDaemonFromSource() {
-  const config = liveCliConfig();
-  if (!config) return;
-  const before = await health(config);
-  if (!before || !Number.isInteger(before.pid)) return;
-
-  const oldPid = before.pid;
-  const deadline = Date.now() + Math.max(1_000, idleRestartTimeoutMs);
-  log(`draining isolated CLI Responses daemon pid ${oldPid} before source reload`);
-  for (;;) {
-    const state = await control(config, "drain");
-    if (state?.active_http_turns === 0 && state?.active_browser_turns === 0) break;
-    if (Date.now() >= deadline) {
-      await control(config, "resume").catch(() => {});
-      throw new Error(
-        `CLI lane source reload timed out waiting for ${state?.active_http_turns ?? "?"} HTTP and `
-        + `${state?.active_browser_turns ?? "?"} browser turn(s) to finish`,
-      );
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
-  }
-
-  await control(config, "shutdown");
-  const restartDeadline = Date.now() + 20_000;
-  while (Date.now() < restartDeadline) {
-    const next = await health(config);
-    if (next && Number.isInteger(next.pid) && next.pid !== oldPid && next.accepting_turns === true) {
-      log(`isolated CLI Responses daemon reloaded from source: ${oldPid} -> ${next.pid}`);
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
-  throw new Error("isolated CLI lane did not recover its Responses daemon within 20 seconds");
 }
 
 function routeCommand(action, env = liveEnvironment()) {
@@ -783,13 +663,8 @@ async function flushReload() {
   pending.runtime = false;
   try {
     if (runtimeChanged) buildBrowserHelper();
-    if (electronChanged) {
-      const reloaded = await restartElectron();
-      if (runtimeChanged && reloaded !== false) await restartCliLaneDaemonFromSource();
-    } else if (runtimeChanged) {
-      await restartDaemonFromSource();
-      await restartCliLaneDaemonFromSource();
-    }
+    if (electronChanged) await restartElectron();
+    else if (runtimeChanged) await restartDaemonFromSource();
   } catch (error) {
     warn(`reload failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
@@ -820,9 +695,7 @@ async function stop(exitCode = 0) {
   if (electronRetryTimer) clearTimeout(electronRetryTimer);
   if (routeTimer) clearInterval(routeTimer);
   if (viteRestartTimer) clearTimeout(viteRestartTimer);
-  if (cliLaneRetryTimer) clearTimeout(cliLaneRetryTimer);
   for (const watcher of watchers.splice(0)) watcher.close();
-  await stopCliLaneSupervisor();
   if (ownsLiveLease) {
     restorePreviousRoute();
     restoreProductionRoute();
@@ -856,11 +729,8 @@ async function main() {
   startVite();
   await waitForVite();
   startElectron();
-  startCliLaneSupervisor();
   startWatchers();
   startRouteMonitor();
-  log(`isolated CLI lane home: ${liveCliHome}`);
-  log("CLI tests use a separate tunnel via: bun run dev:codex -- <codex arguments>");
   log("LIVE READY: edit source files; installer/package rebuilds are no longer required for ordinary iterations");
 }
 

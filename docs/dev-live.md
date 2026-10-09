@@ -13,19 +13,15 @@ The default home is `~/.codex-chatgpt-web-live`:
 ~/.codex-chatgpt-web-live/
 ├── config.json
 ├── launcher/          # Electron userData, ChatGPT cookies/local storage, window state
-├── runtime/           # Desktop-lane launcher ownership + browser descriptor
-├── tunnel/            # Desktop-lane tunnel profile/runtime state
-├── cli-lane/          # dev:live-only Codex CLI route/runtime/tunnel state
+├── runtime/           # launcher ownership + browser descriptor
+├── tunnel/            # tunnel profile/runtime state from normal Full Harness setup
 └── ...
 ```
 
 This is separate from both the installed launcher's data and the simulated
-`~/.codex-chatgpt-web-dev` harness. The source launcher keeps production semantics for the
-**Desktop lane**: the real Codex route, normal `Codex Native2` connector, and a real tunnel.
-In `dev:live` only, an optional **CLI lane** lives under `cli-lane/` and uses its own Codex
-home, Responses port, broker endpoint, connector name, tunnel alias/profile, and Tunnel ID.
-Both lanes reuse the same authenticated launcher browser host, but their MCP/data planes remain
-independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop home.
+`~/.codex-chatgpt-web-dev` harness. The source launcher keeps production semantics: the real
+Codex route, normal `Codex Native2` connector, and real tunnel. Set
+`CODEX_WEB_GPT_LIVE_HOME` to choose another persistent home.
 
 ## First run
 
@@ -45,52 +41,12 @@ independent. Set `CODEX_WEB_GPT_LIVE_HOME` to choose another persistent Desktop 
    ```
 
 4. In the source launcher, sign in to the same ChatGPT account and complete normal Full Harness
-   setup once. This is the **Desktop lane** and keeps using `Codex Native2`.
-5. For concurrent Codex Desktop + Codex CLI testing, create a **second OpenAI Tunnel ID** and keep
-   `dev:live` running, then execute:
+   setup once. The live home retains login, tunnel ID/runtime key configuration, and launcher state.
+5. Restart Codex once after the initial route/catalog installation if requested.
 
-   ```powershell
-   bun run dev:live:cli-setup
-   ```
-
-   Enter the second Tunnel ID/runtime key when prompted. Then create a ChatGPT connector named
-   exactly **`Codex Native2 CLI DEV`** and attach it to that second tunnel. Rerunning
-   `dev:live:cli-setup` while `dev:live` remains open is supported: the wrapper drains and pauses
-   the existing CLI daemon/tunnel before rebinding its port, then the supervisor resumes it after
-   setup commits. Existing account capability results are reused on reruns unless
-   `CODEX_WEB_GPT_LIVE_CLI_REFRESH_ACCOUNT_CAPABILITIES=1` is explicitly set.
-6. Run test CLI processes through the isolated lane:
-
-   ```powershell
-   bun run dev:codex -- <normal codex arguments>
-   ```
-
-   Do not use a plain inherited `codex` process for dual-lane tests; the wrapper pins the CLI
-   process to `cli-lane/codex-home`.
-
-   CLI setup also mirrors only the ordinary Codex home's Computer/Browser tooling surface into the
-   isolated CLI `config.toml`: the `codex-computer-use` notify hook, the OpenAI bundled
-   marketplace, Browser/Chrome/Computer Use plugin tables, and `node_repl`/`cua_repl`/Playwright
-   MCP tables. The isolated Web route, auth/session files, tunnel, broker, and unrelated third-party
-   MCPs are not copied. Any mirrored MCP `CODEX_HOME` environment entry is rewritten to the
-   isolated CLI Codex home. By default the source is the `CODEX_HOME` inherited by
-   `dev:live:cli-setup`; override it with `CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME`, or disable
-   the mirror with `CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING=0`.
-
-   For a session/exec without an explicit `-m/--model` or `--profile`, the wrapper defaults to
-   `chatgpt-web/gpt-5.6-sol` (or `chatgpt-web/gpt-5.6-luna` when the CLI lane account does not
-   expose Sol). It also supplies the route-compatible reasoning effort when
-   `model_reasoning_effort` was not explicitly overridden: Sol defaults to `high`, Sol Instant
-   and Luna to `low`, and fixed Pro routes to their fixed effort. Set
-   `CODEX_WEB_GPT_LIVE_CLI_MODEL` / `CODEX_WEB_GPT_LIVE_CLI_EFFORT` to choose different DEV
-   defaults. On Windows the wrapper also adds `--no-daemon` for TUI/resume/fork so Codex 0.157.x
-   cannot fail on Job Object daemon detachment; `exec` remains on its normal one-shot path.
-7. Restart the Desktop Codex app once after its initial route/catalog installation if requested.
-
-Later `bun run dev:live` runs reuse both lane states. The script reconnects the Desktop Codex
-route when configuration is present and supervises the CLI daemon/tunnel separately. On normal
-Ctrl-C/SIGTERM it disconnects the Desktop live route, restores the previous Desktop route, and
-stops the isolated CLI daemon/tunnel.
+Later `bun run dev:live` runs reuse that state. The script reconnects the live Codex route when
+configuration is present. On normal Ctrl-C/SIGTERM it disconnects the live route to restore the
+previous journaled Codex route.
 
 ## Reload behavior
 
@@ -129,102 +85,3 @@ ordinary development loop.
   Native2/tunnel.
 
 Do not run the installed launcher and `dev:live` at the same time with the same tunnel/connector.
-
-
-## Dual Desktop / CLI tunnels in `dev:live`
-
-Production behavior is unchanged: the packaged launcher continues to expose the existing shared
-production tunnel behavior to normal Codex Desktop/CLI clients.
-
-The dual-lane topology exists only under `bun run dev:live`:
-
-```text
-Codex Desktop/controller
-  -> Desktop CODEX_HOME
-  -> Desktop Responses daemon
-  -> Desktop broker
-  -> Codex Native2
-  -> Desktop Tunnel ID
-
-bun run dev:codex -- ...
-  -> cli-lane/codex-home
-  -> CLI Responses daemon
-  -> CLI broker
-  -> Codex Native2 CLI DEV
-  -> different CLI Tunnel ID
-```
-
-The CLI lane refuses to start when it shares the Desktop lane's Tunnel ID, tunnel alias/profile,
-Responses port, broker endpoint, control token, or connector name. Electron-main reloads are also
-deferred while the CLI lane has an active HTTP/browser turn, so a source-launcher reload cannot
-silently tear down an in-flight CLI test.
-
-Useful overrides:
-
-- `CODEX_WEB_GPT_LIVE_CLI_HOME`: CLI lane state directory.
-- `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`: isolated Codex home used by `dev:codex`.
-- `CODEX_WEB_GPT_LIVE_CLI_SOURCE_CODEX_HOME`: ordinary Codex home whose Computer/Browser tooling
-  tables are selectively mirrored during `dev:live:cli-setup`.
-- `CODEX_WEB_GPT_LIVE_CLI_MIRROR_CODEX_TOOLING=0`: opt out of that tooling mirror.
-- `CODEX_WEB_GPT_LIVE_CLI_PORT`: CLI Responses port used during first setup.
-- `CODEX_WEB_GPT_LIVE_CLI_TUNNEL_ID`: optional non-interactive second Tunnel ID.
-- `CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID`: Platform organization ID for an organization-scoped
-  CLI tunnel. It is persisted into the CLI tunnel configuration and passed to
-  `tunnel-client runtimes connect --organization-id`.
-- `CODEX_WEB_GPT_LIVE_CLI_RUNTIME_KEY_FILE`: optional non-interactive runtime-key file.
-- `CODEX_WEB_GPT_CODEX_BIN`: explicit Codex CLI executable for the wrapper.
-- `CODEX_WEB_GPT_LIVE_CLI_MODEL`: default routed Web model for `dev:codex` sessions when no
-  `-m/--model` or `--profile` is supplied.
-- `CODEX_WEB_GPT_LIVE_CLI_EFFORT`: default reasoning effort injected for the selected routed Web
-  model when no explicit `model_reasoning_effort` override or profile is supplied.
-
-A Tunnel runtime key may have access to both tunnels, but the **Tunnel IDs themselves must differ**.
-
-
-### Tunnel discovery health
-
-DEV live pins OpenAI `tunnel-client` v0.0.15. Connector-facing readiness is checked with
-`tunnel-client runtimes status <alias> --json`. The managed runtime's `/readyz` contract is
-authoritative for whether it can accept work; explicit `control_plane_poll_health=failed|degraded`
-still blocks readiness. A missing/unknown poll snapshot does not by itself fail an otherwise
-healthy/ready runtime because v0.0.15's read-only admin lookup can return
-`tunnel_active_organization_required` for organization-scoped tunnels even though the managed
-runtime itself has the persisted organization context.
-
-
-If `runtimes status` reports `tunnel_active_organization_required`, rerun CLI setup with the
-Platform organization that owns the CLI tunnel:
-
-```powershell
-$env:CODEX_WEB_GPT_LIVE_CLI_ORGANIZATION_ID="org_..."
-bun run dev:live:cli-setup
-```
-
-The organization ID is saved in `cli-lane/config.json`, so later `dev:live` runs do not require
-the environment variable.
-
-
-CLI tunnel commands also inject the persisted organization ID as
-`CONTROL_PLANE_ORGANIZATION_ID`. This is intentionally separate from
-`runtimes connect --organization-id`: the latter scopes tunnel lookup/create, while the
-environment value supplies the `OpenAI-Organization` context used by the managed runtime and
-read-only control-plane status requests. `dev:live:cli-setup` ignores temporary
-`CODEX_HOME`/`CODEX_CHATGPT_WEB_HOME` values set by CLI diagnostic commands.
-
-
-The direct diagnostic helper `bun run scripts/dev-live-cli-tunnel.ts <status|start|stop>` now
-selects the isolated CLI lane automatically. It does not require callers to export
-`CODEX_CHATGPT_WEB_HOME` or `CODEX_HOME`; custom DEV lane roots still use
-`CODEX_WEB_GPT_LIVE_CLI_HOME` / `CODEX_WEB_GPT_LIVE_CLI_CODEX_HOME`.
-
-
-### Dual-lane identity telemetry
-
-When `dev:live` is active, each Responses daemon emits a structured
-`[chatgpt-web] dev_lane_identity` record and exposes the same record as `lane_identity` on
-`GET /healthz`. The record contains the DEV lane, connector name, tunnel alias, Responses port,
-and SHA-256 fingerprints of the tunnel ID and broker endpoint; raw tunnel IDs, broker paths, and
-runtime keys are not logged. Broker registration, queue, delivery, completion, and retirement
-telemetry carries the same identity so concurrent Desktop/CLI tool calls can be proven isolated
-from one log. Installed production launcher behavior is unchanged because the telemetry is enabled
-only when `CODEX_WEB_GPT_LIVE_MODE=1`.
