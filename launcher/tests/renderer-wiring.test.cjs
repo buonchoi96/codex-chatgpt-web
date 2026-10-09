@@ -67,7 +67,7 @@ test("Bigger Context waits for startup and route recovery without invalidating h
         },
       },
     });
-    vm.runInContext(electronMain.slice(electronMain.indexOf("function syncBrowserPreferences("), electronMain.indexOf("async function requestQuit("))
+    vm.runInContext(electronMain.slice(electronMain.indexOf("function syncFreshConversationPreference("), electronMain.indexOf("async function requestQuit("))
       + "\nregisterIpc({ logger, stateStore });", context);
     const start = electronMain.indexOf("} else void (async () => {");
     vm.runInContext(electronMain.slice(start + "} else ".length, electronMain.indexOf('  app.on("before-quit"', start)), context);
@@ -668,14 +668,14 @@ test("changing Bigger Context retires ready automatic chats before a previous mo
     runtimeHost: { currentOperation: () => null }, browserHost: { turnTabs: tabs },
     releaseRetainedConversation: (_host, key) => { released.push(key); tabs.delete("old"); }, send() {},
   });
-  vm.runInContext(electronMain.slice(electronMain.indexOf("function syncBrowserPreferences("), electronMain.indexOf("function registerIpc(")), context);
+  vm.runInContext(electronMain.slice(electronMain.indexOf("function syncFreshConversationPreference("), electronMain.indexOf("function registerIpc(")), context);
   const store = { read: () => state, update: patch => Object.assign(state, patch) };
-  context.syncBrowserPreferences(store, { solAvailable: false, experimentalBiggerContext: true });
+  context.syncFreshConversationPreference(store, { solAvailable: false, experimentalBiggerContext: true });
   assert.deepEqual(released, ["old-luna"]);
   assert.equal(state.experimentalBiggerContext, true);
   assert.equal(tabs.has("active"), true);
   assert.equal(tabs.has("manual"), true);
-  context.syncBrowserPreferences(store, { solAvailable: false, experimentalBiggerContext: true });
+  context.syncFreshConversationPreference(store, { solAvailable: false, experimentalBiggerContext: true });
   assert.deepEqual(released, ["old-luna"]);
 });
 

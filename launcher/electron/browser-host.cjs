@@ -2858,6 +2858,9 @@ class BrowserHost {
       ? "ChatGPT turn paused for recovery"
       : status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
     tab.loading = false;
+    // Terminal pages cannot retain a stale in-flight approval/progress state.
+    tab.approvalPending = false;
+    tab.turnProgress = undefined;
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.setBackgroundThrottling(true);
     if (status === "completed") {
       this.logger.info("browser.tab_completed", { tabId: tab.id, traceId });

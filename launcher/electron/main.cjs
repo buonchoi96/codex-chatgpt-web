@@ -530,7 +530,7 @@ function syncFreshConversationPreference(stateStore, config) {
   if (runtimeHost?.currentOperation()) return current;
   const retentionChanged = current.experimentalFreshConversationPerTurn !== enabled
     || current.useSavedChats !== useSavedChats
-    || current.experimentalBiggerContext !== biggerContextEnabled;
+    || (current.experimentalBiggerContext === true) !== biggerContextEnabled;
   if (!retentionChanged && current.biggerContextAvailable === biggerContextAvailable) return current;
   // Runtime restarts leave browser views alive. Retire completed chats only when their
   // persistence policy changes; capability-only state refreshes must not discard a valid conversation.
@@ -937,7 +937,7 @@ function registerIpc({ logger, stateStore }) {
   });
   handle("launcher:bigger-context", async (_event, enabled) => {
     const result = await runtimeHost.setBiggerContext(enabled === true);
-    syncBrowserPreferences(stateStore, runtimeHost.runtimeConfigSnapshot().config);
+    syncFreshConversationPreference(stateStore, runtimeHost.runtimeConfigSnapshot().config);
     const state = stateStore.update({
       experimentalBiggerContext: result.enabled,
       codexCatalogVerified: IS_DEV_PROFILE ? true : false,
