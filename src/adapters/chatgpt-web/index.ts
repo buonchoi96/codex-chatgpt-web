@@ -25,6 +25,7 @@ import {
 import { namespacedToolName, type AdapterEvent, type CodexContentPart, type CodexParsedRequest, type CodexProviderConfig, type CodexToolResultMessage, type CodexUsage } from "../../types";
 import type { ProviderAdapter } from "../base";
 import { parseDataUrl } from "../image";
+import { swiftToolActivityTitle } from "./tool-activity-label";
 import { ChatGptWebAdapterError } from "./adapter-error";
 import {
   ChatGptAccountSafety,
@@ -338,6 +339,11 @@ function applyNativeAgentLifecycle(
 
 function emitToolBatch(requests: BrokerToolRequest[], usage: CodexUsage, emit: (event: AdapterEvent) => void): void {
   for (const request of requests) {
+    // Codex owns tool card headers and cannot set a per-invocation Tool.title.
+    // Surface the model-authored Swift activity text as adjacent commentary;
+    // never rename the wire tool or duplicate/replay its payload.
+    const title = swiftToolActivityTitle(request);
+    if (title) emit({ type: "text_delta", text: "Computer Use: " + title + "\n", phase: "commentary" });
     emit({ type: "tool_call_start", id: request.callId, name: request.wireName });
     emit({
       type: "tool_call_delta",
