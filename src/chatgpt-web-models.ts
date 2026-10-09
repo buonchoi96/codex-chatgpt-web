@@ -3,9 +3,6 @@ export const CHATGPT_WEB_MODEL_PREFIX = "chatgpt-web/";
 export const CHATGPT_WEB_BACKEND_MODEL = "gpt-5.6-sol";
 /** Internal Luna transport identity; the Free UI does not expose a selectable model version. */
 export const CHATGPT_WEB_LUNA_BACKEND_MODEL = "gpt-5.6-luna";
-export const CHATGPT_WEB_LUNA_BIGGER_CONTEXT_ERROR =
-  "Bigger Context is unavailable for Luna and Think. Turn it off in launcher Settings "
-  + "(or run setup with --standard-context), then restart Codex.";
 export const CHATGPT_WEB_GPT6_SOL_BIGGER_CONTEXT_ERROR =
   "GPT-6 Sol uses standard context for this account and effort. Bigger Context supports Medium, High and Extra High on Pro accounts.";
 /** Internal adapter identity for a turn whose ChatGPT model is selected by the user in the launcher. */
@@ -108,13 +105,17 @@ export const CHATGPT_WEB_PRO_MODEL_COMPOSER_CHAR_LIMIT = 1_635_000;
  * history out of later browser requests without asking Codex to compact its canonical history.
  */
 export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = CHATGPT_WEB_MODEL_CONTEXT_WINDOW;
+/** Observed single-message Free/Luna envelope, independent of model context. */
+export const CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET = 28_000;
+export const CHATGPT_WEB_LUNA_BIGGER_CONTEXT_WINDOW = 84_000;
 /**
  * Leave substantial headroom for a long Luna Web tool turn to compact itself before the hard
  * 1.05M model window. Codex supports mid-turn auto-compaction between sampling/tool cycles.
  */
 export const CHATGPT_WEB_LUNA_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_AUTOMATIC_AUTO_COMPACT_TOKEN_LIMIT;
+export const CHATGPT_WEB_LUNA_BIGGER_AUTO_COMPACT_TOKEN_LIMIT = 59_424;
 /** Bigger Context changes browser transport only; it must not exceed the model's semantic window. */
-export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 1;
+export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 3;
 
 export interface ChatGptWebContextLimits {
   contextWindow: number;
@@ -134,6 +135,7 @@ export function supportsChatGptWebBiggerContext(
   capabilities: Pick<ChatGptWebAccountCapabilities, "proAvailable">,
   modelFamily?: ChatGptWebModelFamily,
 ): boolean {
+  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) return effort === "low" || effort === "medium";
   return backendModel === CHATGPT_WEB_BACKEND_MODEL && (
     modelFamily !== "6" || effort === "max" || (capabilities.proAvailable && effort !== "low")
   );
@@ -190,6 +192,11 @@ export function resolveChatGptWebContextLimits(
     return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
   if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
+    // Free staging is limited to 84K for the experimental transport, while
+    // the default fork context/compaction profile remains unchanged.
+    if (capabilities.experimentalBiggerContext) {
+      return contextLimits(CHATGPT_WEB_LUNA_BIGGER_CONTEXT_WINDOW, CHATGPT_WEB_LUNA_BIGGER_AUTO_COMPACT_TOKEN_LIMIT);
+    }
     return contextLimits(CHATGPT_WEB_CODEX_CONTEXT_WINDOW, autoCompactTokenLimit, CHATGPT_WEB_CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT);
   }
   // GPT-6 retains account/effort-specific profiles. Plus reasoning experimentally
@@ -246,7 +253,9 @@ export function resolveChatGptWebTransportLimits(
   capabilities: ChatGptWebAccountCapabilities,
 ): ChatGptWebTransportLimits {
   if (isChatGptWebZeroRiskBackendModel(backendModel)) return {};
-  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) return {};
+  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
+    return { browserMessageTokenLimit: CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS };
+  }
   if (!capabilities.proAvailable) {
     if (effort === "low") {
       return { browserComposerCharLimit: CHATGPT_WEB_INSTANT_COMPOSER_CHAR_LIMIT };
@@ -280,11 +289,14 @@ export function resolveChatGptWebTransportLimits(
  * Bigger Context expands the transaction, never this per-message budget.
  */
 export function resolveChatGptWebMessageTokenBudget(
-  backendModel: typeof CHATGPT_WEB_BACKEND_MODEL,
+  backendModel: ChatGptWebAutomaticBackendModel,
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
   imageTokens = 0,
 ): number {
+  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
+    return Math.max(0, CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - imageTokens);
+  }
   // Browser transport is bounded by the real Web model window, not the larger Codex calibration
   // window used solely to compensate for Codex's 90% auto-compaction clamp.
   resolveChatGptWebContextLimits(
@@ -299,12 +311,12 @@ export function resolveChatGptWebMessageTokenBudget(
 
 /** Keep repeated Plus Instant uploads within the ordinary pre-compaction input target. */
 export function resolveChatGptWebStagingTokenBudget(
-  backendModel: typeof CHATGPT_WEB_BACKEND_MODEL,
+  backendModel: ChatGptWebAutomaticBackendModel,
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
 ): number {
   const messageBudget = resolveChatGptWebMessageTokenBudget(backendModel, effort, capabilities);
-  if (effort !== "low" || capabilities.proAvailable) return messageBudget;
+  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL || effort !== "low" || capabilities.proAvailable) return messageBudget;
   // A first near-maximum Instant message can succeed while the next is rejected (#777).
   // Reuse normal Instant's input headroom, including the existing platform reserve;
   // this changes staging allocation, not the selected model's advertised context window.

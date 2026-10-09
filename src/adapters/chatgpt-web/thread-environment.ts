@@ -5,7 +5,7 @@ import { atomicWriteFile } from "../../config";
 import { getCodexHome } from "../../codex-integration-shared";
 import type { CodexParsedRequest } from "../../types";
 import {
-  extractChatGptTurnEnvironment,
+  extractChatGptTurnEnvironmentClaim,
   extractChatGptCompactionSourceRevision,
   extractChatGptContinuationEnvironmentClaim,
   extractChatGptSteeringEnvironmentClaim,
@@ -18,6 +18,7 @@ import {
   unattributedChatGptEnvironmentMessages,
   isChatGptCompactionContinuation,
   MissingTrustedCodexEnvironmentError,
+  type ChatGptEnvironmentClaim,
   type ChatGptSandboxPolicy,
   type ChatGptTurnEnvironment,
 } from "./environment";
@@ -126,17 +127,21 @@ function authority(environment: ChatGptTurnEnvironment, updatedAt: number): Stor
   };
 }
 
-function sameAuthority(left: ChatGptTurnEnvironment, right: ChatGptTurnEnvironment): boolean {
+function sameAuthority(claim: ChatGptEnvironmentClaim, right: ChatGptTurnEnvironment, allowAdditionalWritableRoots = false): boolean {
+  const left = claim.environment;
   const samePaths = (a: string[], b: string[]): boolean => {
     const expected = new Set(b.map(pathIdentity));
     return a.length === expected.size && a.every(path => expected.has(pathIdentity(path)));
   };
   return pathIdentity(left.cwd) === pathIdentity(right.cwd)
     && samePaths(left.roots, right.roots)
-    && samePaths(left.writableRoots, right.writableRoots)
+    && (allowAdditionalWritableRoots
+      ? left.writableRoots.every(path => right.writableRoots.some(root => pathIdentity(root) === pathIdentity(path)))
+      : samePaths(left.writableRoots, right.writableRoots))
     && left.sandboxPolicy.type === right.sandboxPolicy.type
-    && (left.sandboxPolicy.type === "dangerFullAccess" || (right.sandboxPolicy.type !== "dangerFullAccess"
-      && left.sandboxPolicy.networkAccess === right.sandboxPolicy.networkAccess));
+    && (left.sandboxPolicy.type === "dangerFullAccess" || !claim.statesNetworkAccess
+      || (right.sandboxPolicy.type !== "dangerFullAccess"
+        && left.sandboxPolicy.networkAccess === right.sandboxPolicy.networkAccess));
 }
 
 /**
@@ -157,8 +162,16 @@ export class ChatGptThreadEnvironmentStore {
 
   resolve(parsed: CodexParsedRequest): ChatGptTurnEnvironment {
     const identity = extractChatGptTurnIdentity(parsed);
+    let initialClaim: ChatGptEnvironmentClaim | undefined;
     try {
-      const environment = extractChatGptTurnEnvironment(parsed);
+      const claim = extractChatGptTurnEnvironmentClaim(parsed);
+      const environment = claim.environment;
+      if (environment.sandboxPolicy.type !== "dangerFullAccess" && !claim.statesNetworkAccess) {
+        // Modern envelopes state filesystem access only. Resolve the current native policy on
+        // the first round too: absence of a network statement is not a disabled-network grant.
+        initialClaim = claim;
+        throw new MissingTrustedCodexEnvironmentError("network access");
+      }
       if (identity.threadId) this.set(identity.threadId, environment);
       return environment;
     } catch (error) {
@@ -171,8 +184,8 @@ export class ChatGptThreadEnvironmentStore {
       const steeringClaim = hasCurrentContext && !currentCompaction
         ? extractChatGptSteeringEnvironmentClaim(parsed) : undefined;
       const calendarDelta = hasCurrentContext && !currentCompaction && hasChatGptCalendarEnvironmentDelta(parsed);
-      if (hasCurrentContext && !currentCompaction && !historicalMessages && !steeringClaim && !calendarDelta) throw error;
-      const currentClaim = currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim;
+      if (hasCurrentContext && !currentCompaction && !initialClaim && !historicalMessages && !steeringClaim && !calendarDelta) throw error;
+      const currentClaim = initialClaim ?? (currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim);
       const rolloutIdentity = lineage ?? extractChatGptRootThreadMetadata(parsed);
       // Automatic compaction has a current turn_context; standalone compaction has only its
       // source turn_context. Either must be the latest native record, never an arbitrary ancestor.
@@ -192,8 +205,9 @@ export class ChatGptThreadEnvironmentStore {
           if (calendarDelta && rolloutEnvironment.sandboxPolicy.type !== "dangerFullAccess") {
             throw new Error("Calendar environment delta conflicts with its current Codex rollout");
           }
-          if (currentClaim && !sameAuthority(currentClaim, rolloutEnvironment)) {
-            throw new Error(`${currentCompaction ? "Compaction continuation" : "Steering"} environment conflicts with its current Codex rollout`);
+          if (currentClaim && !sameAuthority(currentClaim, rolloutEnvironment, initialClaim !== undefined || steeringClaim !== undefined)) {
+            const source = currentCompaction ? "Compaction continuation" : initialClaim ? "Current" : "Steering";
+            throw new Error(`${source} environment conflicts with its current Codex rollout`);
           }
           this.set(rolloutIdentity.threadId, rolloutEnvironment);
           return rolloutEnvironment;

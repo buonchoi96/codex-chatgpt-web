@@ -163,7 +163,11 @@ test("observed resource preview hydration cannot rewrite delivered answer text",
     expect(before.markdownSegments.map(({ key, ...content }) => content))
       .toEqual(after.markdownSegments.map(({ key, ...content }) => content));
     expect(after.markdownSegments.map(segment => segment.html).join("")).not.toContain("candidate-overview.png");
-    expect(after.fullHtml).toContain("candidate-overview.png"); // The browser's original content is untouched.
+    expect(after.fullHtml).not.toContain("candidate-overview.png");
+    await snapshots(page("candidate-overview.png", "PNG"), [doc => {
+      // Only the readback is projected; the actual browser document stays intact.
+      expect(doc.getElementById("turn")!.innerHTML).toContain("candidate-overview.png");
+    }]);
 
     buffer.observe((await snapshot(page("Layout", "").replace("The layout was updated.", "Changed answer."))).markdownSegments, 2);
     expect(() => buffer.finish()).toThrow(ChatGptMarkdownConsistencyError);
@@ -313,6 +317,45 @@ test("reported code-block containers preserve code while their localized toolbar
   }
 });
 
+test("known rich-content controls cannot keep a finished answer waiting, but answer edits restart settling", async () => {
+  // Chart and preview boundaries were captured in DEV; their controls can change
+  // after generation has stopped. Completion must use the same content as delivery.
+  const html = `<section id="turn"><div class="markdown">
+    <p id="prose">Here is the chart.</p><pre><code class="language-json">{"mark":"line"}</code></pre>
+    <div class="chart-widget-container" id="chart"><div role="status">Creating chart</div></div>
+    <div data-code-block-preview-pane="vega-lite" id="preview">Loading preview</div>
+    <p>Done.</p></div><button data-testid="copy-turn-action-button"></button></section>`;
+  const frames = await snapshots(html, [
+    doc => {
+      doc.getElementById("chart")!.innerHTML = '<button>Chart options</button><svg><text>Day 1 Day 2</text></svg>';
+      doc.getElementById("preview")!.innerHTML = '<iframe title="Preview"></iframe>';
+    },
+    doc => { doc.getElementById("chart")!.innerHTML = '<button>Chart options</button><svg><text>Day 3 Day 4</text></svg>'; },
+    doc => { doc.getElementById("prose")!.textContent = "Here is the revised chart."; },
+  ]);
+  const state = (frame: Snapshot) => ({ ...frame, running: false,
+    currentText: frame.visibleText, currentHtml: frame.fullHtml });
+  const tracker = new ChatGptCompletionTracker();
+  expect(frames.every(frame => frame.completionActionVisible)).toBeTrue();
+  expect(tracker.update({ ...state(frames[0]!), running: true }, 0)).toBeFalse();
+  expect(tracker.update(state(frames[0]!), 1)).toBeFalse();
+  expect(frames[1]!.visibleText).toBe(frames[0]!.visibleText);
+  expect(frames[2]!.fullHtml).toBe(frames[0]!.fullHtml);
+  expect(frames[2]!.fullHtml).not.toContain("Chart options");
+  expect(frames[2]!.fullHtml).toContain('{"mark":"line"}');
+  expect(tracker.update(state(frames[1]!), 1000)).toBeFalse();
+  expect(tracker.update(state(frames[2]!), 1 + CHATGPT_COMPLETION_SETTLE_MS)).toBeTrue();
+  expect(tracker.update(state(frames[3]!), 2 + CHATGPT_COMPLETION_SETTLE_MS)).toBeFalse();
+  expect(tracker.update(state(frames[3]!), 2 + 2 * CHATGPT_COMPLETION_SETTLE_MS)).toBeTrue();
+  // A widget refreshing after a tool call is not a new answer from the model.
+  const afterTool = new ChatGptCompletionTracker();
+  afterTool.observeToolBatch(1, frames[0]!.visibleText);
+  expect(afterTool.update(state(frames[1]!), 0)).toBeFalse();
+  expect(afterTool.update(state(frames[2]!), CHATGPT_COMPLETION_SETTLE_MS)).toBeFalse();
+  expect(afterTool.update(state(frames[3]!), 1 + CHATGPT_COMPLETION_SETTLE_MS)).toBeFalse();
+  expect(afterTool.update(state(frames[3]!), 1 + 2 * CHATGPT_COMPLETION_SETTLE_MS)).toBeTrue();
+});
+
 test("writing card controls cannot rewrite delivered content, but edited email text still can", async () => {
   const html = (toolbar: string, body = "Hello <strong>Alex</strong>.") => `<section id="turn"><div class="markdown">
     <p data-start="0" data-end="10">Drafts</p>
@@ -324,7 +367,9 @@ test("writing card controls cannot rewrite delivered content, but edited email t
     </div><p data-start="202" data-end="220">Done.</p></div></section>`;
   const during = await snapshot(html("メール"));
   const complete = await snapshot(html(""));
-  expect(during.markdownSegments).toEqual(complete.markdownSegments);
+  // These snapshots use separate documents; their DOM node identities differ.
+  expect(during.markdownSegments.map(({ key, ...content }) => content))
+    .toEqual(complete.markdownSegments.map(({ key, ...content }) => content));
   expect(during.markdownSegments.map(segment => segment.text).join("\n")).not.toContain("メール");
   expect(during.markdownSegments.map(segment => segment.text).join("\n")).not.toContain("Email format");
   const buffer = new ChatGptMarkdownBuffer(markdown => markdown, 0);

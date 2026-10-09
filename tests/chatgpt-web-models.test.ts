@@ -268,7 +268,7 @@ describe("fixed ChatGPT Web model routes", () => {
     });
   });
 
-  test("Bigger Context changes browser staging without changing the 986K semantic compaction boundary", () => {
+  test("Bigger Context keeps the fork Sol compaction profile and bounds experimental Luna staging", () => {
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "max", {
       ...pro,
       experimentalBiggerContext: true,
@@ -282,9 +282,9 @@ describe("fixed ChatGPT Web model routes", () => {
       extraHighAvailable: false, proAvailable: false,
       experimentalBiggerContext: true,
     })).toEqual({
-      contextWindow: 1_117_022,
-      effectiveContextWindowPercent: 94,
-      autoCompactTokenLimit: 272_000,
+      contextWindow: 84_000,
+      effectiveContextWindowPercent: 100,
+      autoCompactTokenLimit: 59_424,
     });
   });
 

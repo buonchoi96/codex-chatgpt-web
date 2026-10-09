@@ -647,7 +647,7 @@ export function createChatGptWebAdapter(
       : undefined,
   );
   const currentUsageInput = (parsed: CodexParsedRequest): CodexParsedRequest => (
-    parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !parsed._compactionRequest
+    parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !experimentalBiggerContext && !parsed._compactionRequest
       ? lunaCheckpointStore.apply(parsed).parsed
       : parsed
   );
@@ -672,6 +672,7 @@ export function createChatGptWebAdapter(
       : resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, turnCapabilities);
     const identity = extractChatGptTurnIdentity(parsed);
     const captureLunaCheckpoint = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
+      && !experimentalBiggerContext
       && !parsed._compactionRequest
       && Boolean(identity.threadId && identity.turnId);
     const useNativeOutputTunnel = shouldUseNativeOutputTunnel(parsed, {
@@ -1021,6 +1022,10 @@ export function createChatGptWebAdapter(
       };
     }
     if (!mode.localTools) {
+      const prepareWith = async (input: CodexParsedRequest) => ({
+        ...compileChatGptWebPrompt(input, turnCapabilities, undefined, compileOptionsFor(input)),
+        release: () => {},
+      });
       const browserTurn = cancellableBrowserTurn(finalizeCheckpoint(worker.run({
         traceId,
         modelId: parsed.modelId,
@@ -1056,6 +1061,8 @@ export function createChatGptWebAdapter(
         trace,
         text,
         usageInput: checkpointInput.parsed,
+        ...(conversationKey ? { conversationKey } : {}),
+        ...(releaseRetainedConversation ? { releaseRetainedConversation } : {}),
         submission,
         cancel: browserTurn.cancel,
       };
@@ -1245,7 +1252,8 @@ export function createChatGptWebAdapter(
           // Full-Harness Luna can reach this path during a long active Computer Use turn.
           // Rolling checkpoints optimize completed Luna history, but they do not replace native
           // mid-turn compaction of the currently active Codex task.
-          const structuredCompactionRequired = configuredCapabilities.localToolsEnabled;
+          const structuredCompactionRequired = configuredCapabilities.localToolsEnabled
+            || (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && experimentalBiggerContext === true);
           if (structuredCompactionRequired
             && (!retainedLauncherDescriptor || (!manualRequest && !structuredBroker))) {
             emit({
@@ -1506,7 +1514,7 @@ export function createChatGptWebAdapter(
               const upstreamError = handoffError instanceof ChatGptWebAdapterError ? handoffError : undefined;
               emit({
                 type: "error",
-                message: upstreamError?.message ?? "ChatGPT did not complete the context handoff. Retry the task.",
+                message: upstreamError?.message ?? `ChatGPT did not complete the context handoff: ${handoffError.message}`,
                 status: upstreamError?.status ?? 409,
                 errorType: upstreamError?.errorType ?? "invalid_request_error",
                 code: upstreamError?.code ?? "compaction_handoff_failed",
@@ -1526,7 +1534,12 @@ export function createChatGptWebAdapter(
             return;
           }
           const responseExecutionKey = `${executionNamespace}:${chatGptCompactionSourceExecutionKey(parsed)}`;
-          await chatGptTurnSessions.retireAndWait(responseExecutionKey, incoming.abortSignal);
+          const sourceConversationKey = chatGptConversationKey(parsed, executionNamespace);
+          if (sourceConversationKey && chatGptTurnSessions.findConversationHead(sourceConversationKey)) {
+            await withAbort(chatGptTurnSessions.retireConversationAndWait(sourceConversationKey), incoming.abortSignal);
+          } else {
+            await chatGptTurnSessions.retireAndWait(responseExecutionKey, incoming.abortSignal);
+          }
         }
         const executionKey = `${executionNamespace}:${chatGptTurnExecutionKey(parsed)}`;
         const ownerKey = `${executionNamespace}:${chatGptThreadOwnershipKey(parsed)}`;

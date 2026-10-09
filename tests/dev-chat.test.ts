@@ -257,8 +257,10 @@ test("Bigger Context preserves the global DEV auto-compact threshold and fails c
     solAvailable: false,
     extraHighAvailable: false, proAvailable: false,
   }, store, factory, root, { biggerContext: true });
-  expect(() => luna.open("luna-window", "chatgpt-web/luna")).toThrow("unavailable for Luna");
-  expect(() => luna.open("think-window", "chatgpt-web/think")).toThrow("unavailable for Luna");
+  for (const model of ["chatgpt-web/luna", "chatgpt-web/think"] as const) {
+    const state = luna.open(model.split("/")[1]!, model).state;
+    expect(luna.status(state)).toMatchObject({ contextWindow: 84_000, autoCompactTokenLimit: 59_424 });
+  }
   await Promise.all([normal.close(), bigger.close(), luna.close()]);
 });
 
