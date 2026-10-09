@@ -25,7 +25,7 @@ import {
 import { namespacedToolName, type AdapterEvent, type CodexContentPart, type CodexParsedRequest, type CodexProviderConfig, type CodexToolResultMessage, type CodexUsage } from "../../types";
 import type { ProviderAdapter } from "../base";
 import { parseDataUrl } from "../image";
-import { swiftToolActivityTitle } from "./tool-activity-label";
+import { showPublicReasoning } from "./visible-output-policy";
 import { ChatGptWebAdapterError } from "./adapter-error";
 import {
   ChatGptAccountSafety,
@@ -339,11 +339,6 @@ function applyNativeAgentLifecycle(
 
 function emitToolBatch(requests: BrokerToolRequest[], usage: CodexUsage, emit: (event: AdapterEvent) => void): void {
   for (const request of requests) {
-    // Codex owns tool card headers and cannot set a per-invocation Tool.title.
-    // Surface the model-authored Swift activity text as adjacent commentary;
-    // never rename the wire tool or duplicate/replay its payload.
-    const title = swiftToolActivityTitle(request);
-    if (title) emit({ type: "text_delta", text: "Computer Use: " + title + "\n", phase: "commentary" });
     emit({ type: "tool_call_start", id: request.callId, name: request.wireName });
     emit({
       type: "tool_call_delta",
@@ -363,12 +358,12 @@ function emitBrowserCompletion(outcome: ChatGptBrowserOutcome, usage: CodexUsage
 
 function emitTraceEvents(trace: ChatGptTraceEvent[], emit: (event: AdapterEvent) => void): void {
   for (const event of trace) {
+    // Only publish ChatGPT's explicitly visible reasoning summaries. Routine
+    // commentary (e.g. "Preparing visual testing") is still retained in the
+    // source conversation for correctness but is not emitted as Codex progress.
+    // This is NOT a request to expose hidden chain-of-thought.
+    if (!showPublicReasoning(event)) continue;
     if (!event.continuation) emit({ type: "assistant_boundary" });
-    // These events come only from text ChatGPT has already rendered visibly in its public turn DOM.
-    // Codex clients can suppress Responses reasoning-summary deltas depending on UI/summary mode,
-    // which made this public progress disappear while tool calls remained visible. Emit the visible
-    // status/reasoning summaries as commentary so Codex consistently shows the same public progress.
-    // Hidden chain-of-thought is never sourced by ChatGptVisibleTraceTracker and remains untouched.
     emit({ type: "text_delta", text: event.text, phase: "commentary" });
   }
 }
@@ -1836,12 +1831,6 @@ export function createChatGptWebAdapter(
                   retainedFollowupProofs.commit(session.runtime.conversationKey, parsed, finalAnswer);
                 }
                 if (observerNativeOutputTunnel) {
-                  if (session.nativeOutputAfterSequence() === 0 && roundReasoning.length > 0) {
-                    emitRoundBatch(buffer => emitTraceEvents(
-                      roundReasoning.map(text => ({ kind: "commentary" as const, text })),
-                      buffer,
-                    ));
-                  }
                   emitRoundBatch(buffer => emitTextDeltas([finalAnswer], buffer));
                 } else if (bufferStructuredOutput) {
                   emitRoundBatch(buffer => emitTextDeltas([finalAnswer], buffer));
@@ -1907,12 +1896,12 @@ export function createChatGptWebAdapter(
                 }
                 if (next.type === "native-output") {
                   session.acceptNativeOutput(next.event);
-                  if (next.event.kind === "commentary" || next.event.kind === "reasoning") {
+                  if (showPublicReasoning(next.event, parsed.options.hideThinkingSummary)) {
                     const alreadyVisible = roundReasoning.includes(next.event.text);
                     tunneledTraceTexts.add(next.event.text);
                     if (!alreadyVisible) {
                       emitRoundBatch(buffer => emitTraceEvents([{
-                        kind: "commentary",
+                        kind: "reasoning",
                         text: next.event.text,
                       }], buffer));
                     }

@@ -5,8 +5,8 @@ export const CODEX_OUTPUT_CONTROL_WIRE_NAME = "codex.control.output";
 
 export const CODEX_OUTPUT_CONTROL_PROMPT = [
   "codex.control.output is a bound bridge control supplied here, not an inventory tool; no inventory lookup is needed. Call it directly through codex_tool_call with the current bound turn_token and arguments containing kind and text.",
-  "Send every user-visible progress update through codex_tool_call with wire_name codex.control.output, arguments kind=commentary and the complete visible text. Do not expose hidden chain-of-thought.",
-  "Send only concise user-visible reasoning summaries, never hidden chain-of-thought, with kind=reasoning.",
+  "Do not send per-tool activity titles, generic progress statuses, or intermediate commentary. Codex handles the tool lifecycle separately.",
+  "Send only concise user-visible reasoning summaries with kind=reasoning, never private or hidden chain-of-thought.",
   "After all work tools have settled and codex_turn_complete has been accepted, send the complete user-facing answer exactly once with kind=final. Then also return the exact same final text as ordinary assistant prose so the browser fallback can verify this experimental transport.",
   "Use the current codex_native_turn_binding turn_token for every output control call. Output control calls report text to the outer Codex task and do not authorize additional work.",
 ] as const;

@@ -762,6 +762,7 @@ export function compileChatGptWebPrompt(
   const outputControlContract = parsed._compactionRequest
   ? []
   : [
+    "For visible Codex output, provide only concise public reasoning summaries and the completed final answer; do not narrate individual MCP calls, screenshots, benchmark steps, or generic preparation/finalization statuses. This changes presentation only; execute all required tools normally and keep their results accurate.",
     ...(parsed.options.verbosity === "low"
       ? ["Codex requested low response verbosity. Keep the final user-facing answer concise and direct while still satisfying every explicit requirement."]
       : parsed.options.verbosity === "medium"
