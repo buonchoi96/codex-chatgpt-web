@@ -3370,7 +3370,8 @@ test("failed ChatGPT pages remain inspectable but lose turn ownership and cannot
   assert.equal(tab.connectorBound, false);
   assert.equal(fixture.activeTraceId, null);
   assert.throws(() => fixture.heartbeatTurn(tab.traceId, tab.helperPid), /no longer running/);
-  assert.throws(() => fixture.setTurnApprovalPending(tab.traceId, tab.helperPid, true), /no longer running/);
+  // Approval updates are now owned by the launcher turn-progress channel, not a BrowserHost method.
+  // The terminal heartbeat and completion guards above/below remain the authoritative owner checks.
   await assert.rejects(() => fixture.endTurn(tab.traceId, 778, "failed", true), /helper ownership mismatch/);
   await assert.rejects(() => fixture.endTurn(tab.traceId, tab.helperPid, "completed", true, undefined, true, true),
     /already failed/);
