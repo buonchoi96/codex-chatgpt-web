@@ -9,7 +9,7 @@ import { ChatGptTextFeed, ChatGptTraceFeed, chatGptTurnSessions } from "../src/a
 import { callTurnBroker, closeTurnBrokers, RemoteTurnBroker, TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint, defaultConfig, providerConfig } from "../src/config";
 import { parseRequest } from "../src/responses/parser";
-import { compactRequest, devLiveLaneIdentity, HttpTurnCounter, responseRequest, routeChatGptWebRequest, startServer } from "../src/server";
+import { compactRequest, devLiveLaneIdentity, HttpTurnCounter, ModelCatalogFetches, responseRequest, routeChatGptWebRequest, startServer } from "../src/server";
 
 test("DEV live lane identity distinguishes Desktop and CLI without exposing raw tunnel or broker ids", () => {
   const config = defaultConfig("full");

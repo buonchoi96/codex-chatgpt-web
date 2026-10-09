@@ -638,10 +638,6 @@ describe("ChatGPT outer-native harness v4", () => {
       { role: "assistant", content: [{ type: "text", text: "First retained answer" }], timestamp: 3 },
       { role: "user", content: "Continue in the same repository", timestamp: 4 },
     ];
-    if (luna) {
-      first.modelId = second.modelId = "gpt-5.6-luna";
-      first.options.reasoning = second.options.reasoning = "low";
-    }
     const firstRaw = first._rawBody as { input: unknown[] };
     second._rawBody = {
       prompt_cache_key: "thread_test_123",

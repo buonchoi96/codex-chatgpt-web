@@ -314,7 +314,7 @@ export class ChatGptMarkdownBuffer {
     let sawPending = false;
     let previousSourceStart: number | undefined;
 
-    for (const segment of segments) {
+    for (const [observedIndex, segment] of segments.entries()) {
       if (segment.sourceStart !== undefined) {
         if (previousSourceStart !== undefined && segment.sourceStart <= previousSourceStart) {
           return new ChatGptMarkdownConsistencyError(
@@ -341,7 +341,7 @@ export class ChatGptMarkdownBuffer {
         }
         if (committed.sourceStart !== undefined && segment.sourceStart !== undefined
           && committed.sourceStart !== segment.sourceStart) {
-          return this.changedCommittedBlockError("source_range_changed", segment, committed, observedIndex, committedIndex);
+          return this.changedCommittedBlockError("source_range_changed", segment, committed);
         }
         // A matching DOM node can acquire its first source range after delivery. Preserve
         // that proven association for later remounts, only after this whole snapshot passes.
@@ -378,10 +378,6 @@ export class ChatGptMarkdownBuffer {
             observedStart: segment.sourceStart, observedEnd: segment.sourceEnd,
             committedStart: tail.sourceStart, committedEnd: tail.sourceEnd,
             observedTextChars: segment.text.length, committedTextChars: tail.text.length,
-            observedTag: segment.tag, committedTag: tail.tag,
-            observedIndex, committedIndex: this.committed.length - 1,
-            observedKeyMode: segment.sourceStart === undefined ? "dom-node" : "source-range",
-            committedKeyMode: tail.sourceStart === undefined ? "dom-node" : "source-range",
           },
         );
       }
