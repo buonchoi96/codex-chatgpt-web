@@ -26,6 +26,7 @@ import type {
   PreviousAgentAssignment,
 } from "./codex-integration-shared";
 import {
+  codexInterruptHookProvablyAbsent,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
@@ -167,10 +168,14 @@ export function managedJournalIsActive(journal: ManagedRouteJournal): boolean {
   return journal.version === 3 || journal.active;
 }
 
-export function verifyManagedJournalState(text: string, journal: ManagedRouteJournal): void {
+export function verifyManagedJournalState(
+  text: string,
+  journal: ManagedRouteJournal,
+  options: { allowAbsentHook?: boolean } = {},
+): void {
   // Recovery selects the journal that owns the physical edits, even if a user-selected
   // provider now bypasses the bridge. That installation must remain removable.
-  if (journal.version === 3 || journal.active) verifyOwnedInstalledRoute(text, journal);
+  if (journal.version === 3 || journal.active) verifyOwnedInstalledRoute(text, journal, options);
   else verifyRestoredRoute(text, journal);
 }
 
@@ -388,7 +393,11 @@ export function verifyInstalledRoute(text: string, journal: ManagedRouteJournal)
   assertBuiltinModelProvider(text);
 }
 
-function verifyOwnedInstalledRoute(text: string, journal: ManagedRouteJournal): void {
+function verifyOwnedInstalledRoute(
+  text: string,
+  journal: ManagedRouteJournal,
+  options: { allowAbsentHook?: boolean } = {},
+): void {
   const lines = splitLines(text);
   const current = assignments(lines);
   if (current.openai_base_url.value !== journal.installed.openai_base_url) {
@@ -409,7 +418,11 @@ function verifyOwnedInstalledRoute(text: string, journal: ManagedRouteJournal): 
     }
   }
   if (journal.version === 10) {
-    verifyCodexInterruptHook(text, journal.interruptHook);
+    // Setup may reinstall a hook removed in full by a native config rewrite. All other
+    // consumers still require the installed hook unless they explicitly opt into this check.
+    if (!options.allowAbsentHook || !codexInterruptHookProvablyAbsent(text, journal.interruptHook)) {
+      verifyCodexInterruptHook(text, journal.interruptHook);
+    }
     verifyNativeFullAccess(text, journal);
   }
   if (journal.version === 8 || journal.version === 9 || journal.version === 10) {
@@ -543,10 +556,14 @@ export function assertPreservedPreviousRealtimeAssignment(
   }
 }
 
-export function restoreManagedRoute(text: string, journal: ManagedRouteJournal): string {
-  verifyOwnedInstalledRoute(text, journal);
+export function restoreManagedRoute(
+  text: string,
+  journal: ManagedRouteJournal,
+  options: { allowAbsentHook?: boolean } = {},
+): string {
+  verifyOwnedInstalledRoute(text, journal, options);
   const withoutHook = journal.version === 10
-    ? restoreCodexInterruptHook(text, journal.interruptHook)
+    ? restoreCodexInterruptHook(text, journal.interruptHook, { allowAbsent: options.allowAbsentHook })
     : text;
   const document = parseDocument(withoutHook);
   removeManagedComment(document);

@@ -152,7 +152,10 @@ function journalMatchesConfig(journal: AnyCodexIntegrationJournal): boolean {
     if (!existsSync(journal.configPath)) return false;
     const text = readFileSync(journal.configPath, "utf8");
     if (journal.version === 2) return text.includes(journal.providerBlock);
-    verifyManagedJournalState(text, journal);
+    // Choose between journal copies using the same narrowly scoped proof as Setup.
+    // A missing owned hook is acceptable only when every other installed route
+    // invariant is intact; two equally valid but divergent journals still conflict.
+    verifyManagedJournalState(text, journal, { allowAbsentHook: journal.version === 10 });
     return true;
   } catch {
     return false;

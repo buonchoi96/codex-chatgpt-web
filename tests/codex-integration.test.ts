@@ -861,8 +861,14 @@ describe("reversible native Codex route integration", () => {
         const journal = readFileSync(getCodexJournalPath(), "utf8");
         const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
 
-        expect(() => preflightCodexIntegration(config)).toThrow("changed after setup");
-        expect(() => installCodexIntegration(config)).toThrow("changed after setup");
+        if (keepRoute) {
+          expect(() => preflightCodexIntegration(config)).not.toThrow();
+        } else {
+          // A fully restored route is not an active installation: only an explicit
+          // replace request may install it again.
+          expect(() => preflightCodexIntegration(config)).toThrow("openai_base_url");
+          expect(() => installCodexIntegration(config)).toThrow("openai_base_url");
+        }
         expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).not.toThrow();
         expect(readFileSync(configPath, "utf8")).toBe(current);
         expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(journal);
@@ -883,6 +889,50 @@ describe("reversible native Codex route integration", () => {
         expect(readFileSync(configPath, "utf8")).toBe(original);
       }
     }
+  });
+
+  test("Reinstall auto-repairs a fully removed launcher hook with foreign Interrupt hooks intact", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = [
+      'model = "gpt-5.6-sol"',
+      "[[hooks.Interrupt]]",
+      "[[hooks.Interrupt.hooks]]",
+      'type = "command"',
+      'command = "keep-foreign-hook"',
+      'timeout = 3',
+      "",
+      '[hooks.state."other-app:interrupt:0:0"]',
+      'trusted_hash = "sha256:keep-foreign"',
+      "",
+      "[mcp_servers.keep_foreign]",
+      'command = "foreign-mcp"',
+      "",
+    ].join("\n");
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+    saveConfig(config);
+    const installed = installCodexIntegration(config);
+    const withoutManaged = readFileSync(configPath, "utf8").replace(installed.interruptHook.fragment, "");
+    writeFileSync(configPath, withoutManaged);
+    const journal = readFileSync(getCodexJournalPath(), "utf8");
+    const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
+
+    expect(() => preflightCodexIntegration(config)).not.toThrow();
+    expect(readFileSync(configPath, "utf8")).toBe(withoutManaged);
+    expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(journal);
+    expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(recovery);
+
+    const repaired = installCodexIntegration(config);
+    const repairedText = readFileSync(configPath, "utf8");
+    const document = Bun.TOML.parse(repairedText) as any;
+    expect(document.hooks.Interrupt).toHaveLength(2);
+    expect(document.hooks.Interrupt[0].hooks[0].command).toBe("keep-foreign-hook");
+    expect(document.mcp_servers.keep_foreign.command).toBe("foreign-mcp");
+    expect(repaired.interruptHook.command).toBe(installed.interruptHook.command);
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    uninstallCodexIntegration();
+    expect(readFileSync(configPath, "utf8")).toBe(original);
   });
 
   test("explicit setup still refuses changed hooks, partial removal and invalid config", () => {

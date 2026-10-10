@@ -562,22 +562,54 @@ export function verifyCodexInterruptHook(text: string, installed: InstalledCodex
   locateCodexInterruptHook(text, installed);
 }
 
+/**
+ * A native Codex rewrite, or manual removal of the entire launcher fragment, may leave
+ * unrelated Interrupt hooks in place. Treat the managed hook as fully absent only if
+ * its original journal is internally valid, neither ownership marker survives, and
+ * neither the command nor ANY matching trust state survives at a relocated index.
+ * This is not permission to discard malformed or user-owned hooks.
+ */
+export function codexInterruptHookProvablyAbsent(
+  text: string,
+  installed: InstalledCodexInterruptHook,
+): boolean {
+  if (codexInterruptHookHash(installed.command) !== installed.trustedHash) return false;
+  if (managedMarkerCount(text) !== 0 || text.includes(MANAGED_INTERRUPT_HOOK_END)) return false;
+  // A fragment or comment injected inside a TOML value must not be considered a clean removal.
+  let document: HookDocument;
+  try {
+    document = parseHookDocument(text);
+  } catch {
+    return false;
+  }
+  const hooks = document.hooks;
+  if (hooks === undefined) return true;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+  const groups = hooks.Interrupt;
+  if (groups !== undefined) {
+    if (!Array.isArray(groups)) return false;
+    for (const group of groups) {
+      if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+      const entries = (group as { hooks?: unknown }).hooks;
+      if (!Array.isArray(entries)) return false;
+      if (entries.some(entry => entry && typeof entry === "object" && !Array.isArray(entry)
+        && (entry as Record<string, unknown>).command === installed.command)) return false;
+    }
+  }
+  const state = hooks.state;
+  if (state === undefined) return true;
+  if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+  if (Object.hasOwn(state, installed.stateKey)) return false;
+  return !Object.values(state).some(entry => entry && typeof entry === "object" && !Array.isArray(entry)
+    && (entry as Record<string, unknown>).trusted_hash === installed.trustedHash);
+}
+
 export function restoreCodexInterruptHook(
   text: string,
   installed: InstalledCodexInterruptHook,
   options: { allowAbsent?: boolean } = {},
 ): string {
-  // Explicit Setup can reinstall a fully removed hook. A stale journal alone does not mean
-  // there is still a definition to remove; partial edits must retain the strict checks below.
-  if (options.allowAbsent && managedMarkerCount(text) === 0 && !text.includes(MANAGED_INTERRUPT_HOOK_END)) {
-    const { hooks } = Bun.TOML.parse(stripUtf8Bom(text)) as { hooks?: unknown };
-    if (hooks === undefined) return text;
-    if (hooks && typeof hooks === "object" && !Array.isArray(hooks) && !Object.hasOwn(hooks, "Interrupt")) {
-      const state = (hooks as Record<string, unknown>).state;
-      if (state === undefined || (state && typeof state === "object" && !Array.isArray(state)
-        && !Object.hasOwn(state, installed.stateKey))) return text;
-    }
-  }
+  if (options.allowAbsent && codexInterruptHookProvablyAbsent(text, installed)) return text;
   const exact = restoreExactCodexInterruptHookFragment(text, installed);
   if (exact !== undefined) return exact;
   const owned = locateCodexInterruptHook(text, installed).sort((left, right) => right.start - left.start);

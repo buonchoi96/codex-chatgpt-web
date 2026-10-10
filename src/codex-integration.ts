@@ -197,7 +197,7 @@ export function preflightCodexIntegration(
       return;
     }
     try {
-      verifyManagedJournalState(currentText, existing);
+      verifyManagedJournalState(currentText, existing, { allowAbsentHook: existing.version === 10 });
     } catch (error) {
       if (options.replaceExistingRoute !== true) throw error;
       installConfiguredRoute(
@@ -214,7 +214,7 @@ export function preflightCodexIntegration(
       return;
     }
     const baseline = managedJournalIsActive(existing)
-      ? restoreManagedRoute(currentText, existing)
+      ? restoreManagedRoute(currentText, existing, { allowAbsentHook: existing.version === 10 })
       : currentText;
     installConfiguredRoute(
       baseline,
@@ -268,9 +268,12 @@ export function installCodexIntegration(
     let baseline: string;
     let preservePrevious = true;
     try {
-      verifyManagedJournalState(currentText, existing);
+      // A cleanly removed managed Interrupt hook can be reinstalled from the
+      // trusted journal without disturbing other Codex hooks or resetting route settings.
+      const reinstall = { allowAbsentHook: existing.version === 10 };
+      verifyManagedJournalState(currentText, existing, reinstall);
       baseline = managedJournalIsActive(existing)
-        ? restoreManagedRoute(currentText, existing)
+        ? restoreManagedRoute(currentText, existing, reinstall)
         : currentText;
     } catch (error) {
       if (options.replaceExistingRoute !== true) throw error;

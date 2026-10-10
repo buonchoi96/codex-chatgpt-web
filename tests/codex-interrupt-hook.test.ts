@@ -10,6 +10,7 @@ import {
   installCodexInterruptHook,
   installCodexInterruptHookCommand,
   reclaimOrphanedCodexInterruptHook,
+  codexInterruptHookProvablyAbsent,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
@@ -69,6 +70,41 @@ test("exact managed hook restoration takes the semantic fast path before AST fal
   expect(installed.text).toContain(installed.installed.fragment);
   expect(() => verifyCodexInterruptHook(installed.text, installed.installed)).not.toThrow();
   expect(restoreCodexInterruptHook(installed.text, installed.installed)).toBe(original);
+});
+
+
+test("reinstall recognizes a fully removed managed hook without touching foreign Interrupt groups", () => {
+  const original = [
+    'model = "gpt-5.6-sol"',
+    '[[hooks.Interrupt]]',
+    '[[hooks.Interrupt.hooks]]',
+    'type = "command"',
+    'command = "foreign-interrupt"',
+    'timeout = 3',
+    '[hooks.state."foreign-app:interrupt:0:0"]',
+    'trusted_hash = "sha256:foreign"',
+    '',
+  ].join("\n");
+  const installed = installCodexInterruptHookCommand(original, "/fixture/config.toml", "launcher-hook");
+  const without = installed.text.replace(installed.installed.fragment, "");
+  expect(codexInterruptHookProvablyAbsent(without, installed.installed)).toBe(true);
+  expect(restoreCodexInterruptHook(without, installed.installed, { allowAbsent: true })).toBe(without);
+  expect(() => restoreCodexInterruptHook(without, installed.installed)).toThrow("changed after setup");
+  const reinstalled = installCodexInterruptHookCommand(without, "/fixture/config.toml", "launcher-hook");
+  expect((Bun.TOML.parse(reinstalled.text) as any).hooks.Interrupt).toHaveLength(2);
+  expect(restoreCodexInterruptHook(reinstalled.text, reinstalled.installed)).toBe(without);
+
+  for (const partial of [
+    without + MANAGED_INTERRUPT_HOOK_START + "\n",
+    without + MANAGED_INTERRUPT_HOOK_END + "\n",
+    without + "\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = 'command'\ncommand = 'launcher-hook'\ntimeout = 3\n",
+    without + "\n[hooks.state." + JSON.stringify(installed.installed.stateKey) + "]\ntrusted_hash = " + JSON.stringify(installed.installed.trustedHash) + "\n",
+    without.replace("sha256:foreign", installed.installed.trustedHash),
+    without + "\n[hooks]\nInterrupt = 'invalid'\n",
+  ]) {
+    expect(codexInterruptHookProvablyAbsent(partial, installed.installed)).toBe(false);
+    expect(() => restoreCodexInterruptHook(partial, installed.installed, { allowAbsent: true })).toThrow();
+  }
 });
 
 test("accepts and preserves a UTF-8 BOM in Codex config", () => {
