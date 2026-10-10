@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -62,8 +62,31 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+// Windows may prohibit file symlinks without Developer Mode or SeCreateSymbolicLinkPrivilege.
+// Keep real symlink coverage on all systems that support it, and skip only when
+// the operating system explicitly denies creating a symlink in a temp directory.
+const fileSymlinksSupported = (() => {
+  const root = mkdtempSync(join(tmpdir(), "codex-web-symlink-probe-"));
+  try {
+    const target = join(root, "target.toml");
+    const alias = join(root, "alias.toml");
+    writeFileSync(target, 'model = "example"\\n');
+    try {
+      symlinkSync(target, alias, "file");
+    } catch (error) {
+      if (process.platform === "win32"
+        && error && typeof error === "object"
+        && (error as NodeJS.ErrnoException).code === "EPERM") return false;
+      throw error;
+    }
+    return lstatSync(alias).isSymbolicLink();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+})();
+
 describe("reversible native Codex route integration", () => {
-  test("route install, update, switching and removal preserve a symlinked shared Codex config", () => {
+  test.skipIf(!fileSymlinksSupported)("route install, update, switching and removal preserve a symlinked shared Codex config", () => {
     const { root, codexHome } = fixture();
     const shared = join(root, "shared");
     mkdirSync(shared, { mode: 0o750 });
@@ -97,7 +120,7 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(target, "utf8")).toBe(original);
   });
 
-  test("config compensation preserves the link and refuses redirected or invalid targets", () => {
+  test.skipIf(!fileSymlinksSupported)("config compensation preserves the link and refuses redirected or invalid targets", () => {
     const { root, codexHome } = fixture();
     const alias = join(codexHome, "config.toml");
     const target = join(root, "shared.toml");
@@ -1060,7 +1083,8 @@ describe("reversible native Codex route integration", () => {
     const current = readFileSync(configPath, "utf8");
     expect(current).toContain('[mcp_servers.keep]\ncommand = "unchanged"');
     expect((Bun.TOML.parse(current) as any).hooks.Interrupt).toHaveLength(1);
-    expect(current).toContain(repaired.interruptHook.command);
+    expect((Bun.TOML.parse(current) as any).hooks.Interrupt[0].hooks[0].command)
+      .toBe(repaired.interruptHook.command);
     expect(inspectCodexIntegration().errors).toEqual([]);
     uninstallCodexIntegration();
     expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as any).mcp_servers)
@@ -1078,10 +1102,18 @@ describe("reversible native Codex route integration", () => {
     const withoutHook = active.replace(installed.interruptHook.fragment, "");
     const journal = readFileSync(getCodexJournalPath(), "utf8");
     const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
+    // A missing command plus an exact journal-matched trust record is safely
+    // recoverable. Other partial changes below must remain fail-closed.
+    const orphanTrust = withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`;
+    writeFileSync(configPath, orphanTrust);
+    expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).not.toThrow();
+    expect(readFileSync(configPath, "utf8")).toBe(orphanTrust);
+    expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(journal);
+    expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(recovery);
+
     for (const [current, diagnosis] of [
       [active.replace("timeout = 3", "timeout = 2"), "refusing to overwrite it"],
       [withoutHook + installed.interruptHook.fragment.split("[[hooks.Interrupt]]")[0], "refusing to overwrite it"],
-      [withoutHook + `\n[hooks.state.${JSON.stringify(installed.interruptHook.stateKey)}]\ntrusted_hash = ${JSON.stringify(installed.interruptHook.trustedHash)}\n`, "refusing to overwrite it"],
       [withoutHook + '\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = "command"\ncommand = "user-modified-hook"\n', "refusing to overwrite it"],
       [withoutHook + '\n[hooks]\nInterrupt = []\n', "refusing to overwrite it"],
       [withoutHook + '\n[hooks]\nstate = "invalid"\n', "refusing to overwrite it"],
