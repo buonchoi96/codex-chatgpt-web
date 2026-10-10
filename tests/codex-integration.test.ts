@@ -840,6 +840,52 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(configPath, "utf8")).toBe(original);
   });
 
+  test("route connect restores only a provably absent active Interrupt hook without touching MCPs", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = [
+      'model = "gpt-6"',
+      "[mcp_servers.node_repl]",
+      'command = "preserve-user-mcp"',
+      "[mcp_servers.node_repl.env]",
+      'SETTING = "preserve-exactly"',
+      "",
+    ].join("\n");
+    writeFileSync(configPath, original);
+    const installed = installCodexIntegration(nativeConfig("full"));
+    const active = readFileSync(configPath, "utf8");
+    const withoutHook = active.replace(installed.interruptHook.fragment, "");
+    expect(withoutHook).not.toBe(active);
+    writeFileSync(configPath, withoutHook);
+
+    const reconnected = activateCodexIntegration();
+    expect(reconnected).toEqual({ changed: true, active: true });
+    const after = readFileSync(configPath, "utf8");
+    expect((Bun.TOML.parse(after) as any).mcp_servers)
+      .toEqual((Bun.TOML.parse(original) as any).mcp_servers);
+    expect((Bun.TOML.parse(after) as any).hooks.Interrupt).toHaveLength(1);
+    expect(inspectCodexIntegration()).toMatchObject({ installed: true, active: true, errors: [] });
+    deactivateCodexIntegration();
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+  });
+
+  test("route connect refuses a competing trusted lifecycle hook with the wrong launcher home", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    writeFileSync(configPath, 'model = "gpt-6"\n[mcp_servers.keep]\ncommand = "user"\n');
+    const installed = installCodexIntegration(nativeConfig("full"));
+    const active = readFileSync(configPath, "utf8");
+    // A fully trusted command for another home is not proof that this journal
+    // can remove it; it must remain in Codex config until explicit safe recovery.
+    const otherCommand = '"C:\\\\somewhere\\\\other.exe" "--home" "C:\\\\other-launcher" "hook" "interrupt"';
+    const stale = active.replace(JSON.stringify(installed.interruptHook.command), JSON.stringify(otherCommand))
+      .replace(installed.interruptHook.trustedHash, codexInterruptHookHash(otherCommand));
+    expect(stale).not.toBe(active);
+    writeFileSync(configPath, stale);
+    expect(() => activateCodexIntegration()).toThrow("changed after setup");
+    expect(readFileSync(configPath, "utf8")).toBe(stale);
+  });
+
   test("explicit setup restores a removed hook without discarding the current Codex config", () => {
     for (const ending of ["\n", "\r\n"]) {
       for (const keepRoute of [true, false]) {
