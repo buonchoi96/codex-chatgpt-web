@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { AppConfig } from "./config";
-import { getConfigPath, loadConfig, saveConfig } from "./config";
+import { getConfigPath, loadConfig, saveConfig, stripUtf8Bom } from "./config";
 import { installCodexInterruptHook, installCodexInterruptHookCommand, reclaimOrphanedCodexInterruptHook } from "./codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
@@ -51,6 +52,19 @@ import {
   verifyRestoredRoute,
 } from "./codex-integration-route";
 
+/**
+ * Do not touch any user-owned MCP configuration while replacing a Codex route
+ * or interrupt hook. Protect the entire parsed mcp_servers subtree, including
+ * environment values, without logging or serializing user secrets.
+ */
+function assertMcpServersPreserved(before: string, after: string): void {
+  const parse = (text: string): unknown =>
+    (Bun.TOML.parse(stripUtf8Bom(text).replace(/\r\n?/g, "\n")) as { mcp_servers?: unknown }).mcp_servers;
+  if (!isDeepStrictEqual(parse(before), parse(after))) {
+    throw new Error("Codex integration repair would change an existing mcp_servers setting; refusing to write config.toml");
+  }
+}
+
 function installConfiguredRoute(
   baseline: string,
   installedUrl: string,
@@ -96,6 +110,7 @@ function installConfiguredRoute(
   const hook = "interruptHookCommand" in config
     ? installCodexInterruptHookCommand(nativeAccess.text, getCodexConfigPath(), config.interruptHookCommand)
     : installCodexInterruptHook(nativeAccess.text, getCodexConfigPath(), config);
+  assertMcpServersPreserved(baseline, hook.text);
   return {
     ...configured,
     text: hook.text,
@@ -200,8 +215,10 @@ export function preflightCodexIntegration(
       verifyManagedJournalState(currentText, existing, { allowAbsentHook: existing.version === 10 });
     } catch (error) {
       if (options.replaceExistingRoute !== true) throw error;
+      const baseline = replacementBaseline(currentText, configExists, existing);
+      assertMcpServersPreserved(currentText, baseline);
       installConfiguredRoute(
-        replacementBaseline(currentText, configExists, existing),
+        baseline,
         installedUrl,
         config,
         true,
@@ -216,6 +233,7 @@ export function preflightCodexIntegration(
     const baseline = managedJournalIsActive(existing)
       ? restoreManagedRoute(currentText, existing)
       : currentText;
+    assertMcpServersPreserved(currentText, baseline);
     installConfiguredRoute(
       baseline,
       installedUrl,
@@ -239,6 +257,7 @@ export function preflightCodexIntegration(
     }
     baseline = restoreLegacyV2(currentText, existing);
   }
+  assertMcpServersPreserved(currentText, baseline);
   installConfiguredRoute(
     baseline,
     installedUrl,
@@ -327,6 +346,7 @@ export function installCodexIntegration(
       updated.active = false;
       if (existing.reconnectOnStartup) updated.reconnectOnStartup = true;
     }
+    assertMcpServersPreserved(currentText, installedText);
     writeIntegrationState(updated, { path: configPath, data: installedText }, [getCodexModelsCachePath()]);
     return updated;
   }
@@ -375,6 +395,7 @@ export function installCodexIntegration(
     } : {}),
     format: textFormat(baseline),
   };
+  assertMcpServersPreserved(currentText, patched.text);
   writeIntegrationState(journal, { path: configPath, data: patched.text }, [getCodexModelsCachePath()]);
   if (existing?.version === 2 && existsSync(existing.catalogPath)) rmSync(existing.catalogPath);
   return journal;
@@ -399,6 +420,7 @@ export function deactivateCodexIntegration(options: { forRuntimeRecovery?: boole
     return { changed: false, active: false };
   }
   const restored = restoreManagedRoute(current, existing);
+  assertMcpServersPreserved(current, restored);
   const disconnected:
     | CodexIntegrationJournal
     | LegacyCodexIntegrationJournalV9
@@ -503,6 +525,7 @@ export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {
     } : {}),
     ...(existing.format ? { format: existing.format } : {}),
   };
+  assertMcpServersPreserved(current, route.text);
   writeIntegrationState(connected, { path: existing.configPath, data: route.text }, [getCodexModelsCachePath()]);
   return { changed: true, active: true };
 }

@@ -588,10 +588,6 @@ export function codexInterruptHookProvablyAbsent(
   const groups = hooks.Interrupt;
   if (groups !== undefined) {
     if (!Array.isArray(groups) || groups.length === 0) return false;
-    // A group still occupying the launcher's original slot is ambiguous:
-    // its command may have been edited rather than the entire hook removed.
-    // Earlier foreign groups are safe only when the managed slot vanished.
-    if (groups.length > installed.groupIndex) return false;
     for (const group of groups) {
       if (!group || typeof group !== "object" || Array.isArray(group)) return false;
       const entries = (group as { hooks?: unknown }).hooks;
@@ -601,11 +597,100 @@ export function codexInterruptHookProvablyAbsent(
     }
   }
   const state = hooks.state;
-  if (state === undefined) return true;
-  if (!state || typeof state !== "object" || Array.isArray(state)) return false;
-  if (Object.hasOwn(state, installed.stateKey)) return false;
-  return !Object.values(state).some(entry => entry && typeof entry === "object" && !Array.isArray(entry)
-    && (entry as Record<string, unknown>).trusted_hash === installed.trustedHash);
+  if (state !== undefined && (!state || typeof state !== "object" || Array.isArray(state))) return false;
+  if (state && Object.values(state).some(entry => entry && typeof entry === "object" && !Array.isArray(entry)
+    && (entry as Record<string, unknown>).trusted_hash === installed.trustedHash)) return false;
+  if (groups && groups.length > installed.groupIndex) {
+    // Codex can replace the removed launcher's index with a NEW foreign hook.
+    // Never overwrite or remove that hook. It is a separate owner only when its
+    // own command, group shape and per-index trust state form a complete proof.
+    // An untrusted or partially edited group still fails closed.
+    for (let index = installed.groupIndex; index < groups.length; index++) {
+      const group = groups[index] as { hooks?: unknown };
+      const entries = group.hooks;
+      if (!Array.isArray(entries) || entries.length !== 1) return false;
+      const entry = entries[0];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+      const hook = entry as Record<string, unknown>;
+      if (JSON.stringify(Object.keys(hook).sort()) !== JSON.stringify(["command", "timeout", "type"])
+        || hook.type !== "command" || typeof hook.command !== "string" || !hook.command
+        || hook.timeout !== 3 || hook.command === installed.command) return false;
+      const key = interruptStateKeyForGroup(installed.stateKey, index);
+      if (!key || !state || !Object.hasOwn(state, key)) return false;
+      const trusted = state[key];
+      if (!trusted || typeof trusted !== "object" || Array.isArray(trusted)) return false;
+      const trustEntry = trusted as Record<string, unknown>;
+      if (Object.keys(trustEntry).length !== 1
+        || trustEntry.trusted_hash !== codexInterruptHookHash(hook.command)) return false;
+    }
+  } else if (state && Object.hasOwn(state, installed.stateKey)) {
+    // No independently trusted replacement: the original trust slot survives.
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Recover a launcher-owned trust record when native Codex has removed the corresponding
+ * command group but left its exact, journal-verified [hooks.state] entry behind.
+ *
+ * This path never touches any other hook, MCP server, model or feature. A surviving
+ * command, conflicting trust hash, nonstandard trust shape, marker, or malformed TOML
+ * still fails closed. Returning undefined means Setup must use its existing error.
+ */
+function removeProvablyOrphanedCodexInterruptTrust(
+  text: string,
+  installed: InstalledCodexInterruptHook,
+): string | undefined {
+  if (codexInterruptHookHash(installed.command) !== installed.trustedHash
+    || managedMarkerCount(text) !== 0 || text.includes(MANAGED_INTERRUPT_HOOK_END)) return undefined;
+  let document: HookDocument;
+  let ast: AST.TOMLProgram;
+  try {
+    document = parseHookDocument(text);
+    ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
+  } catch { return undefined; }
+  const state = document.hooks?.state;
+  if (!state || typeof state !== "object" || Array.isArray(state)) return undefined;
+  const record = state[installed.stateKey];
+  if (!record || typeof record !== "object" || Array.isArray(record)) return undefined;
+  const trust = record as Record<string, unknown>;
+  if (Object.keys(trust).length !== 1 || trust.trusted_hash !== installed.trustedHash) return undefined;
+  if (Object.entries(state).some(([key, value]) => key !== installed.stateKey
+    && value && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).trusted_hash === installed.trustedHash)) return undefined;
+  if (document.hooks?.Interrupt?.some(group =>
+    group && typeof group === "object" && !Array.isArray(group)
+    && Array.isArray((group as { hooks?: unknown }).hooks)
+    && (group as { hooks: unknown[] }).hooks.some(entry =>
+      entry && typeof entry === "object" && !Array.isArray(entry)
+      && (entry as Record<string, unknown>).command === installed.command))) return undefined;
+
+  const tables = ast.body[0].body.filter(node => node.type === "TOMLTable"
+    && JSON.stringify(node.resolvedKey) === JSON.stringify(["hooks", "state", installed.stateKey]));
+  if (tables.length !== 1) return undefined;
+  const table = tables[0]!;
+  const start = Math.max(text.lastIndexOf("\n", table.range[0] - 1), text.lastIndexOf("\r", table.range[0] - 1)) + 1;
+  if (!/^[ \t]*$/.test(text.slice(start, table.range[0]))) return undefined;
+  const end = table.range[1];
+  const newline = /^(?:[ \t]*(?:\r\n|\n|\r))?/.exec(text.slice(end))?.[0] ?? "";
+  const repaired = text.slice(0, start) + text.slice(end + newline.length);
+  const expected = structuredClone(document);
+  delete expected.hooks!.state![installed.stateKey];
+  try {
+    if (JSON.stringify(withoutEmptyHookContainers(parseHookDocument(repaired)))
+      !== JSON.stringify(withoutEmptyHookContainers(expected))) return undefined;
+  } catch { return undefined; }
+  return codexInterruptHookProvablyAbsent(repaired, installed) ? repaired : undefined;
+}
+
+/** Non-mutating proof used by Setup preflight and journal selection. */
+export function recoverCodexInterruptHookAbsence(
+  text: string,
+  installed: InstalledCodexInterruptHook,
+): string | undefined {
+  if (codexInterruptHookProvablyAbsent(text, installed)) return text;
+  return removeProvablyOrphanedCodexInterruptTrust(text, installed);
 }
 
 export function restoreCodexInterruptHook(
@@ -613,7 +698,10 @@ export function restoreCodexInterruptHook(
   installed: InstalledCodexInterruptHook,
   options: { allowAbsent?: boolean } = {},
 ): string {
-  if (options.allowAbsent && codexInterruptHookProvablyAbsent(text, installed)) return text;
+  if (options.allowAbsent) {
+    const recovered = recoverCodexInterruptHookAbsence(text, installed);
+    if (recovered !== undefined) return recovered;
+  }
   const exact = restoreExactCodexInterruptHookFragment(text, installed);
   if (exact !== undefined) return exact;
   const owned = locateCodexInterruptHook(text, installed).sort((left, right) => right.start - left.start);

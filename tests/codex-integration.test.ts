@@ -18,6 +18,7 @@ import {
   uninstallCodexIntegration,
 } from "../src/codex-integration";
 import { defaultConfig, loadConfig, saveConfig } from "../src/config";
+import { codexInterruptHookHash } from "../src/codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   MANAGED_COMMENT,
@@ -933,6 +934,91 @@ describe("reversible native Codex route integration", () => {
     expect(inspectCodexIntegration().errors).toEqual([]);
     uninstallCodexIntegration();
     expect(readFileSync(configPath, "utf8")).toBe(original);
+  });
+
+
+  test("Reinstall preserves every user MCP setting when a trusted foreign hook occupies the old launcher slot", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const mcp = [
+      "[mcp_servers.node_repl]",
+      'command = "node.exe"',
+      'args = ["repl.js"]',
+      "[mcp_servers.node_repl.env]",
+      "NODE_REPL_NODE_PATH = 'C:\\Program Files\\node\\node.exe'",
+      "[mcp_servers.user_service]",
+      'command = "user-owned-service"',
+      "",
+    ].join("\n");
+    const original = 'model = "gpt-6"\n\n' + mcp;
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+    saveConfig(config);
+    const installed = installCodexIntegration(config);
+    const active = readFileSync(configPath, "utf8");
+    const foreign = [
+      "[[hooks.Interrupt]]",
+      "[[hooks.Interrupt.hooks]]",
+      'type = "command"',
+      'command = "trusted-other-owner"',
+      "timeout = 3",
+      "[hooks.state." + JSON.stringify(installed.interruptHook.stateKey) + "]",
+      "trusted_hash = " + JSON.stringify(codexInterruptHookHash("trusted-other-owner")),
+      "",
+    ].join("\n");
+    const changed = active.replace(installed.interruptHook.fragment, "") + "\n" + foreign;
+    writeFileSync(configPath, changed);
+    const journal = readFileSync(getCodexJournalPath(), "utf8");
+    const journalRecovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
+    expect(() => preflightCodexIntegration(config)).not.toThrow();
+    expect(readFileSync(configPath, "utf8")).toBe(changed);
+    expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(journal);
+    expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(journalRecovery);
+
+    const repaired = installCodexIntegration(config);
+    const result = readFileSync(configPath, "utf8");
+    expect(result).toContain(mcp);
+    const parsed = Bun.TOML.parse(result) as any;
+    expect(parsed.hooks.Interrupt).toHaveLength(2);
+    expect(parsed.hooks.Interrupt[0].hooks[0].command).toBe("trusted-other-owner");
+    expect(parsed.hooks.Interrupt[1].hooks[0].command).toBe(repaired.interruptHook.command);
+    expect(parsed.mcp_servers).toEqual((Bun.TOML.parse(original) as any).mcp_servers);
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    uninstallCodexIntegration();
+    expect(readFileSync(configPath, "utf8")).toContain(mcp);
+    expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as any).hooks.Interrupt)
+      .toHaveLength(1);
+  });
+
+  test("Reinstall prunes only a journal-matched orphan trust state and retains MCP entries", () => {
+    const { codexHome } = fixture();
+    const configPath = join(codexHome, "config.toml");
+    const original = 'model = "gpt-6"\n\n[mcp_servers.keep]\ncommand = "unchanged"\n\n';
+    writeFileSync(configPath, original);
+    const config = nativeConfig("full");
+    saveConfig(config);
+    const installed = installCodexIntegration(config);
+    const active = readFileSync(configPath, "utf8");
+    const orphan = active.replace(installed.interruptHook.fragment, "") + "\n"
+      + "[hooks.state." + JSON.stringify(installed.interruptHook.stateKey) + "]\n"
+      + "trusted_hash = " + JSON.stringify(installed.interruptHook.trustedHash) + "\n";
+    writeFileSync(configPath, orphan);
+    const primary = readFileSync(getCodexJournalPath(), "utf8");
+    const recovery = readFileSync(getCodexJournalRecoveryPath(), "utf8");
+    expect(() => preflightCodexIntegration(config)).not.toThrow();
+    expect(readFileSync(configPath, "utf8")).toBe(orphan);
+    expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(primary);
+    expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(recovery);
+
+    const repaired = installCodexIntegration(config);
+    const current = readFileSync(configPath, "utf8");
+    expect(current).toContain('[mcp_servers.keep]\ncommand = "unchanged"');
+    expect((Bun.TOML.parse(current) as any).hooks.Interrupt).toHaveLength(1);
+    expect(current).toContain(repaired.interruptHook.command);
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    uninstallCodexIntegration();
+    expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as any).mcp_servers)
+      .toEqual((Bun.TOML.parse(original) as any).mcp_servers);
   });
 
   test("explicit setup still refuses changed hooks, partial removal and invalid config", () => {

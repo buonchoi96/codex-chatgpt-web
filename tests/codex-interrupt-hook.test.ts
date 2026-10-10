@@ -11,6 +11,7 @@ import {
   installCodexInterruptHookCommand,
   reclaimOrphanedCodexInterruptHook,
   codexInterruptHookProvablyAbsent,
+  recoverCodexInterruptHookAbsence,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
@@ -104,6 +105,82 @@ test("reinstall recognizes a fully removed managed hook without touching foreign
   ]) {
     expect(codexInterruptHookProvablyAbsent(partial, installed.installed)).toBe(false);
     expect(() => restoreCodexInterruptHook(partial, installed.installed, { allowAbsent: true })).toThrow();
+  }
+});
+
+
+test("trust-verified foreign Interrupt slot is preserved during explicit Reinstall", () => {
+  const original = [
+    'model = "gpt-6"',
+    "[mcp_servers.node_repl]",
+    'command = "node-repl-user-setting"',
+    "[mcp_servers.node_repl.env]",
+    'KEEP = "unchanged"',
+    "",
+  ].join("\n");
+  const installed = installCodexInterruptHookCommand(original, "/fixture/config.toml", "launcher-hook");
+  expect(installed.installed.groupIndex).toBe(0);
+  const foreign = [
+    "[[hooks.Interrupt]]",
+    "[[hooks.Interrupt.hooks]]",
+    'type = "command"',
+    'command = "foreign-trusted-hook"',
+    "timeout = 3",
+    "",
+    "[hooks.state." + JSON.stringify(installed.installed.stateKey) + "]",
+    "trusted_hash = " + JSON.stringify(codexInterruptHookHash("foreign-trusted-hook")),
+    "",
+  ].join("\n");
+  const replacement = original + foreign;
+  expect(codexInterruptHookProvablyAbsent(replacement, installed.installed)).toBe(true);
+  expect(recoverCodexInterruptHookAbsence(replacement, installed.installed)).toBe(replacement);
+  expect(restoreCodexInterruptHook(replacement, installed.installed, { allowAbsent: true })).toBe(replacement);
+  const rebuilt = installCodexInterruptHookCommand(replacement, "/fixture/config.toml", "launcher-hook");
+  expect((Bun.TOML.parse(rebuilt.text) as any).hooks.Interrupt).toHaveLength(2);
+  expect((Bun.TOML.parse(rebuilt.text) as any).mcp_servers.node_repl.env.KEEP).toBe("unchanged");
+  expect(restoreCodexInterruptHook(rebuilt.text, rebuilt.installed)).toBe(replacement);
+
+  // Without independent trust, a changed hook at the launcher's old
+  // index could be an edited launcher hook. Refuse to guess ownership.
+  const untrusted = replacement.replace(codexInterruptHookHash("foreign-trusted-hook"), "sha256:unknown");
+  expect(codexInterruptHookProvablyAbsent(untrusted, installed.installed)).toBe(false);
+  expect(recoverCodexInterruptHookAbsence(untrusted, installed.installed)).toBeUndefined();
+  expect(() => restoreCodexInterruptHook(untrusted, installed.installed, { allowAbsent: true }))
+    .toThrow("changed after setup");
+});
+
+test("an exact orphaned launcher trust entry is removed without touching MCP tables", () => {
+  const original = [
+    'model = "gpt-6"',
+    "",
+    "[mcp_servers.custom]",
+    'command = "original"',
+    "[mcp_servers.custom.env]",
+    'PRIVATE_VALUE = "preserve-verbatim"',
+    "",
+  ].join("\n");
+  const installed = installCodexInterruptHookCommand(original, "/fixture/config.toml", "launcher-hook");
+  const orphan = original + [
+    "[hooks.state." + JSON.stringify(installed.installed.stateKey) + "]",
+    "trusted_hash = " + JSON.stringify(installed.installed.trustedHash),
+    "",
+  ].join("\n");
+  const repaired = recoverCodexInterruptHookAbsence(orphan, installed.installed);
+  expect(repaired).toBeDefined();
+  expect(Bun.TOML.parse(repaired!)).toEqual(Bun.TOML.parse(original));
+  expect(repaired).toContain('[mcp_servers.custom.env]\nPRIVATE_VALUE = "preserve-verbatim"');
+  expect(restoreCodexInterruptHook(orphan, installed.installed, { allowAbsent: true })).toBe(repaired);
+  const reinstalled = installCodexInterruptHookCommand(repaired!, "/fixture/config.toml", "launcher-hook");
+  expect(restoreCodexInterruptHook(reinstalled.text, reinstalled.installed)).toBe(repaired);
+
+  for (const tampered of [
+    orphan.replace(installed.installed.trustedHash, "sha256:" + "f".repeat(64)),
+    orphan.replace("trusted_hash = ", "modified_hash = "),
+    orphan + "[hooks.state." + JSON.stringify(installed.installed.stateKey) + ".extra]\nvalue = 1\n",
+  ]) {
+    expect(recoverCodexInterruptHookAbsence(tampered, installed.installed)).toBeUndefined();
+    expect(() => restoreCodexInterruptHook(tampered, installed.installed, { allowAbsent: true }))
+      .toThrow();
   }
 });
 

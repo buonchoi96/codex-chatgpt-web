@@ -26,7 +26,7 @@ import type {
   PreviousAgentAssignment,
 } from "./codex-integration-shared";
 import {
-  codexInterruptHookProvablyAbsent,
+  recoverCodexInterruptHookAbsence,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
@@ -420,7 +420,7 @@ function verifyOwnedInstalledRoute(
   if (journal.version === 10) {
     // Setup may reinstall a hook removed in full by a native config rewrite. All other
     // consumers still require the installed hook unless they explicitly opt into this check.
-    if (!options.allowAbsentHook || !codexInterruptHookProvablyAbsent(text, journal.interruptHook)) {
+    if (!options.allowAbsentHook || recoverCodexInterruptHookAbsence(text, journal.interruptHook) === undefined) {
       verifyCodexInterruptHook(text, journal.interruptHook);
     }
     verifyNativeFullAccess(text, journal);
