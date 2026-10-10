@@ -19,7 +19,7 @@ const at = args.indexOf("--home");
 const home = at < 0 ? null : args[at + 1];
 const apply = args.includes("--apply");
 const remaining = args.filter((v, i) => v !== "--apply" && v !== "--home" && (i === 0 || args[i - 1] !== "--home"));
-if (remaining.length || (at >= 0 && (!home || home.startsWith("--")))) {
+if (remaining.length || at < 0 || !home || home.startsWith("--")) {
   console.error("Usage: bun scripts/repair-conflicting-interrupt-hook.cjs --home <live-home> [--apply]");
   process.exit(2);
 }
