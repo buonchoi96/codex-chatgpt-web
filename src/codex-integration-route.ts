@@ -9,6 +9,7 @@ import {
   MANAGED_MULTI_AGENT_LINE,
   MANAGED_REMOTE_COMPACTION_LINE,
   managedAgentMaxDepthLine,
+  sha256,
 } from "./codex-integration-shared";
 import type {
   CodexIntegrationJournal,
@@ -190,6 +191,26 @@ export function assertBuiltinModelProvider(text: string): void {
   }
 }
 
+/**
+ * An exact route/hook rollback must preserve the original end-of-file layout.
+ * New v10 journals retain only a hash of the pre-install body and the original
+ * line terminators. Correct a launcher-generated trailing spacer only when the
+ * rest of the file has returned byte-for-byte to that original body. Any user
+ * change outside the suffix leaves the file completely untouched.
+ */
+function restoreProvenBaselineTrailingEols(text: string, journal: ManagedRouteJournal): string {
+  if (journal.version !== 10) return text;
+  const evidence = journal.format;
+  if (typeof evidence?.baselineTrailingEol !== "string"
+    || !/^(?:\r\n|\r|\n)*$/.test(evidence.baselineTrailingEol)
+    || typeof evidence.baselineBodySha256 !== "string"
+    || !/^[a-f0-9]{64}$/.test(evidence.baselineBodySha256)) return text;
+  const suffix = /(?:\r\n|\r|\n)*$/.exec(text)?.[0] ?? "";
+  const body = text.slice(0, text.length - suffix.length);
+  if (sha256(body) !== evidence.baselineBodySha256) return text;
+  return body + evidence.baselineTrailingEol;
+}
+
 export function replacementBaseline(
   currentText: string,
   configExists: boolean,
@@ -222,7 +243,8 @@ export function replacementBaseline(
         removeDocumentLine(document, current.index);
       }
     }
-    return renderDocument(document);
+    const restored = renderDocument(document);
+    return restoreProvenBaselineTrailingEols(restored, journal);
   }
 
   if (journal.version === 7 || journal.version === 8) {
@@ -617,7 +639,7 @@ export function restoreManagedRoute(
     restoredFeatures = restoreManagedFeatures(restoredRoute, journal);
   }
   return journal.version === 10
-    ? restoreNativeFullAccess(restoredFeatures, journal)
+    ? restoreProvenBaselineTrailingEols(restoreNativeFullAccess(restoredFeatures, journal), journal)
     : restoredFeatures;
 }
 
