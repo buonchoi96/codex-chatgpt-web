@@ -95,11 +95,25 @@ test("reinstall recognizes a fully removed managed hook without touching foreign
   expect((Bun.TOML.parse(reinstalled.text) as any).hooks.Interrupt).toHaveLength(2);
   expect(restoreCodexInterruptHook(reinstalled.text, reinstalled.installed)).toBe(without);
 
+  // Native Codex can remove the launcher command but leave its exact journal-owned
+  // trust entry. This is recoverable (without touching any foreign hook), rather than
+  // the ambiguous partial state that the old assertion rejected.
+  const orphanedTrust = without + "\n[hooks.state."
+    + JSON.stringify(installed.installed.stateKey) + "]\ntrusted_hash = "
+    + JSON.stringify(installed.installed.trustedHash) + "\n";
+  expect(codexInterruptHookProvablyAbsent(orphanedTrust, installed.installed)).toBe(false);
+  expect(recoverCodexInterruptHookAbsence(orphanedTrust, installed.installed)).toBe(without);
+  expect(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })).toBe(without);
+  const restored = Bun.TOML.parse(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })) as any;
+  expect(restored.hooks.Interrupt).toEqual((Bun.TOML.parse(original) as any).hooks.Interrupt);
+  expect(restored.hooks.state).toEqual((Bun.TOML.parse(original) as any).hooks.state);
+
+  // Incomplete markers, live managed commands, conflicting hashes and malformed
+  // tables must still fail closed even when reinstall is explicitly requested.
   for (const partial of [
     without + MANAGED_INTERRUPT_HOOK_START + "\n",
     without + MANAGED_INTERRUPT_HOOK_END + "\n",
     without + "\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = 'command'\ncommand = 'launcher-hook'\ntimeout = 3\n",
-    without + "\n[hooks.state." + JSON.stringify(installed.installed.stateKey) + "]\ntrusted_hash = " + JSON.stringify(installed.installed.trustedHash) + "\n",
     without.replace("sha256:foreign", installed.installed.trustedHash),
     without + "\n[hooks]\nInterrupt = 'invalid'\n",
   ]) {
