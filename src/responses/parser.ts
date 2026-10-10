@@ -227,10 +227,36 @@ function ensureAssistantPlaceholder(messages: CodexMessage[], modelId: string, n
   return placeholder;
 }
 
+// Keep the same decoded-byte ceiling as ChatGPT's browser attachment path.
+// These are explicit MCP image items, NOT screenshot metadata or arbitrary text.
+const MAX_MCP_TOOL_IMAGE_BYTES = 20_000_000;
+const MCP_TOOL_IMAGE_BASE64_MAX = Math.ceil(MAX_MCP_TOOL_IMAGE_BYTES / 3) * 4;
+const MCP_TOOL_PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function mcpToolImageUrl(block: Record<string, unknown>): string | undefined {
+  const mime = block.mimeType;
+  const base64 = block.data;
+  if ((mime !== "image/png" && mime !== "image/jpeg")
+    || typeof base64 !== "string" || base64.length === 0
+    || base64.length > MCP_TOOL_IMAGE_BASE64_MAX || base64.length % 4 !== 0
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) {
+    return undefined;
+  }
+  const bytes = Buffer.from(base64, "base64");
+  if (bytes.length === 0 || bytes.length > MAX_MCP_TOOL_IMAGE_BYTES) return undefined;
+  const valid = mime === "image/png"
+    ? bytes.length >= 24 && bytes.subarray(0, 8).equals(MCP_TOOL_PNG_SIGNATURE)
+      && bytes.subarray(-12, -8).equals(Buffer.alloc(4))
+      && bytes.toString("ascii", bytes.length - 8, bytes.length - 4) === "IEND"
+    : bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8
+      && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9;
+  return valid ? `data:${mime};base64,${base64}` : undefined;
+}
+
 /**
- * Tool-call output content. Preserves images (e.g. Codex `view_image` returns
- * `input_image` items): returns content parts when any image is present, else a plain joined string.
- * Never inlines an image_url as text (that would explode the token count).
+ * Tool-call output content. Preserves native `input_image` and explicit MCP
+ * `image` parts that survive Codex Native2's Responses transport. Never inline
+ * base64 as text. A metadata-only screenshot is not evidence of image delivery.
  */
 function outputToToolResultContent(output: string | unknown[] | undefined): string | CodexContentPart[] {
   if (typeof output === "string") return output;
@@ -246,6 +272,15 @@ function outputToToolResultContent(output: string | unknown[] | undefined): stri
     } else if (raw.type === "input_image" && typeof raw.image_url === "string") {
       parts.push({ type: "image", imageUrl: raw.image_url, ...(typeof raw.detail === "string" ? { detail: normalizeImageDetail(raw.detail) } : {}) });
       hasImage = true;
+    } else if (raw.type === "image") {
+      const imageUrl = mcpToolImageUrl(raw);
+      if (imageUrl) {
+        parts.push({ type: "image", imageUrl });
+        hasImage = true;
+      } else {
+        // Fail visibly, without leaking malformed content or claiming the model saw it.
+        parts.push({ type: "text", text: "[MCP image omitted: invalid or unsupported image payload]" });
+      }
     } else if (raw.type === "encrypted_content") {
       // codex-rs FunctionCallOutputContentItem::EncryptedContent — opaque to routed models.
       parts.push({ type: "text", text: "[encrypted content omitted]" });

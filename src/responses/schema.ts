@@ -23,13 +23,21 @@ const summaryTextSchema = z.object({ type: z.literal("summary_text"), text: z.st
 const reasoningTextSchema = z.object({ type: z.literal("reasoning_text"), text: z.string() });
 // codex-rs FunctionCallOutputContentItem (protocol/src/models.rs): input_text | input_image | encrypted_content.
 const encryptedContentBlockSchema = z.object({ type: z.literal("encrypted_content"), encrypted_content: z.string() });
+// Codex Native2 may preserve an MCP result's image item verbatim in a function
+// output instead of converting it to codex-rs input_image. Keep the bytes until
+// the tool-output parser validates them; never interpret metadata as an image.
+const mcpToolImageBlockSchema = z.object({
+  type: z.literal("image"),
+  mimeType: z.string(),
+  data: z.string(),
+}).passthrough();
 
 const inputContentBlockSchema = z.union([inputTextSchema, plainTextSchema, inputImageBlockSchema, inputFileBlockSchema]);
 const outputContentBlockSchema = z.union([outputTextSchema, plainTextSchema, outputRefusalSchema]);
 // Codex tool outputs can contain both input-shaped and output-shaped content blocks.
 const toolOutputContentBlockSchema = z.union([
   outputTextSchema, plainTextSchema, outputRefusalSchema,
-  inputTextSchema, inputImageBlockSchema, encryptedContentBlockSchema,
+  inputTextSchema, inputImageBlockSchema, mcpToolImageBlockSchema, encryptedContentBlockSchema,
 ]);
 const toolOutputSchema = z.union([z.string(), z.array(toolOutputContentBlockSchema)]);
 
