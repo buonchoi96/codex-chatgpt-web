@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
-import { classifyNativeOperation, nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure, splitIndependentInspections } from "../src/adapters/chatgpt-web/native-operation";
+import { classifyNativeOperation, nativeBackgroundReceipt, nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure, splitIndependentInspections } from "../src/adapters/chatgpt-web/native-operation";
 import { parseRequest } from "../src/responses/parser";
+
+test("only the invocation's framed typed receipt may reconcile background activity", () => {
+  const nonce = "a".repeat(48), prefix = `codex-native-receipt:${nonce}:`;
+  expect(nativeBackgroundReceipt([{ type: "text", text: '{"exit_code":0}' }], nonce)).toBeUndefined();
+  expect(nativeBackgroundReceipt([{ type: "text", text: `codex-native-receipt:${"b".repeat(48)}:{"exit_code":0}` }], nonce)).toBeUndefined();
+  expect(nativeBackgroundReceipt([{ type: "text", text: prefix + '{"session_id":42}' }], nonce)).toEqual({ session_id: 42 });
+  expect(nativeBackgroundReceipt([{ type: "text", text: prefix + '{"session_id":42}\n' + prefix + '{"exit_code":0}' }], nonce)).toBeUndefined();
+});
 
 test("rejection identity ignores command transport tuning and object order but retains approval evidence", () => {
   const first = operationFingerprint("exec_command", { cmd: "Remove-Item important", yield_time_ms: 1000, max_output_tokens: 100 });
@@ -53,6 +61,7 @@ test("inspection intent describes a simple command without granting safety autho
   expect(classifyNativeOperation("exec_command", { cmd: "git status --short" })).toMatchObject({
     category: "command", risk: "read_only", readOnly: true, commandShape: "simple", foregroundTransition: false,
   });
+  expect(classifyNativeOperation("arbitrary_mutator", { cmd: "git status --short" }).readOnly).toBe(false);
   expect(classifyNativeOperation("exec_command", { cmd: "git -c alias.status='!rm file' status" }).risk).toBe("unknown");
   expect(classifyNativeOperation("mcp__node_repl__js", { code: "await sky.list_apps(); await sky.type_text({text:'secret'})" }).readOnly).toBe(false);
 });

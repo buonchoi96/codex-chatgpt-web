@@ -19,6 +19,7 @@ import {
 import { estimateTokens } from "../../lib/token-estimate";
 import { BackendPerfTrace } from "../../lib/backend-perf";
 import { BoundedCache } from "../../lib/bounded-cache";
+import { SameTabRecovery } from "./same-tab-recovery";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "./ui-labels";
 import type { CodexProviderConfig } from "../../types";
 import { parseDataUrl } from "../image";
@@ -114,6 +115,7 @@ import {
 import {
   chatGptExternalProgressIsLive,
   chatGptExternalToolCallsAreInFlight,
+  chatGptExternalWorkBlocksRecovery,
 } from "./turn-progress";
 import type {
   ChatGptExternalTurnProgressSnapshot,
@@ -1614,7 +1616,7 @@ export interface BrowserTurn {
     /** Full Harness requires an accepted semantic completion receipt before DOM completion is terminal. */
     receiptReady?(): Promise<boolean>;
     /** Re-supply the exact current capability only inside a bounded missing-receipt recovery turn. */
-    recoveryTurnToken?(): Promise<string>;
+    recoveryTurnToken?(phase?: "stop" | "submitted"): Promise<string>;
   };
   /** Allow one clean pre-submit composer retry for isolated history compaction only. */
   compaction?: boolean;
@@ -3537,6 +3539,15 @@ export class ChatGptBrowserWorker {
     }
   }
 
+  private async assertContinuationEffort(page: Page, mode: SelectedChatGptWebModelMode,
+    proof: { url: string; documentOrigin: number }): Promise<void> {
+    if (page.url() !== proof.url || await page.evaluate(() => performance.timeOrigin) !== proof.documentOrigin) {
+      throw chatGptModelControlUnavailableAdapterError("ChatGPT changed the accepted conversation before continuation");
+    }
+    await this.assertSelectedEffort(page, { ...mode,
+      ...(mode.selection ? { selection: { ...mode.selection, url: proof.url } } : {}) });
+  }
+
   private async activeComposer(
     page: Page,
     timeoutMs = 30_000,
@@ -4781,6 +4792,7 @@ export class ChatGptBrowserWorker {
       }
       const externalProgressSnapshot = externalProgress?.snapshot();
       const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
+      const externalWorkBlocksRecovery = chatGptExternalWorkBlocksRecovery(externalProgressSnapshot);
       const softRecoveryVisible = networkInterruptedVisible
         || chatGptLongThinkingStatusVisible(snapshot.traceBlocks);
       if (!frontendErrorVisible && !softRecoveryVisible && snapshot.stoppedThinkingVisible) {
@@ -4804,12 +4816,12 @@ export class ChatGptBrowserWorker {
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
         continue;
       }
-      if (frontendErrorTracker.update({
-        alertVisible: frontendErrorVisible,
-        visibleText: snapshot.visibleText,
-        traceBlocks: snapshot.traceBlocks,
-        externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
-        externalToolCallsInFlight,
+if (frontendErrorTracker.update({
+          alertVisible: frontendErrorVisible,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          externalToolCallsInFlight: externalWorkBlocksRecovery,
       })) {
         throw new ChatGptWebAdapterError(
           "ChatGPT kept a red/retry response-level error visible for one minute with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
@@ -4821,12 +4833,12 @@ export class ChatGptBrowserWorker {
           },
         );
       }
-      if (softRecoveryTracker.update({
-        alertVisible: softRecoveryVisible,
-        visibleText: snapshot.visibleText,
-        traceBlocks: snapshot.traceBlocks,
-        externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
-        externalToolCallsInFlight,
+if (softRecoveryTracker.update({
+          alertVisible: softRecoveryVisible,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          externalToolCallsInFlight: externalWorkBlocksRecovery,
       })) {
         throw new ChatGptWebAdapterError(
           "ChatGPT remained in an interrupted-network or long-thinking recovery state for three minutes with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
@@ -6718,6 +6730,8 @@ export class ChatGptBrowserWorker {
           : undefined,
       );
       await diagnostics.capture(page, "send-accepted");
+      const acceptedConversationUrl = page.url();
+      const acceptedDocumentOrigin = await page.evaluate(() => performance.timeOrigin);
 
       let lastHeartbeat = 0;
       let finalText = "";
@@ -6771,14 +6785,189 @@ export class ChatGptBrowserWorker {
           ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
           : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
       );
-      const frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_FRONTEND_ERROR_STALL_MS);
-      const softRecoveryTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_SOFT_RECOVERY_STALL_MS);
+      let frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_FRONTEND_ERROR_STALL_MS);
+      let softRecoveryTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_SOFT_RECOVERY_STALL_MS);
       const networkErrorRecovery = new ChatGptNetworkErrorRecoveryTracker();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
       let observedThisIteration = false;
       let completionFenceRevision: number | undefined;
+      const submitContinuation = async (prompt: string, label: string, verifyBeforeSend?: () => Promise<void>) => {
+        const proof = { url: acceptedConversationUrl, documentOrigin: acceptedDocumentOrigin };
+        await this.assertContinuationEffort(page, mode, proof);
+        bufferedFinalDeltas = [];
+        completionTracker = new ChatGptCompletionTracker();
+        // Connector trigger attempts are scoped to one attachment episode. A retained
+        // conversation can legitimately clear its selected connector after every recovery
+        // send, so reusing the initial prompt budget across recoveries makes the third
+        // continuation fail before it can even reopen an otherwise healthy connector menu.
+        const recoveryConnectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
+        await this.runStage(
+          turn.traceId,
+          `completion_receipt_recovery_${label}_attachment`,
+          browserStageTimeouts.promptAttachment,
+          (stageSignal) => this.attachPrompt(
+            page,
+            prompt,
+            true,
+            checkpoint => diagnostics.capture(page, `completion-recovery-${label}-${checkpoint}`),
+            turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+            false,
+            recoveryConnectorAttemptBudget,
+            true,
+            mode.thinkEnabled,
+          ),
+          chatGptSuspensionClock,
+          true,
+        );
+        // Connector selection can run a personalization proof that itself submits a temporary
+        // ChatGPT message. Capture the semantic submission baseline only after attachment and
+        // connector preflight have finished, otherwise the real recovery send can appear as
+        // two new conversation turns and poison the same-chat continuation.
+        submissionBaseline = await captureSubmissionBaselineWithRecovery(
+          `completion_receipt_recovery_${label}_baseline`,
+        );
+        await verifyBeforeSend?.();
+        await this.runStage(
+          turn.traceId,
+          `completion_receipt_recovery_${label}_send`,
+          browserStageTimeouts.send,
+          (stageSignal) => this.sendAttachedPrompt(
+            page,
+            submissionBaseline,
+            checkpoint => diagnostics.capture(page, `completion-recovery-${label}-${checkpoint}`),
+            turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
+            turn.externalProgress,
+            { onSendActivated: async () => { await verifyBeforeSend?.(); await this.assertContinuationEffort(page, mode, proof); submissionRejection.begin(page); },
+              onSubmitted: async () => { await turn.completionFence?.recoveryTurnToken?.("submitted"); } },
+            completionTracker,
+            launcherObservationRecovery
+              ? async (...args) => {
+                const recovered = await recoverSubmissionObservation(...args);
+                submissionBaseline = recovered.baseline;
+                return recovered;
+              }
+              : undefined,
+          ),
+        );
+        responseTurn = await this.waitForNewAssistantTurn(
+          page,
+          submissionBaseline,
+          deadline,
+          turn.abortSignal,
+          turn.externalProgress,
+          CHATGPT_RESPONSE_DOM_GRACE_MS,
+          completionTracker,
+          launcherObservationRecovery
+            ? async (...args) => {
+              const recovered = await recoverAssistantObservation(...args);
+              submissionBaseline = recovered.baseline;
+              return recovered;
+            }
+            : undefined,
+        );
+        visibleTrace = new ChatGptVisibleTraceTracker();
+        markdownBuffer = new ChatGptMarkdownBuffer();
+        domHealthTracker = new ChatGptTurnDomHealthTracker();
+        runningProgressTracker = new ChatGptRunningProgressTracker(
+          turn.compaction
+            ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
+            : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
+        );
+        responseDomCache.key = undefined;
+        responseDomCache.snapshot = undefined;
+        completionFenceRevision = undefined;
+        capturedResponse = false;
+        loggedCompletionWait = false;
+        sawRunning = false;
+        await diagnostics.capture(page, `completion-receipt-recovery-${label}-accepted`);
+      };
+      const sameTabRecovery = new SameTabRecovery(state => {
+        console.info(`[chatgpt-web] same_tab_recovery ${JSON.stringify({ traceId: turn.traceId, state })}`);
+      });
+      let stoppedPartial = false;
+      const recoverVerifiedStall = async (): Promise<boolean> => {
+        if (!receiptRequired || turn.compaction || !turn.externalProgress || !turn.conversationKey) return false;
+        let recoveryToken: string | undefined;
+        const url = acceptedConversationUrl, baseline = submissionBaseline, identity = responseTurn.identity;
+        const documentOrigin = acceptedDocumentOrigin;
+        const observe = async () => {
+          turn.abortSignal?.throwIfAborted();
+          await throwIfChatGptRateLimitDialog(page);
+          await throwIfChatGptSessionFailureAlert(page);
+          await assertAuthenticatedChatGptPage(page);
+          const state = await this.submissionDomState(page, {}, turn.abortSignal);
+          const snapshot = await this.responseDomSnapshot(responseTurn.locator, {});
+          const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).filter({ visible: true });
+          const stopCount = await stop.count();
+          const progress = turn.externalProgress!.snapshot();
+          return {
+            owned: page.url() === url && await page.evaluate(() => performance.timeOrigin) === documentOrigin
+              && stopCount <= 1 && chatGptNewTurnIdentity(baseline.initialTurnIdentities, state.responseIdentities) === identity
+              && (!baseline.acceptedUserIdentity
+                || chatGptNewTurnIdentity(baseline.initialTurnIdentities, state.userIdentities) === baseline.acceptedUserIdentity),
+            revision: progress.revision, activeTools: chatGptExternalWorkBlocksRecovery(progress) ? 1 : 0,
+            approvalPending: await page.locator('[data-testid="tool-approval-card"], [data-codex-approval-surface="true"]')
+              .filter({ visible: true }).count() > 0
+              || await page.getByRole("dialog").filter({ has: page.getByText(/^Allow ChatGPT to use .+\?$/) })
+                .filter({ visible: true }).count() > 0,
+            safetyBlocked: progress.compactionRequested === true || chatGptFinalIndicatesSafetyBlocked(snapshot.visibleText),
+            stopVisible: stopCount === 1, composerReady: await this.composerReadyForNextMessage(page),
+          };
+        };
+        const recovered = await sameTabRecovery.recover({ observe,
+          stop: async () => {
+            recoveryToken = await turn.completionFence?.recoveryTurnToken?.("stop");
+            if (!recoveryToken) throw new Error("Same-tab recovery lost its authorized native capability");
+            stoppedPartial = true;
+            bufferedFinalDeltas = [];
+            const stop = chatGptStopButton(page);
+            await stop.click({ timeout: 2_000 });
+            await stop.waitFor({ state: "hidden", timeout: 5_000 });
+            const readyDeadline = Date.now() + 5_000;
+            while (!await this.composerReadyForNextMessage(page) && Date.now() < readyDeadline) {
+              turn.abortSignal?.throwIfAborted();
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          },
+          submit: async () => {
+            const reconciled = await observe();
+            const verifyBeforeSend = async () => {
+              const current = await observe();
+              if (!current.owned || current.activeTools > 0 || current.approvalPending || current.safetyBlocked
+                || current.revision !== reconciled.revision) {
+                throw new ChatGptWebAdapterError("Same-tab recovery changed ownership or native reconciliation before Send.",
+                  { status: 409, errorType: "server_error", code: "same_tab_recovery_unsafe", retryable: false });
+              }
+            };
+            const recoveryId = randomUUID();
+            const token = recoveryToken ?? await turn.completionFence?.recoveryTurnToken?.();
+            if (!token) throw new Error("Same-tab recovery lost its authorized native capability");
+            const prompt = [
+              `The bridge stopped this verified stalled response. Continue the SAME authorized task (recovery_id=${recoveryId}).`,
+              "The stopped partial response is not a completed answer. Keep prior native tool results and receipts.",
+              "Never repeat a completed mutating tool. Reconcile an ambiguous operation with its status/receipt before any further action; if unavailable, report the blocker.",
+              chatGptCompletionReceiptRecoveryPrompt(1, 2, token),
+            ].join("\n");
+            await submitContinuation(prompt, `stall-${recoveryId}`, verifyBeforeSend);
+            stoppedPartial = false;
+            frontendErrorTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_FRONTEND_ERROR_STALL_MS);
+            softRecoveryTracker = new ChatGptMessageDeliveryTimeoutTracker(CHATGPT_SOFT_RECOVERY_STALL_MS);
+          },
+        }).catch(error => {
+          if (error instanceof ChatGptWebAdapterError || error instanceof DOMException && error.name === "AbortError") throw error;
+          throw new ChatGptWebAdapterError("Same-tab recovery could not verify ownership, Stop or continuation acceptance; reconcile before retry.",
+            { status: 409, errorType: "server_error", code: "same_tab_recovery_unsafe", retryable: false, cause: error });
+        });
+        if (recovered) return true;
+        if (sameTabRecovery.state === "WAITING_FOR_TOOL" || sameTabRecovery.state === "WAITING_FOR_APPROVAL") {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          return true;
+        }
+        throw new ChatGptWebAdapterError(`Same-tab recovery requires reconciliation: ${sameTabRecovery.state}.`,
+          { status: 409, errorType: "server_error", code: "same_tab_recovery_unsafe", retryable: false });
+      };
       for (;;) {
         // The heartbeat is a consumer callback, so it stays outside the observation-fault region:
         // a defect in the caller must not be retried as though the page could not be read.
@@ -6882,6 +7071,12 @@ export class ChatGptBrowserWorker {
         }
         const externalProgressSnapshot = turn.externalProgress?.snapshot();
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
+        const externalWorkBlocksRecovery = chatGptExternalWorkBlocksRecovery(externalProgressSnapshot);
+        if (stoppedPartial) {
+          if (!externalWorkBlocksRecovery) await recoverVerifiedStall();
+          await new Promise(resolve => setTimeout(resolve, 250));
+          continue;
+        }
         const softRecoveryVisible = networkInterruptedVisible
           || chatGptLongThinkingStatusVisible(snapshot.traceBlocks);
         // Dedicated hard/soft recovery UI owns its progress-aware grace. Do not let secondary
@@ -6984,9 +7179,10 @@ export class ChatGptBrowserWorker {
           visibleText: snapshot.visibleText,
           traceBlocks: snapshot.traceBlocks,
           externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
-          externalToolCallsInFlight,
+          externalToolCallsInFlight: externalWorkBlocksRecovery,
         })) {
           await diagnostics.capture(page, "frontend-error-semantic-stall").catch(() => {});
+          if (await recoverVerifiedStall()) continue;
           throw new ChatGptWebAdapterError(
             "ChatGPT kept a red/retry response-level error visible for one minute with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
             {
@@ -7002,9 +7198,10 @@ export class ChatGptBrowserWorker {
           visibleText: snapshot.visibleText,
           traceBlocks: snapshot.traceBlocks,
           externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
-          externalToolCallsInFlight,
+          externalToolCallsInFlight: externalWorkBlocksRecovery,
         })) {
           await diagnostics.capture(page, "soft-recovery-semantic-stall").catch(() => {});
+          if (await recoverVerifiedStall()) continue;
           throw new ChatGptWebAdapterError(
             "ChatGPT remained in an interrupted-network or long-thinking recovery state for three minutes with no backend reasoning, ChatGPT activity, or Codex Native progress, and no native command remained in flight.",
             {
@@ -7035,14 +7232,15 @@ export class ChatGptBrowserWorker {
           : false;
         const terminalUiReady = snapshot.completionActionVisible || composerReady;
         if (running) sawRunning = true;
-        if (runningProgressTracker.update({
+if (runningProgressTracker.update({
           running,
           visibleText: snapshot.visibleText,
           traceBlocks: snapshot.traceBlocks,
           externalLastProgressAt: externalProgressSnapshot?.lastProgressAt,
-          externalToolCallsInFlight,
+          externalToolCallsInFlight: externalWorkBlocksRecovery,
         })) {
           await diagnostics.capture(page, "response-semantic-stall").catch(() => {});
+          if (await recoverVerifiedStall()) continue;
           await stop.press("Enter").catch(() => {});
           throw new ChatGptWebAdapterError(
             `ChatGPT remained in a running state for ${(runningProgressTracker.currentStallMs() / 60_000).toFixed(1)} minutes without visible response, reasoning, ChatGPT activity, or Codex tool progress. The active browser surface was stopped so Codex can retry the turn on a fresh surface.`,
@@ -7170,95 +7368,9 @@ export class ChatGptBrowserWorker {
               turn.onCommentary?.(
                 "ChatGPT reached a final boundary before certifying the full request; continuing unfinished work automatically.",
               );
-              bufferedFinalDeltas = [];
-              completionTracker = new ChatGptCompletionTracker();
-              const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();
-              // Connector trigger attempts are scoped to one attachment episode. A retained
-              // conversation can legitimately clear its selected connector after every recovery
-              // send, so reusing the initial prompt budget across recoveries makes the third
-              // continuation fail before it can even reopen an otherwise healthy connector menu.
-              const recoveryConnectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
-              await this.runStage(
-                turn.traceId,
-                `completion_receipt_recovery_${completionReceiptRecoveries}_attachment`,
-                browserStageTimeouts.promptAttachment,
-                (stageSignal) => this.attachPrompt(
-                  page,
-                  chatGptCompletionReceiptRecoveryPrompt(
-                    completionReceiptRecoveries,
-                    MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
-                    recoveryTurnToken,
-                  ),
-                  true,
-                  checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
-                  turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
-                  false,
-                  recoveryConnectorAttemptBudget,
-                  true,
-                  mode.thinkEnabled,
-                ),
-                chatGptSuspensionClock,
-                true,
-              );
-              // Connector selection can run a personalization proof that itself submits a temporary
-              // ChatGPT message. Capture the semantic submission baseline only after attachment and
-              // connector preflight have finished, otherwise the real recovery send can appear as
-              // two new conversation turns and poison the same-chat continuation.
-              submissionBaseline = await captureSubmissionBaselineWithRecovery(
-                `completion_receipt_recovery_${completionReceiptRecoveries}_baseline`,
-              );
-              await this.runStage(
-                turn.traceId,
-                `completion_receipt_recovery_${completionReceiptRecoveries}_send`,
-                browserStageTimeouts.send,
-                (stageSignal) => this.sendAttachedPrompt(
-                  page,
-                  submissionBaseline,
-                  checkpoint => diagnostics.capture(page, `completion-recovery-${completionReceiptRecoveries}-${checkpoint}`),
-                  turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
-                  turn.externalProgress,
-                  { onSendActivated: () => { submissionRejection.begin(page); } },
-                  completionTracker,
-                  launcherObservationRecovery
-                    ? async (...args) => {
-                      const recovered = await recoverSubmissionObservation(...args);
-                      submissionBaseline = recovered.baseline;
-                      return recovered;
-                    }
-                    : undefined,
-                ),
-              );
-              responseTurn = await this.waitForNewAssistantTurn(
-                page,
-                submissionBaseline,
-                deadline,
-                turn.abortSignal,
-                turn.externalProgress,
-                CHATGPT_RESPONSE_DOM_GRACE_MS,
-                completionTracker,
-                launcherObservationRecovery
-                  ? async (...args) => {
-                    const recovered = await recoverAssistantObservation(...args);
-                    submissionBaseline = recovered.baseline;
-                    return recovered;
-                  }
-                  : undefined,
-              );
-              visibleTrace = new ChatGptVisibleTraceTracker();
-              markdownBuffer = new ChatGptMarkdownBuffer();
-              domHealthTracker = new ChatGptTurnDomHealthTracker();
-              runningProgressTracker = new ChatGptRunningProgressTracker(
-                turn.compaction
-                  ? CHATGPT_COMPACTION_RUNNING_NO_PROGRESS_STALL_MS
-                  : CHATGPT_RUNNING_NO_PROGRESS_STALL_MS,
-              );
-              responseDomCache.key = undefined;
-              responseDomCache.snapshot = undefined;
-              completionFenceRevision = undefined;
-              capturedResponse = false;
-              loggedCompletionWait = false;
-              sawRunning = false;
-              await diagnostics.capture(page, `completion-receipt-recovery-${completionReceiptRecoveries}-accepted`);
+              await submitContinuation(chatGptCompletionReceiptRecoveryPrompt(
+                completionReceiptRecoveries, MAX_CHATGPT_COMPLETION_RECEIPT_RECOVERIES,
+                await turn.completionFence?.recoveryTurnToken?.()), String(completionReceiptRecoveries));
               continue;
             }
             if (turn.completionFence) {
@@ -7380,6 +7492,7 @@ export class ChatGptBrowserWorker {
 
       const finalRejection = await submissionRejection.failure();
       if (finalRejection) throw finalRejection;
+      sameTabRecovery.complete();
       if (this.context && this.config.browserHost === "managed-chrome") {
         const state = await this.context.storageState();
         atomicWriteFile(this.config.storageStatePath, `${JSON.stringify(state)}\n`);

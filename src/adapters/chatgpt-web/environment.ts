@@ -10,6 +10,7 @@ export type ChatGptSandboxPolicy =
   | { type: "workspaceWrite"; writableRoots: string[]; networkAccess: boolean };
 
 export interface ChatGptTurnEnvironment {
+  recoveryScope?: string;
   cwd: string;
   roots: string[];
   writableRoots: string[];

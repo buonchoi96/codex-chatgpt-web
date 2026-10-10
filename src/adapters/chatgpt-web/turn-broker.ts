@@ -1,16 +1,17 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { BackendPerfTrace } from "../../lib/backend-perf";
-import { isWindowsPipeEndpoint } from "../../config";
+import { getConfigDir, isWindowsPipeEndpoint } from "../../config";
+import { NativeOperationLedger } from "./native-operation-ledger";
 import {
   CompactionTransactionStore,
   type CompactionTransactionHandle,
 } from "./compaction-transaction";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { subagentModelObservation } from "./mcp-observation";
-import { nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure,
+import { classifyNativeOperation, nativeBackgroundReceipt, nativeSafetyDiagnostic, operationFingerprint, operationTelemetry, preserveNativeGatewayFailure,
   sanitizedOperationIntent, type NativeOperationIntent } from "./native-operation";
 
 interface PendingTurn extends ChatGptTurnEnvironment {
@@ -26,6 +27,8 @@ export interface BrokerToolRequest {
   requestedTool?: string;
   operationIntent?: NativeOperationIntent;
   registryGeneration?: string;
+  backgroundReceiptNonce?: string;
+  backgroundArguments?: Record<string, unknown>;
 }
 
 export interface BrokerToolResult {
@@ -127,6 +130,10 @@ interface TurnChannel {
   /** Small replay window closes the race where completion lands exactly as the transport deadline fires. */
   recentToolResults: Map<string, BrokerToolResult>;
   rejectedOperations: Map<string, BrokerToolResult>;
+  operationResults: Map<string, { callId: string; result: BrokerToolResult }>;
+  operationResultsOverflow: boolean;
+  recovering: boolean;
+  recoveryDispatchPaused: boolean;
   waiters: Set<ToolWaiter>;
   toolCallsQueued: number;
   toolCallsCompleted: number;
@@ -176,6 +183,7 @@ interface BrokerRequest {
     | "owner_next"
     | "owner_complete"
     | "owner_completion_fence_begin"
+    | "owner_prepare_recovery"
     | "owner_completion_fence_commit"
     | "owner_completion_receipt_status"
     | "owner_require_completion_receipt"
@@ -196,6 +204,7 @@ interface BrokerRequest {
     | "owner_reset_output"
     | "owner_seal_output";
   token?: string;
+  recoveryPhase?: "stop" | "submitted";
   bindingId?: string;
   wireName?: string;
   freeform?: boolean;
@@ -228,6 +237,8 @@ interface BrokerRequest {
   requestedTool?: string;
   operationIntent?: NativeOperationIntent;
   operationFingerprint?: string;
+  backgroundReceiptNonce?: string;
+  backgroundArguments?: Record<string, unknown>;
   registryGeneration?: string;
   failureMarker?: string;
 }
@@ -462,6 +473,7 @@ function environmentIdentity(environment: ChatGptTurnEnvironment): string {
     roots: environment.roots,
     writableRoots: environment.writableRoots,
     sandboxPolicy: environment.sandboxPolicy,
+    recoveryScope: environment.recoveryScope,
   });
 }
 
@@ -472,6 +484,7 @@ function ownerEnvironment(value: unknown): ChatGptTurnEnvironment {
     && candidate.length > 0
     && candidate.every(path => typeof path === "string" && isAbsolute(path));
   if (typeof environment.cwd !== "string" || !isAbsolute(environment.cwd)
+    || (environment.recoveryScope !== undefined && !/^[a-f0-9]{64}$/.test(environment.recoveryScope))
     || !paths(environment.roots) || !Array.isArray(environment.writableRoots)
     || environment.writableRoots.some(path => typeof path !== "string" || !isAbsolute(path))
     || !environment.roots.some(root => {
@@ -513,6 +526,7 @@ export interface TurnBrokerOwner {
   requestCompaction(token: string, queuedResult: BrokerToolResult): number | Promise<number>;
   compactionDeliveryCount(token: string): number | Promise<number>;
   beginCompletionFence(token: string): number | undefined | Promise<number | undefined>;
+  prepareRecovery(token: string, phase?: "stop" | "submitted"): boolean | Promise<boolean>;
   commitCompletionFence(token: string, revision: number): boolean | Promise<boolean>;
   requireNativeCompletionReceipt(token: string): void | Promise<void>;
   nativeCompletionReceiptAccepted(token: string): boolean | Promise<boolean>;
@@ -541,6 +555,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   private readonly channels = new Map<string, TurnChannel>();
+  private readonly operationLedger = new NativeOperationLedger(() => join(getConfigDir(), "runtime", "native-operation-receipts.json"));
   private readonly pending = new Map<string, TurnChannel>();
   private readonly compactionTransactions = new CompactionTransactionStore();
   private readonly bindings = new Map<string, { token: string; channel: TurnChannel }>();
@@ -612,6 +627,10 @@ export class TurnBroker implements TurnBrokerOwner {
       detachedResults: new Map(),
       recentToolResults: new Map(),
       rejectedOperations: new Map(),
+      operationResults: new Map(),
+      operationResultsOverflow: false,
+      recovering: false,
+      recoveryDispatchPaused: false,
       waiters: new Set(),
       toolCallsQueued: 0,
       toolCallsCompleted: 0,
@@ -691,6 +710,8 @@ export class TurnBroker implements TurnBrokerOwner {
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
+    environment = { ...environment, ...(channel.environment.recoveryScope && environment.recoveryScope === undefined
+      ? { recoveryScope: channel.environment.recoveryScope } : {}) };
     if (environmentIdentity(channel.environment) !== environmentIdentity(environment)) {
       throw new Error("Codex turn environment changed during an active ChatGPT tool loop");
     }
@@ -773,6 +794,20 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.finishDecision ??= invocation.perf?.start(surface);
     channel.toolCallsCompleted += 1;
     result = preserveNativeGatewayFailure(result, invocation.failureMarker);
+    const backgroundReceipt = nativeBackgroundReceipt(result.content, invocation.request.backgroundReceiptNonce);
+    if (backgroundReceipt) {
+      const prefix = `codex-native-receipt:${invocation.request.backgroundReceiptNonce}:`;
+      result = { ...result, content: result.content.flatMap(value => {
+        const item = value as { type?: unknown; text?: unknown } | null;
+        if (item?.type !== "text" || typeof item.text !== "string") return [value];
+        const offset = item.text.indexOf(prefix);
+        if (offset < 0) return [value];
+        const end = item.text.indexOf("\n", offset);
+        const text = item.text.slice(0, offset > 0 && item.text[offset - 1] === "\n" ? offset - 1 : offset)
+          + (end < 0 ? "" : item.text.slice(end));
+        return text ? [{ ...item, text }] : [];
+      }) };
+    }
     const safety = nativeSafetyDiagnostic(result);
     if (safety.result !== "not_reported") {
       result = { ...result, _meta: { ...(result._meta && typeof result._meta === "object" ? result._meta : {}), codexNativeSafety: safety } };
@@ -782,6 +817,15 @@ export class TurnBroker implements TurnBrokerOwner {
       safety, brokerDelivered: true, operationAlreadyDispatched: true, elapsedMs: Date.now() - invocation.startedAt,
     })}`);
     const retainedResult = structuredClone(result);
+    if (!classifyNativeOperation(invocation.request.requestedTool ?? invocation.request.wireName, invocation.request.arguments).readOnly) {
+      if (channel.environment.recoveryScope) {
+        try { this.operationLedger.complete(channel.environment.recoveryScope, invocation.fingerprint, retainedResult); }
+        catch { channel.operationResultsOverflow = true; }
+      }
+      if (channel.operationResults.size < MAX_RETAINED_TOOL_RESULTS || channel.operationResults.has(invocation.fingerprint)) {
+        channel.operationResults.set(invocation.fingerprint, { callId, result: retainedResult });
+      } else channel.operationResultsOverflow = true;
+    }
     channel.recentToolResults.delete(callId);
     channel.recentToolResults.set(callId, retainedResult);
     while (channel.recentToolResults.size > MAX_RETAINED_TOOL_RESULTS) {
@@ -983,6 +1027,27 @@ export class TurnBroker implements TurnBrokerOwner {
       receipt: structuredClone(receipt),
     };
     return { accepted: true };
+  }
+
+  prepareRecovery(token: string, phase?: "stop" | "submitted"): boolean {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel) throw new Error("turn token is invalid or expired");
+    this.assertSafeHarnessRunning(channel, true);
+    if (phase === "submitted") {
+      if (!channel.recovering) return false;
+      channel.recoveryDispatchPaused = false;
+      return true;
+    }
+    if (channel.safe || channel.completionCommitted || channel.operationResultsOverflow
+      || channel.activities.size > 0 || channel.invocations.size > 0 || channel.detachedResults.size > 0) return false;
+    if (channel.environment.recoveryScope) {
+      try { this.operationLedger.beginRecovery(channel.environment.recoveryScope); }
+      catch { return false; }
+    }
+    channel.recovering = true;
+    channel.recoveryDispatchPaused = phase === "stop";
+    return true;
   }
 
   beginCompletionFence(token: string): number | undefined {
@@ -1511,7 +1576,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "cancel_trace", "resolve", "release", "invoke", "cancel_invoke", "invoke_status", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
+    if (!["claim", "cancel_trace", "resolve", "release", "invoke", "cancel_invoke", "invoke_status", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_prepare_recovery", "owner_completion_fence_commit", "owner_completion_receipt_status", "owner_require_completion_receipt", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "native_complete", "activity_complete", "submit_compaction_handoff", "submit_recovery_checkpoint", "submit_output", "owner_next_output", "owner_reset_output", "owner_seal_output"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1670,6 +1735,11 @@ export class TurnBroker implements TurnBrokerOwner {
     if (request.method === "owner_completion_fence_begin") {
       if (!request.token) throw new Error("turn owner token is required");
       return { revision: this.beginCompletionFence(request.token) ?? null };
+    }
+    if (request.method === "owner_prepare_recovery") {
+      if (!request.token) throw new Error("turn owner token is required");
+      if (request.recoveryPhase !== undefined && !["stop", "submitted"].includes(request.recoveryPhase)) throw new Error("Invalid recovery phase");
+      return { prepared: this.prepareRecovery(request.token, request.recoveryPhase) };
     }
     if (request.method === "owner_completion_fence_commit") {
       if (!request.token) throw new Error("turn owner token is required");
@@ -1935,6 +2005,9 @@ export class TurnBroker implements TurnBrokerOwner {
     }
 
     await this.dispatchGuard?.(binding.channel.traceId);
+    if (binding.channel.recoveryDispatchPaused) return { isError: true,
+      content: [{ type: "text", text: "RECONCILIATION_REQUIRED: native dispatch is fenced until verified Stop/continuation submission; this operation was not dispatched." }],
+      structuredContent: { code: "RECONCILIATION_REQUIRED", operationAlreadyDispatched: false } };
     if (socketSignal?.aborted) throw new Error("turn broker invocation was cancelled before dispatch");
     const fingerprint = typeof request.operationFingerprint === "string" && /^[a-f0-9]{64}$/.test(request.operationFingerprint)
       ? request.operationFingerprint : operationFingerprint(wireName, request.arguments, request.input);
@@ -1948,6 +2021,11 @@ export class TurnBroker implements TurnBrokerOwner {
       ...(sanitizedOperationIntent(request.operationIntent) ? { operationIntent: sanitizedOperationIntent(request.operationIntent) } : {}),
       ...(typeof request.registryGeneration === "string" && /^[a-f0-9]{12}$/.test(request.registryGeneration)
         ? { registryGeneration: request.registryGeneration } : {}),
+      ...(typeof request.backgroundReceiptNonce === "string" && /^[a-f0-9]{48}$/.test(request.backgroundReceiptNonce)
+        ? { backgroundReceiptNonce: request.backgroundReceiptNonce,
+          backgroundArguments: Object.fromEntries(Object.entries(request.backgroundArguments ?? {})
+            .filter(([key, value]) => ["session_id", "target", "process", "targets"].includes(key)
+              && (typeof value === "string" || Number.isSafeInteger(value) || Array.isArray(value)))) } : {}),
     };
     const rejected = binding.channel.rejectedOperations.get(fingerprint);
     if (rejected) {
@@ -1956,6 +2034,11 @@ export class TurnBroker implements TurnBrokerOwner {
         retryAttempted: true, retryRepresentationChanged: false, elapsedMs: 0,
       })}`);
       return structuredClone(rejected);
+    }
+    const completed = binding.channel.recovering ? binding.channel.operationResults.get(fingerprint) : undefined;
+    if (completed) return detachedToolReplayResult(completed.callId, wireName, structuredClone(completed.result));
+    if (binding.channel.environment.recoveryScope && !classifyNativeOperation(toolRequest.requestedTool ?? wireName, toolRequest.arguments).readOnly) {
+      this.operationLedger.begin(binding.channel.environment.recoveryScope, fingerprint);
     }
     binding.channel.finishDecision?.();
     binding.channel.finishDecision = undefined;
@@ -2053,6 +2136,7 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.invocations.clear();
     channel.detachedResults.clear();
     channel.recentToolResults.clear();
+    channel.operationResults.clear();
     channel.queuedCallIds = [];
     channel.deliveredCallIds.clear();
   }
@@ -2133,6 +2217,10 @@ export async function callTurnBroker<T>(
     // The server owns response termination. Bounded calls wait for the pipe/socket to close
     // before their callers can advance the lifecycle while Bun drains named-pipe writes.
     socket.once("close", finishResponse);
+    socket.once("end", () => {
+      if (!response) finishResponse();
+      else socket.end();
+    });
     socket.once("connect", () => socket.write(`${JSON.stringify({ id, ...wireRequest })}\n`));
     socket.on("data", chunk => {
       if (settled || response) return;
@@ -2369,6 +2457,12 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
       throw new Error("DEV turn owner received an invalid completion fence revision");
     }
     return response.revision as number;
+  }
+
+  async prepareRecovery(token: string, phase?: "stop" | "submitted"): Promise<boolean> {
+    const response = await callTurnBroker<{ prepared?: unknown }>(this.socketPath, { method: "owner_prepare_recovery", token, recoveryPhase: phase });
+    if (typeof response.prepared !== "boolean") throw new Error("DEV turn owner received an invalid recovery preparation result");
+    return response.prepared;
   }
 
   async commitCompletionFence(token: string, revision: number): Promise<boolean> {

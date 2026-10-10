@@ -7,6 +7,7 @@ import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "../src
 import { LauncherBrowserHelperClient } from "../src/adapters/chatgpt-web/launcher-helper-client";
 import type { BrowserTurn, ResolvedBrowserConfig } from "../src/adapters/chatgpt-web/browser-worker";
 import { LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
+import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -31,6 +32,8 @@ test("daemon streams browser lifecycle through the real helper process", async (
         await turn.onMultipartStageAcknowledged?.(index);
       }
       await turn.onSendActivated();
+      await turn.completionFence.recoveryTurnToken("stop");
+      await turn.completionFence.recoveryTurnToken("submitted");
       turn.onSubmitted();
       turn.onReasoningSummary("Reading project");
       turn.onReasoningSummary(" files", true);
@@ -89,14 +92,18 @@ test("daemon streams browser lifecycle through the real helper process", async (
   let sendActivated = false;
   let submitted = false;
   let released = false;
+  const recoveryPhases: unknown[] = [];
   const client = new LauncherBrowserHelperClient(config);
   try {
-    const result = await client.run({
+    const turn: BrowserTurn = {
       traceId: "abcdef123456",
       modelId: "gpt-5.6-sol",
       reasoning: "high",
       modelFamily: "5.6",
       capabilities: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false },
+      externalProgress: new ChatGptExternalTurnProgress(),
+      completionFence: { begin: async () => 0, commit: async () => true, receiptReady: async () => false,
+        recoveryTurnToken: async phase => { recoveryPhases.push(phase); return "turn_helper_test_token_0123456789"; } },
       prepare: async () => ({
         text: "inspect", images: [],
         skillFiles: [selectedSkillFile({ role: "user", origin: "codex_skill", timestamp: 0,
@@ -112,7 +119,8 @@ test("daemon streams browser lifecycle through the real helper process", async (
       onTextDelta: text => deltas.push(text),
       captureLunaCheckpoint: true,
       onLunaCheckpoint: checkpoint => checkpoints.push(checkpoint),
-    });
+    };
+    const result = await client.run(turn);
     expect(result).toBe("done");
     expect(reasoning).toEqual([
       { text: "Reading project", continuation: false },
@@ -121,6 +129,7 @@ test("daemon streams browser lifecycle through the real helper process", async (
     expect(deltas).toEqual(["done"]);
     expect(sendActivated).toBe(true);
     expect(submitted).toBe(true);
+    expect(recoveryPhases).toEqual(["stop", "submitted"]);
     expect(acknowledgedStages).toEqual([1, 2, 3, 4, 5]);
     expect(checkpoints).toEqual([{
       answerHash: "a".repeat(64),
@@ -134,10 +143,25 @@ test("daemon streams browser lifecycle through the real helper process", async (
       },
     }]);
     expect(released).toBe(true);
+    await client.close();
+    const oldParent = new LauncherBrowserHelperClient(config);
+    const internal = oldParent as unknown as { send(message: Record<string, unknown>): Promise<void> };
+    const send = internal.send.bind(oldParent);
+    internal.send = async message => {
+      if (message.type === "completion_recovery_token_ack") {
+        const { phase: _phase, ...oldParentReply } = message;
+        return send(oldParentReply);
+      }
+      return send(message);
+    };
+    try {
+      await expect(oldParent.run({ ...turn, traceId: "legacy-parent-fence" })).rejects.toThrow("Recovery phase acknowledgement");
+      expect(recoveryPhases).toEqual(["stop", "submitted", "stop"]);
+    } finally { await oldParent.close(); }
   } finally {
     await client.close();
   }
-});
+}, 15_000);
 
 test("accepted compaction retires through the helper as completed without hiding cancellations or errors", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-helper-compaction-end-"));

@@ -1,6 +1,19 @@
 import { createHash } from "node:crypto";
 
 export type NativeOperationRisk = "read_only" | "low_risk_ui" | "ordinary_mutation" | "sensitive" | "unknown";
+export function nativeBackgroundReceipt(content: unknown[], nonce?: string): Record<string, unknown> | undefined {
+  if (!nonce || !/^[a-f0-9]{48}$/.test(nonce)) return undefined;
+  const prefix = `codex-native-receipt:${nonce}:`;
+  const lines = content.flatMap(value => {
+    const item = value as { type?: unknown; text?: unknown } | null;
+    return item?.type === "text" && typeof item.text === "string" ? item.text.split("\n").filter(line => line.startsWith(prefix)) : [];
+  });
+  if (lines.length !== 1 || lines[0]!.length > 65536) return undefined;
+  try {
+    const receipt = JSON.parse(lines[0]!.slice(prefix.length));
+    return receipt && typeof receipt === "object" && !Array.isArray(receipt) ? receipt : undefined;
+  } catch { return undefined; }
+}
 export function preserveNativeGatewayFailure<T extends { content: unknown[]; isError?: boolean }>(result: T, expectedMarker?: string): T {
   if (!expectedMarker) return result;
   // The broker supplies a fresh marker for this invocation, never to the nested tool itself.
@@ -46,7 +59,8 @@ export function splitIndependentInspections(command: string): string[] | undefin
 
 export function classifyNativeOperation(name: string, args: Record<string, unknown> = {}): NativeOperationIntent {
   const command = typeof args.cmd === "string" ? args.cmd : typeof args.command === "string" ? args.command : undefined;
-  const inspection = command !== undefined && independentProbes.has(command.trim());
+  const inspection = /^(?:(?:functions|tools)__)?(?:exec_command|shell_command)$/.test(name)
+    && command !== undefined && independentProbes.has(command.trim());
   const shape = command === undefined ? "none" : /[;\r\n&|<>`$(){}]/.test(command) ? "compound" : /["']/.test(command) ? "opaque" : "simple";
   const cu = /(?:node_repl|computer_use|cua_repl)/.test(name);
   return {

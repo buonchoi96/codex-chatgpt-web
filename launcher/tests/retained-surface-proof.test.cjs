@@ -55,3 +55,28 @@ test("unprovable terminal state, disconnected renderer and authentication transi
   tab.authenticationRequired = true;
   assert.equal(await captureRetainedSurfaceProof(tab), undefined);
 });
+
+test("identical logical messages can remount without invalidating semantic transcript proof", async () => {
+  let callback;
+  const message = (role, id) => ({ nodeType: 1, textContent: role + ' text',
+    getAttribute: name => name === 'data-message-author-role' ? role : name === 'data-message-id' ? id : null,
+    matches: selector => selector.includes('data-message-author-role'), closest: () => null,
+    querySelector: () => null, querySelectorAll: () => [] });
+  let messages = [message('user', 'u1'), message('assistant', 'a1')];
+  const composer = { getClientRects: () => [1], cloneNode: () => ({ textContent: '', querySelectorAll: () => [] }) };
+  const context = vm.createContext({ crypto: require('node:crypto').webcrypto, TextEncoder,
+    location: { href: 'https://chatgpt.com/c/A' }, performance: { timeOrigin: 123 },
+    document: { documentElement: {}, querySelectorAll: selector => selector.startsWith('#prompt') ? [composer]
+      : selector.startsWith('[data-message-author-role') ? messages : [] },
+    MutationObserver: class { constructor(fn) { callback = fn; } observe() {} takeRecords() { return []; } } });
+  const first = await vm.runInContext(TRANSCRIPT_PROBE, context);
+  const removed = messages;
+  messages = [message('user', 'u1'), message('assistant', 'a1')];
+  callback([{ type: 'childList', target: {}, addedNodes: messages, removedNodes: removed }]);
+  const second = await vm.runInContext(TRANSCRIPT_PROBE, context);
+  assert.equal(retainedSurfaceProofMatches(first, second), true);
+  callback([{ type: 'childList', target: {}, addedNodes: [message('user', 'foreign')], removedNodes: [] }]);
+  const third = await vm.runInContext(TRANSCRIPT_PROBE, context);
+  assert.equal(third.hash, first.hash);
+  assert.equal(retainedSurfaceProofMatches(first, third), false);
+});

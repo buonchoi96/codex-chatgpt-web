@@ -3968,6 +3968,25 @@ test("completed SSE size errors reject only their current submission, not model 
   }
 });
 
+test("continuation effort readback binds the accepted conversation without changing model selection", async () => {
+  const proof = { url: "https://chatgpt.com/c/fixture?temporary-chat=true", documentOrigin: 42 };
+  const mode = { selection: { url: "https://chatgpt.com/?temporary-chat=true", label: "Alto" }, modelFamily: "6" };
+  let url = proof.url, epoch = proof.documentOrigin;
+  const readbacks: unknown[] = [];
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    assertSelectedEffort: async (_page: unknown, selection: unknown) => { readbacks.push(selection); },
+  }) as any;
+  const page = { url: () => url, evaluate: async () => epoch };
+  await worker.assertContinuationEffort(page, mode, proof);
+  expect(readbacks).toEqual([{ ...mode, selection: { ...mode.selection, url: proof.url } }]);
+  expect(mode.selection.url).toBe("https://chatgpt.com/?temporary-chat=true");
+  url = "https://chatgpt.com/c/foreign";
+  await expect(worker.assertContinuationEffort(page, mode, proof)).rejects.toThrow("ChatGPT model controls are unavailable");
+  url = proof.url; epoch += 1;
+  await expect(worker.assertContinuationEffort(page, mode, proof)).rejects.toThrow("ChatGPT model controls are unavailable");
+  expect(readbacks).toHaveLength(1);
+});
+
 test("effort readback rejects a changed selection or surface before activating Send", async () => {
   const selection = { url: "https://chatgpt.com/?temporary-chat=true", label: "Alto" };
   const state = { url: selection.url, label: "Alto", expanded: "false", editable: true, count: 1 };
@@ -5696,7 +5715,7 @@ test("Luna Think attachment reacquires the composer and uses the visible Think t
 
 test("completion receipt recovery scopes connector trigger attempts per continuation", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
-  const start = workerSource.indexOf("const recoveryTurnToken = await turn.completionFence?.recoveryTurnToken?.();");
+  const start = workerSource.indexOf("const submitContinuation = async (");
   const end = workerSource.indexOf("// Connector selection can run a personalization proof", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);

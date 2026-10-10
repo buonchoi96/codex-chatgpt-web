@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { nativeBackgroundReceipt } from "./native-operation";
 import { BackendPerfTrace } from "../../lib/backend-perf";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
-import { defaultBrokerEndpoint, expandUserPath, resolveBrokerEndpoint } from "../../config";
+import { defaultBrokerEndpoint, expandUserPath, getConfigDir, resolveBrokerEndpoint } from "../../config";
 import {
   cancelLauncherManualTurn,
   endLauncherManualTurn,
@@ -71,8 +72,9 @@ import {
 } from "./conversation-key";
 import { RetainedConversationProofStore } from "./retained-followup-proof";
 // responseRequest constructs an adapter per native round; proof must survive those factories.
-// Keys include provider/profile, thread, model, effort and compaction epoch; memory loss fails closed.
-const retainedFollowupProofs = new RetainedConversationProofStore();
+// Canonical hashes survive daemon restart; physical ownership is independently verified by launcher.
+const retainedFollowupProofs = new RetainedConversationProofStore(Date.now,
+  () => join(getConfigDir(), "runtime", "retained-followup-proofs.json"));
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
   const configured = provider.chatgptWeb?.brokerSocketPath?.trim();
@@ -302,11 +304,15 @@ function applyNativeAgentLifecycle(
   message: CodexToolResultMessage,
   parentThreadId: string | undefined,
 ): void {
-  if (!parentThreadId) return;
   const request = session.outstanding().find(candidate => candidate.callId === message.toolCallId);
-  if (!request || message.isError) return;
+  if (!request) return;
   const result = brokerResult(message);
   const structured = result.structuredContent;
+  if (session.runtime.mode === "tools") {
+    session.runtime.externalProgress.recordBackgroundResult(request.requestedTool ?? request.wireName,
+      request.backgroundArguments ?? request.arguments, nativeBackgroundReceipt(result.content, request.backgroundReceiptNonce), message.isError);
+  }
+  if (!parentThreadId || message.isError) return;
   if (request.wireName === "multi_agent_v1__spawn_agent"
     && structured && typeof structured === "object" && !Array.isArray(structured)) {
     const agentId = (structured as { agent_id?: unknown }).agent_id;
@@ -723,7 +729,11 @@ export function createChatGptWebAdapter(
     const resumeInput = retainedConversationKey
       ? manualRequest
         ? retainedConversationResumeRequest(parsed)
-        : inputPerf.measure("retained_conversation_verify", () => retainedFollowupProofs.resume(retainedConversationKey, parsed))
+        : inputPerf.measure("retained_conversation_verify", () => {
+          const proof = retainedFollowupProofs.check(retainedConversationKey, parsed);
+          console.error(`[chatgpt-web] retained_reuse ${JSON.stringify({ traceId, reason: proof.reason })}`);
+          return proof.parsed;
+        })
       : lunaActiveTurnRecovery
         ? retainedActiveTurnRecoveryRequest(checkpointInput.parsed)
         : undefined;
@@ -1076,7 +1086,8 @@ export function createChatGptWebAdapter(
       let turnToken = activeToken;
       if (!turnToken) {
         turnToken = await broker.register(
-          environment,
+          { ...environment, ...(conversationKey && identity.threadId && identity.turnId
+            ? { recoveryScope: createHash("sha256").update(JSON.stringify([conversationKey, identity.threadId, identity.turnId])).digest("hex") } : {}) },
           timeoutMs === undefined ? undefined : timeoutMs + 60_000,
           traceId,
         );
@@ -1127,7 +1138,11 @@ export function createChatGptWebAdapter(
         begin: async () => broker.beginCompletionFence(await token.promise),
         commit: async revision => broker.commitCompletionFence(await token.promise, revision),
         receiptReady: async () => broker.nativeCompletionReceiptAccepted(await token.promise),
-        recoveryTurnToken: async () => await token.promise,
+        recoveryTurnToken: async phase => {
+          const current = await token.promise;
+          if (!await broker.prepareRecovery(current, phase)) throw new Error("Same-tab recovery has unsettled native activity or incomplete receipts");
+          return current;
+        },
       },
       ...(captureLunaCheckpoint ? {
         captureLunaCheckpoint: true,

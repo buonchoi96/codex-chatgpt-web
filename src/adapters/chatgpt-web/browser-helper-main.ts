@@ -76,7 +76,7 @@ type InputMessage = RunMessage
   | { type: "completion_fence_begin_ack"; id: string; requestId: number; revision: number | null }
   | { type: "completion_fence_commit_ack"; id: string; requestId: number; committed: boolean }
   | { type: "completion_receipt_status_ack"; id: string; requestId: number; accepted: boolean }
-  | { type: "completion_recovery_token_ack"; id: string; requestId: number; turnToken: string }
+  | { type: "completion_recovery_token_ack"; id: string; requestId: number; turnToken: string; phase?: "stop" | "submitted" }
   | { type: "progress"; id: string; snapshot: ChatGptExternalTurnProgressSnapshot }
   | { type: "abort"; id: string; reason?: "compaction_handoff_accepted" }
   | { type: "shutdown" };
@@ -123,6 +123,7 @@ const completionReceiptStatusWaiters = new Map<string, {
 }>();
 const completionRecoveryTokenWaiters = new Map<string, {
   requestId: number;
+  phase?: "stop" | "submitted";
   resolve: (turnToken: string) => void;
   reject: (error: Error) => void;
 }>();
@@ -300,15 +301,15 @@ async function run(message: RunMessage): Promise<void> {
               reject(new Error("Browser helper could not request completion receipt status"));
             }
           }),
-          recoveryTurnToken: () => new Promise<string>((resolve, reject) => {
+          recoveryTurnToken: phase => new Promise<string>((resolve, reject) => {
             if (completionRecoveryTokenWaiters.has(message.id)) {
               reject(new Error("Browser helper completion recovery token request is already pending"));
               return;
             }
             completionFenceRequestId += 1;
             const requestId = completionFenceRequestId;
-            completionRecoveryTokenWaiters.set(message.id, { requestId, resolve, reject });
-            if (!writeProtocol({ type: "event", id: message.id, event: "completion_recovery_token", requestId })) {
+            completionRecoveryTokenWaiters.set(message.id, { requestId, resolve, reject, ...(phase ? { phase } : {}) });
+            if (!writeProtocol({ type: "event", id: message.id, event: "completion_recovery_token", requestId, ...(phase ? { phase } : {}) })) {
               completionRecoveryTokenWaiters.delete(message.id);
               reject(new Error("Browser helper could not request the completion recovery token"));
             }
@@ -568,6 +569,11 @@ input.on("line", line => {
     const waiter = completionRecoveryTokenWaiters.get(message.id);
     if (!waiter || waiter.requestId !== message.requestId) return;
     completionRecoveryTokenWaiters.delete(message.id);
+    if (waiter.phase !== message.phase) {
+      waiter.reject(new Error("Recovery phase acknowledgement is missing or changed; native dispatch fencing is unverified"));
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
     waiter.resolve(message.turnToken);
   } else if (message.type === "progress") {
     // Progress is meaningful only for a turn this helper is currently running. Ignore every other

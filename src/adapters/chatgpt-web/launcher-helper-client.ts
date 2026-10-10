@@ -36,7 +36,7 @@ type HelperMessage =
   | { type: "event"; id: string; event: "completion_fence_begin"; requestId: number }
   | { type: "event"; id: string; event: "completion_fence_commit"; requestId: number; revision: number }
   | { type: "event"; id: string; event: "completion_receipt_status"; requestId: number }
-  | { type: "event"; id: string; event: "completion_recovery_token"; requestId: number }
+  | { type: "event"; id: string; event: "completion_recovery_token"; requestId: number; phase?: "stop" | "submitted" }
   | { type: "event"; id: string; event: "prepared_selected"; reused: boolean }
   | { type: "event"; id: string; event: "luna_checkpoint"; checkpoint: ChatGptLunaCheckpoint; answerHash: string }
   | { type: "result"; id: string; text: string }
@@ -104,6 +104,11 @@ function parseHelperMessage(line: string): HelperMessage {
     if (event === "completion_receipt_status" || event === "completion_recovery_token") {
       if (!Number.isSafeInteger(message.requestId) || (message.requestId as number) <= 0) {
         throw new Error("Launcher browser helper completion receipt request id is invalid");
+      }
+      if (event === "completion_recovery_token") {
+        if (message.phase !== undefined && message.phase !== "stop" && message.phase !== "submitted") throw new Error("Invalid helper recovery phase");
+        return { type: "event", id: message.id, event, requestId: message.requestId as number,
+          ...(message.phase ? { phase: message.phase as "stop" | "submitted" } : {}) };
       }
       return { type: "event", id: message.id, event, requestId: message.requestId as number };
     }
@@ -538,13 +543,14 @@ export class LauncherBrowserHelperClient {
           );
           return;
         }
-        void recoveryTurnToken().then(turnToken => {
+        void recoveryTurnToken(message.phase).then(turnToken => {
           if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
           return this.send({
             type: "completion_recovery_token_ack",
             id: message.id,
             requestId: message.requestId,
             turnToken,
+            ...(message.phase ? { phase: message.phase } : {}),
           });
         }).catch(error => this.abortWithLocalFailure(
           message.id,

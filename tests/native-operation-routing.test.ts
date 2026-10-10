@@ -7,11 +7,33 @@ import { join } from "node:path";
 import { defaultBrokerEndpoint } from "../src/config";
 import { TurnBroker, type BrokerToolResult } from "../src/adapters/chatgpt-web/turn-broker";
 import type { CodexTool } from "../src/types";
+import { nativeBackgroundReceipt } from "../src/adapters/chatgpt-web/native-operation";
+import { ChatGptExternalTurnProgress, chatGptExternalWorkBlocksRecovery } from "../src/adapters/chatgpt-web/turn-progress";
 
 const commandTool: CodexTool = { name: "exec_command", description: "Run one command", parameters: { type: "object" } };
 const repl: CodexTool = { name: "js", namespace: "mcp__node_repl", description: "Persistent Node REPL", parameters: { type: "object" } };
 const gateway: CodexTool = { name: "exec", freeform: true, description: "Native gateway", parameters: {} };
 const ok: BrokerToolResult = { content: [{ type: "text", text: "ok" }] };
+
+test("real generated gateway receipts preserve background ownership through native text transport", async () => {
+  await harness([gateway], async ({ client, broker, token }) => {
+    const pending = client.callTool({ name: "codex_exec", arguments: { turn_token: token, cmd: "fixture-owned-background" } });
+    const [request] = await broker.nextToolBatch(token);
+    const content: Array<{ type: "text"; text: string }> = [];
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction("tools", "ALL_TOOLS", "text", request!.input!)(
+      { exec_command: async () => ({ session_id: 42, output: "native stdout" }) }, [{ name: "exec_command" }],
+      (value: unknown) => content.push({ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }));
+    const progress = new ChatGptExternalTurnProgress();
+    progress.recordBackgroundResult(request!.requestedTool!, request!.backgroundArguments,
+      nativeBackgroundReceipt(content, request!.backgroundReceiptNonce));
+    broker.completeTool(token, request!.callId, { content });
+    const returned = await pending;
+    expect(progress.snapshot().activeNativeProcesses).toBe(1);
+    expect(chatGptExternalWorkBlocksRecovery(progress.snapshot())).toBe(true);
+    expect(JSON.stringify(returned.content)).not.toContain("codex-native-receipt");
+  });
+}, 30_000);
 
 // Native nested inventories require the unpredictable marker of this exact request.
 function nestedCatalogFor(input: string, tools: { name: string; description: string }[]): BrokerToolResult {
@@ -31,6 +53,44 @@ async function harness(tools: CodexTool[], run: (context: { client: Client; brok
   try { await client.connect(transport); await run({ client, broker, token }); }
   finally { await client.close().catch(() => {}); broker.revoke(token); await broker.close(); rmSync(root, { recursive: true, force: true }); }
 }
+
+test("same-tab recovery returns a completed mutation receipt without dispatching it again", async () => {
+  await harness([commandTool], async ({ client, broker, token }) => {
+    const args = { turn_token: token, cmd: "fixture-write-once" };
+    const first = client.callTool({ name: "codex_exec", arguments: args });
+    const [request] = await broker.nextToolBatch(token);
+    expect((broker as any).prepareRecovery(token)).toBe(false);
+    const receipt = { content: [{ type: "text", text: "fixture mutation receipt" }] };
+    broker.completeTool(token, request!.callId, receipt);
+    await first;
+    expect((broker as any).prepareRecovery(token)).toBe(true);
+    const replay = client.callTool({ name: "codex_exec", arguments: { ...args, yield_time_ms: 2000 } });
+    const abort = new AbortController();
+    const delivered = await Promise.race([replay.then(() => []), broker.nextToolBatch(token, abort.signal).catch(() => [])]);
+    for (const item of delivered) broker.completeTool(token, item.callId, receipt);
+    abort.abort();
+    expect(delivered).toHaveLength(0);
+    expect(JSON.stringify((await replay).content)).toContain("fixture mutation receipt");
+  });
+}, 30_000);
+
+test("prepared Stop recovery fences newly arriving native mutations", async () => {
+  await harness([commandTool], async ({ client, broker, token }) => {
+    expect((broker as any).prepareRecovery(token, "stop")).toBe(true);
+    const pending = client.callTool({ name: "codex_exec", arguments: { turn_token: token, cmd: "fixture-mutation-during-stop" } });
+    const abort = new AbortController();
+    const delivered = await Promise.race([pending.then(() => []), broker.nextToolBatch(token, abort.signal).catch(() => [])]);
+    for (const request of delivered) broker.completeTool(token, request.callId, ok);
+    abort.abort();
+    expect(delivered).toHaveLength(0);
+    expect((await pending).isError).toBe(true);
+    expect((broker as any).prepareRecovery(token, "submitted")).toBe(true);
+    const resumed = client.callTool({ name: "codex_exec", arguments: { turn_token: token, cmd: "fixture-mutation-after-resume" } });
+    const [request] = await broker.nextToolBatch(token);
+    broker.completeTool(token, request!.callId, ok);
+    expect((await resumed).isError).not.toBe(true);
+  });
+}, 30_000);
 
 test("command route retains simple input and splits only independent fixed read probes", async () => {
   await harness([commandTool], async ({ client, broker, token }) => {

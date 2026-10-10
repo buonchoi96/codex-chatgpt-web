@@ -2,6 +2,9 @@ export interface ChatGptExternalTurnProgressSnapshot {
   revision: number;
   lastToolBatchRevision: number;
   activeToolCalls: number;
+  activeNativeProcesses?: number;
+  activeSubagents?: number;
+  backgroundActivityUnverified?: boolean;
   lastProgressAt?: number;
   /** The active browser response has been superseded by native context compaction. */
   compactionRequested?: boolean;
@@ -85,6 +88,10 @@ abstract class ChatGptTurnProgressBroadcaster implements ChatGptTurnProgressRead
 }
 
 export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster {
+  private readonly nativeProcesses = new Set<number>();
+  private readonly scopedProcesses = new Set<string>();
+  private readonly subagents = new Set<string>();
+  private backgroundActivityUnverified = false;
   private revision = 0;
   private lastToolBatchRevision = 0;
   private observedToolBatchRevision = 0;
@@ -99,9 +106,66 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
       revision: this.revision,
       lastToolBatchRevision: this.lastToolBatchRevision,
       activeToolCalls: this.activeToolCalls,
+      ...(this.nativeProcesses.size + this.scopedProcesses.size ? { activeNativeProcesses: this.nativeProcesses.size + this.scopedProcesses.size } : {}),
+      ...(this.subagents.size ? { activeSubagents: this.subagents.size } : {}),
+      ...(this.backgroundActivityUnverified ? { backgroundActivityUnverified: true } : {}),
       ...(this.lastProgressAt !== undefined ? { lastProgressAt: this.lastProgressAt } : {}),
       ...(this.compactionRequested ? { compactionRequested: true } : {}),
     };
+  }
+
+  /** Only typed native envelopes may reconcile work; command stdout is never a receipt. */
+  recordBackgroundResult(name: string, args: Record<string, unknown> = {}, result: unknown, isError = false): void {
+    const tool = name.replace(/^(?:functions|tools)__/, "");
+    if (isError) {
+      if (tool === "exec" || tool === "exec_command" || tool === "multi_agent_v1__spawn_agent"
+        || /node_repl|cua_repl|(?:^|__)swift_process_start$/.test(tool)) this.backgroundActivityUnverified = true;
+      return;
+    }
+    if (tool === "exec" || /node_repl|cua_repl/.test(tool)) {
+      this.backgroundActivityUnverified = true;
+      return;
+    }
+    const process = tool === "exec_command" || tool === "write_stdin";
+    const scoped = /(?:^|__)swift_process_(?:start|poll|cancel)$/.test(tool);
+    const spawn = tool === "multi_agent_v1__spawn_agent";
+    const wait = tool === "multi_agent_v1__wait_agent";
+    const close = tool === "multi_agent_v1__close_agent";
+    if (!process && !scoped && !spawn && !wait && !close) return;
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      this.backgroundActivityUnverified = true;
+      return;
+    }
+    const receipt = result as Record<string, unknown>;
+    if (scoped) {
+      if (typeof receipt.process !== "string") this.backgroundActivityUnverified = true;
+      else if (receipt.status === "running") this.scopedProcesses.add(receipt.process);
+      else if (["completed", "cancelled", "timeout", "user_aborted", "output_limit"].includes(receipt.status as string)) this.scopedProcesses.delete(receipt.process);
+      else this.backgroundActivityUnverified = true;
+    }
+    if (process) {
+      if (Number.isSafeInteger(receipt.session_id) && (receipt.session_id as number) >= 0) {
+        this.nativeProcesses.add(receipt.session_id as number);
+      } else if (tool === "write_stdin" && Number.isSafeInteger(args.session_id) && Number.isSafeInteger(receipt.exit_code)) {
+        this.nativeProcesses.delete(args.session_id as number);
+      } else if (!Number.isSafeInteger(receipt.exit_code)) this.backgroundActivityUnverified = true;
+    }
+    if (spawn) {
+      if (typeof receipt.agent_id === "string") this.subagents.add(receipt.agent_id);
+      else this.backgroundActivityUnverified = true;
+    }
+    if (wait && receipt.status && typeof receipt.status === "object" && !Array.isArray(receipt.status)) {
+      for (const [id, status] of Object.entries(receipt.status)) {
+        if (["shutdown", "not_found"].includes(status as string)
+          || status && typeof status === "object" && ("completed" in status || "errored" in status)) this.subagents.delete(id);
+      }
+    }
+    if (wait && (!receipt.status || typeof receipt.status !== "object" || Array.isArray(receipt.status))) this.backgroundActivityUnverified = true;
+    if (close && typeof args.target === "string") {
+      const status = receipt.previous_status;
+      if (["shutdown", "not_found"].includes(status as string)
+        || status && typeof status === "object" && ("completed" in status || "errored" in status)) this.subagents.delete(args.target);
+    }
   }
 
   recordToolBatch(count: number, now = Date.now()): number {
@@ -282,6 +346,9 @@ export function assertChatGptTurnProgressSnapshot(
     || !finiteIndex(value.revision)
     || !finiteIndex(value.lastToolBatchRevision)
     || !finiteIndex(value.activeToolCalls)
+    || (value.activeNativeProcesses !== undefined && !finiteIndex(value.activeNativeProcesses))
+    || (value.activeSubagents !== undefined && !finiteIndex(value.activeSubagents))
+    || (value.backgroundActivityUnverified !== undefined && typeof value.backgroundActivityUnverified !== "boolean")
     || value.lastToolBatchRevision > value.revision
     || (value.lastProgressAt !== undefined && !Number.isFinite(value.lastProgressAt))
     || (value.compactionRequested !== undefined && typeof value.compactionRequested !== "boolean")
@@ -301,7 +368,7 @@ export function chatGptExternalProgressIsLive(
   if (!Number.isFinite(now) || !Number.isFinite(graceMs) || graceMs < 0) {
     throw new Error("ChatGPT external progress liveness inputs are invalid");
   }
-  return snapshot.activeToolCalls > 0
+  return chatGptExternalWorkBlocksRecovery(snapshot)
     || (snapshot.lastProgressAt !== undefined && now - snapshot.lastProgressAt < graceMs);
 }
 
@@ -310,4 +377,9 @@ export function chatGptExternalToolCallsAreInFlight(
   snapshot: ChatGptExternalTurnProgressSnapshot | undefined,
 ): boolean {
   return (snapshot?.activeToolCalls ?? 0) > 0;
+}
+
+export function chatGptExternalWorkBlocksRecovery(snapshot: ChatGptExternalTurnProgressSnapshot | undefined): boolean {
+  return (snapshot?.activeToolCalls ?? 0) > 0 || (snapshot?.activeNativeProcesses ?? 0) > 0
+    || (snapshot?.activeSubagents ?? 0) > 0 || snapshot?.backgroundActivityUnverified === true;
 }

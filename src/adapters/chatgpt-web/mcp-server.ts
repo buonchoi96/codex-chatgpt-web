@@ -845,11 +845,25 @@ export async function runChatGptMcpServer(options: {
     const semanticArguments = payload.semanticArguments ?? payload.arguments;
     const semanticInput = payload.requestedTool ? payload.semanticInput : payload.input;
     const failureMarker = payload.gatewayResult ? JSON.stringify({ __codex_native_failure_v1: randomBytes(24).toString("hex") }) : undefined;
+    const backgroundReceiptNonce = payload.gatewayResult ? randomBytes(24).toString("hex") : undefined;
+    const backgroundReceiptProgram = backgroundReceiptNonce ? [
+      "const receiptSource = result?.structuredContent?.data ?? result?.structuredContent ?? result;",
+      "const terminalStatus = value => typeof value === 'string' ? value : value && typeof value === 'object' ? ('completed' in value ? {completed:true} : 'errored' in value ? {errored:true} : null) : null;",
+      "const backgroundReceipt = {};",
+      "for (const key of ['session_id','exit_code','agent_id','process','status']) {",
+      "  const value = receiptSource?.[key];",
+      "  if (typeof value === 'string' || Number.isSafeInteger(value)) backgroundReceipt[key] = value;",
+      "}",
+      "if (receiptSource?.status && typeof receiptSource.status === 'object' && !Array.isArray(receiptSource.status)) backgroundReceipt.status = Object.fromEntries(Object.entries(receiptSource.status).slice(0,128).map(([id,value]) => [id,terminalStatus(value)]));",
+      "if (receiptSource && typeof receiptSource === 'object' && 'previous_status' in receiptSource) backgroundReceipt.previous_status = terminalStatus(receiptSource.previous_status);",
+      `text(${JSON.stringify(`codex-native-receipt:${backgroundReceiptNonce}:`)} + JSON.stringify(backgroundReceipt));`,
+    ].join("\n") : "";
     if (failureMarker && !payload.input?.endsWith(GATEWAY_FAILURE_LINE)) {
       throw new Error("Native gateway result framing is missing");
     }
     const nativeInput = failureMarker
       ? payload.input!.slice(0, -GATEWAY_FAILURE_LINE.length)
+        + backgroundReceiptProgram + "\n"
         + `if (result?.isError === true) text(${JSON.stringify(failureMarker)});`
       : payload.input;
     // A search/reset may change a deferred registry even when the outer descriptors stay equal.
@@ -867,6 +881,9 @@ export async function runChatGptMcpServer(options: {
         operationFingerprint: operationFingerprint(requestedTool, semanticArguments, semanticInput),
         registryGeneration: createHash("sha256").update(JSON.stringify(bound.tools)).digest("hex").slice(0, 12),
         ...(failureMarker ? { failureMarker } : {}),
+        ...(backgroundReceiptNonce ? { backgroundReceiptNonce,
+          backgroundArguments: Object.fromEntries(Object.entries(semanticArguments ?? {})
+            .filter(([key]) => ["session_id", "target", "process", "targets"].includes(key))) } : {}),
       }, timeoutMs, signal);
       return asMcpResult(response);
     } catch (error) {

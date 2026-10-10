@@ -3,20 +3,44 @@ const { createHash } = require("node:crypto");
 // Browser content never crosses this boundary: hash the owned transcript inside its renderer.
 // UI labels/picker controls are separately reconciled by the worker before every Send.
 const TRANSCRIPT_PROBE = `(async () => {
-  const selector = '[data-turn-key], [data-message-author-role="user"], [data-message-author-role="assistant"]';
-  const key = '__codexBridgeRetainedTranscriptV1';
+  const messageSelector = '[data-message-author-role="user"], [data-message-author-role="assistant"], [data-user-message-bubble], [data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]';
+  const selector = '[data-turn-key], [data-turn-id], [data-turn-id-container], ' + messageSelector;
+  const role = element => element.getAttribute('data-message-author-role')
+    ?? (element.matches('[data-user-message-bubble]') ? 'user' : 'assistant');
+  const identity = element => element.getAttribute('data-message-id') ?? element.getAttribute('data-turn-id')
+    ?? element.closest('[data-turn-id-container]')?.getAttribute('data-turn-id-container')
+    ?? element.closest('[data-turn-key]')?.getAttribute('data-turn-key');
+  const record = element => [role(element), identity(element), element.textContent];
+  const key = '__codexBridgeRetainedTranscriptV2';
   if (!globalThis[key]) {
-    const tracker = { revision: 0 };
+    const tracker = { revision: 0, seen: new Map() };
     const relevant = node => node && (node.nodeType === 1
       ? node.matches(selector) || node.closest(selector) || node.querySelector(selector)
       : node.parentElement?.closest(selector));
     tracker.update = records => {
-      if (records.some(record => record.type === 'attributes' || relevant(record.target)
-        || [...record.addedNodes, ...record.removedNodes].some(relevant))) tracker.revision++;
+      for (const mutation of records) {
+        if (mutation.type !== 'childList') {
+          if (relevant(mutation.target)) tracker.revision++;
+          continue;
+        }
+        // Identical messages can be virtualized/remounted. An unseen or changed logical
+        // message leaves permanent evidence even if it disappears before the next probe.
+        for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+          if (!relevant(node)) continue;
+          const messages = node.nodeType === 1
+            ? [...(node.matches(messageSelector) ? [node] : []), ...(node.querySelectorAll?.(messageSelector) ?? [])]
+            : [];
+          if (!messages.length) { tracker.revision++; continue; }
+          for (const message of messages) {
+            const value = record(message), id = JSON.stringify(value.slice(0, 2));
+            if (!value[1] || tracker.seen.get(id) !== JSON.stringify(value)) tracker.revision++;
+          }
+        }
+      }
     };
     tracker.observer = new MutationObserver(tracker.update);
     tracker.observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true,
-      attributes: true, attributeFilter: ['data-turn-key', 'data-message-author-role', 'data-message-id'] });
+      attributes: true, attributeFilter: ['data-turn-key', 'data-turn-id', 'data-turn-id-container', 'data-message-author-role', 'data-message-id'] });
     globalThis[key] = tracker;
   }
   const tracker = globalThis[key];
@@ -30,18 +54,17 @@ const TRANSCRIPT_PROBE = `(async () => {
     ...group.querySelectorAll('[data-user-message-bubble]'),
     ...group.querySelectorAll('[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]')
   ]) : [...document.querySelectorAll('[data-message-author-role="user"], [data-message-author-role="assistant"]')];
-  const role = element => element.getAttribute('data-message-author-role')
-    ?? (element.matches('[data-user-message-bubble]') ? 'user' : 'assistant');
   const last = messages.at(-1);
   if (!composer || running || !last || role(last) !== 'assistant') return null;
   const draft = composer.cloneNode(true);
   draft.querySelectorAll('[data-id^="plugin:"][data-keyword], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"], [data-inline-selection-pill-cursor-target]').forEach(element => element.remove());
   if ((draft.textContent ?? '').trim()) return null;
-  const transcript = JSON.stringify(messages.map(element => [role(element),
-    element.getAttribute('data-message-id') ?? element.closest('[data-turn-key]')?.getAttribute('data-turn-key'), element.textContent]));
+  const records = messages.map(record);
+  const transcript = JSON.stringify(records);
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(transcript));
   tracker.update(tracker.observer.takeRecords());
   if (revision !== tracker.revision) return null;
+  tracker.seen = new Map(records.filter(value => value[1]).map(value => [JSON.stringify(value.slice(0, 2)), JSON.stringify(value)]));
   return { url: location.href, document: performance.timeOrigin, count: messages.length, revision,
     hash: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') };
 })()`;
