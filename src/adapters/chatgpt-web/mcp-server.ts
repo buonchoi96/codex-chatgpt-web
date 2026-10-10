@@ -11,6 +11,7 @@ import {
 } from "./native-compaction-control";
 import { CODEX_OUTPUT_CONTROL_WIRE_NAME, submitNativeOutputControl } from "./native-output-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
+import { annotateNativeImageRelay, logNativeImageRelay } from "./native-image-relay";
 import { observeMcpToolCalls } from "./mcp-observation";
 import { classifyNativeOperation, operationFingerprint, splitIndependentInspections, type NativeOperationIntent } from "./native-operation";
 import { computerUseIntent, computerUseProgram, type ComputerUseOperation } from "./native-computer-use";
@@ -486,14 +487,16 @@ export function chatGptMcpInvocationTimeout(
 }
 
 function asMcpResult(value: BrokerToolResult) {
+  logNativeImageRelay("mcp_outbound", value);
+  const delivered = annotateNativeImageRelay(value);
   return {
-    content: value.content as never,
-    ...(value.structuredContent !== undefined && value.structuredContent !== null && typeof value.structuredContent === "object"
-      ? { structuredContent: value.structuredContent as Record<string, unknown> }
+    content: delivered.content as never,
+    ...(delivered.structuredContent !== undefined && delivered.structuredContent !== null && typeof delivered.structuredContent === "object"
+      ? { structuredContent: delivered.structuredContent as Record<string, unknown> }
       : {}),
-    ...(value.isError ? { isError: true } : {}),
-    ...(value._meta !== undefined && value._meta !== null && typeof value._meta === "object"
-      ? { _meta: value._meta as Record<string, unknown> }
+    ...(delivered.isError ? { isError: true } : {}),
+    ...(delivered._meta !== undefined && delivered._meta !== null && typeof delivered._meta === "object"
+      ? { _meta: delivered._meta as Record<string, unknown> }
       : {}),
   };
 }

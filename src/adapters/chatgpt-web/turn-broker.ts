@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { logNativeImageRelay } from "./native-image-relay";
 import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -851,6 +852,7 @@ export class TurnBroker implements TurnBrokerOwner {
         `[computer-use] trace=${channel.traceId} toolComplete tool=${invocation.request.wireName}`,
       );
     }
+    logNativeImageRelay("broker", result, callId);
     const diagnostic = brokerToolResultDiagnostic(invocation.request, result);
     if (diagnostic) {
       console.info(

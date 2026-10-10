@@ -26,6 +26,7 @@ import {
 import { namespacedToolName, type AdapterEvent, type CodexContentPart, type CodexParsedRequest, type CodexProviderConfig, type CodexToolResultMessage, type CodexUsage } from "../../types";
 import type { ProviderAdapter } from "../base";
 import { parseDataUrl } from "../image";
+import { logNativeImageRelay } from "./native-image-relay";
 import { showPublicReasoning } from "./visible-output-policy";
 import { ChatGptWebAdapterError } from "./adapter-error";
 import {
@@ -284,11 +285,13 @@ function brokerResult(
     ? message.content
     : message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
   const structured = structuredContent(text);
-  return {
+  const result: BrokerToolResult = {
     content,
     ...(structured !== undefined ? { structuredContent: structured } : {}),
     ...(message.isError ? { isError: true } : {}),
   };
+  logNativeImageRelay("codex_response", result, message.toolCallId);
+  return result;
 }
 
 const CODEX_AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

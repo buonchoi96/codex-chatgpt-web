@@ -283,3 +283,56 @@ test("cached connectors reach finite Computer Use through the existing stable ga
     expect(invalid.isError).toBe(true);
   });
 }, 30_000);
+
+const pngFixture = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==";
+const swiftObserveTool: CodexTool = {
+  name: "game_observe", namespace: "mcp__computer_use_swift",
+  description: "Read-only screenshot of owned game", parameters: { type: "object" },
+};
+
+test("direct Codex Native2 MCP result preserves a Swift image through broker and MCP return", async () => {
+  await harness([swiftObserveTool], async ({ client, broker, token }) => {
+    const pending = client.callTool({ name: "codex_tool_call", arguments: {
+      turn_token: token, wire_name: "mcp__computer_use_swift__game_observe", arguments: { session: "fixture" },
+    } });
+    const [request] = await broker.nextToolBatch(token);
+    expect(request?.wireName).toBe("mcp__computer_use_swift__game_observe");
+    const structuredContent = { ok: true, data: {
+      screenshot_content_index: 1, screenshot_image_bytes: Buffer.from(pngFixture, "base64").length,
+      screenshot_mime_type: "image/png",
+    } };
+    broker.completeTool(token, request!.callId, {
+      content: [
+        { type: "text", text: JSON.stringify(structuredContent) },
+        { type: "image", mimeType: "image/png", data: pngFixture },
+      ],
+      structuredContent,
+    });
+    const result = await pending;
+    expect(result.isError).not.toBe(true);
+    expect(result.content.filter(part => part.type === "image")).toEqual([
+      { type: "image", mimeType: "image/png", data: pngFixture },
+    ]);
+    expect(result.structuredContent).toMatchObject(structuredContent);
+  });
+}, 30_000);
+
+test("metadata-only Codex Native result warns without changing completed operation status", async () => {
+  await harness([swiftObserveTool], async ({ client, broker, token }) => {
+    const pending = client.callTool({ name: "codex_tool_call", arguments: {
+      turn_token: token, wire_name: "mcp__computer_use_swift__game_observe", arguments: { session: "fixture" },
+    } });
+    const [request] = await broker.nextToolBatch(token);
+    const structuredContent = { ok: true, data: { screenshot_content_index: 1, screenshot_mime_type: "image/png" } };
+    broker.completeTool(token, request!.callId, {
+      content: [{ type: "text", text: JSON.stringify(structuredContent) }],
+      structuredContent,
+    });
+    const result = await pending;
+    expect(result.isError).not.toBe(true);
+    expect(result.content.filter(part => part.type === "image")).toHaveLength(0);
+    expect(result.content.some(part => part.type === "text" &&
+      part.text.includes("model has NOT observed"))).toBe(true);
+    expect(result.structuredContent).toMatchObject(structuredContent);
+  });
+}, 30_000);
