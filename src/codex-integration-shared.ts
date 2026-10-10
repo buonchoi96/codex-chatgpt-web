@@ -84,6 +84,10 @@ export interface CodexIntegrationJournal extends RouteRecoveryState {
   format?: {
     lineEnding: "\n" | "\r\n" | "\r";
     trailingNewline: boolean;
+    /** Exact original trailing line terminators for reversible v10 setup. */
+    baselineTrailingEol?: string;
+    /** SHA-256 of the original config excluding trailing line terminators. */
+    baselineBodySha256?: string;
   };
 }
 
