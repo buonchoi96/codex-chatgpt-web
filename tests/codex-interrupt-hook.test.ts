@@ -102,9 +102,15 @@ test("reinstall recognizes a fully removed managed hook without touching foreign
     + JSON.stringify(installed.installed.stateKey) + "]\ntrusted_hash = "
     + JSON.stringify(installed.installed.trustedHash) + "\n";
   expect(codexInterruptHookProvablyAbsent(orphanedTrust, installed.installed)).toBe(false);
-  expect(recoverCodexInterruptHookAbsence(orphanedTrust, installed.installed)).toBe(without);
-  expect(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })).toBe(without);
-  const restored = Bun.TOML.parse(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })) as any;
+  const recovered = recoverCodexInterruptHookAbsence(orphanedTrust, installed.installed);
+  expect(recovered).toBeDefined();
+  // Removing a TOML table can leave an extra blank line; compare its semantic
+  // document rather than requiring a byte-identical newline layout.
+  expect(Bun.TOML.parse(recovered!)).toEqual(Bun.TOML.parse(without));
+  expect(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })).toBe(recovered);
+  expect(recovered).toContain('command = "foreign-interrupt"');
+  expect(recovered).toContain('trusted_hash = "sha256:foreign"');
+  const restored = Bun.TOML.parse(recovered!) as any;
   expect(restored.hooks.Interrupt).toEqual((Bun.TOML.parse(original) as any).hooks.Interrupt);
   expect(restored.hooks.state).toEqual((Bun.TOML.parse(original) as any).hooks.state);
 
