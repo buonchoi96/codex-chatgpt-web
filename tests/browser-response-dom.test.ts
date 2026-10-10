@@ -282,6 +282,34 @@ test("captured power response keeps its Markdown ledger through final rendering"
   expect(buffer.finish().markdown).toEndWith("STREAM\\_END\\_927");
 });
 
+test("completion-fenced response can replace a remounted DOM draft without a false stream conflict", () => {
+  const preview: ChatGptMarkdownSegment[] = [
+    { key: "preview", tag: "p", html: "<p>Verified progress.</p>", text: "Verified progress.", streamable: true },
+    { key: "pending", tag: "p", html: "<p>Pending result.</p>", text: "Pending result.", streamable: false },
+  ];
+  const completed: ChatGptMarkdownSegment[] = [
+    { key: "final-remount", tag: "p", html: "<p>Final.</p>", text: "Final.", streamable: false },
+    { key: "final-body", tag: "p", html: "<p>Correct final answer.</p>", text: "Correct final answer.", streamable: false },
+  ];
+
+  // A streaming response cannot retract text delivered before a renderer remount.
+  const streaming = new ChatGptMarkdownBuffer(undefined, 0, "stream");
+  expect(streaming.observe(preview, 0)).toBe("Verified progress.");
+  expect(streaming.observe(completed, 1)).toBe("");
+  expect(streaming.currentSnapshotIsConsistent()).toBeFalse();
+
+  // A completion-receipt-gated response has delivered nothing yet, so the last
+  // verified terminal DOM supersedes the earlier draft without replay or conflict.
+  const gated = new ChatGptMarkdownBuffer(undefined, 0, "complete");
+  expect(gated.observe(preview, 0)).toBe("");
+  expect(gated.observe(completed, 1)).toBe("");
+  expect(gated.currentSnapshotIsConsistent()).toBeTrue();
+  expect(gated.finish()).toEqual({
+    markdown: "Final.\n\nCorrect final answer.",
+    delta: "Final.\n\nCorrect final answer.",
+  });
+});
+
 test("reported code-block containers preserve code while their localized toolbar changes", async () => {
   // #631 supplied the finished structure: a generic DIV around
   // [data-markdown-copy="code-block"] > DIV > CODE, without a PRE.

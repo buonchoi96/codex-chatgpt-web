@@ -6745,14 +6745,18 @@ if (softRecoveryTracker.update({
       };
       const sentAt = Date.now();
       let visibleTrace = new ChatGptVisibleTraceTracker();
-      let markdownBuffer = new ChatGptMarkdownBuffer();
       const checkpointStream = turn.captureLunaCheckpoint
         ? new ChatGptLunaCheckpointStream()
         : undefined;
       const receiptRequired = turn.completionFence?.receiptReady !== undefined;
-      // Archive turns are buffered until terminal completion so an unreadable-ZIP marker can
-      // transparently switch to the TXT fallback without leaking transport text to Codex.
+      // Completion-fenced and archive turns have not emitted any final text to Codex.
+      // Keep a replaceable terminal DOM draft rather than committing intermediate blocks:
+      // ChatGPT can remount the final answer after native receipts and completion controls
+      // hydrate, invalidating otherwise legitimate earlier DOM keys/source positions.
+      // Ordinary live streams still keep the strict append-only consistency check.
       const deferFinalText = receiptRequired || Boolean(prepared.archive);
+      const markdownDelivery = deferFinalText ? "complete" : "stream";
+      let markdownBuffer = new ChatGptMarkdownBuffer(undefined, 750, markdownDelivery);
       let bufferedFinalDeltas: string[] = [];
       const emitMarkdownDelta = (delta: string): void => {
         const visible = checkpointStream ? checkpointStream.push(delta) : delta;
@@ -7164,7 +7168,7 @@ if (softRecoveryTracker.update({
             noProgressRecoveries: 0,
             progressRevision: 0,
           };
-          markdownBuffer = new ChatGptMarkdownBuffer();
+          markdownBuffer = new ChatGptMarkdownBuffer(undefined, 750, markdownDelivery);
           visibleTrace = new ChatGptVisibleTraceTracker();
           bufferedFinalDeltas = [];
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
