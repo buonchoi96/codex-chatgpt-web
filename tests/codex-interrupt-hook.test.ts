@@ -129,6 +129,47 @@ test("reinstall recognizes a fully removed managed hook without touching foreign
 });
 
 
+test("reinstalls a uniquely marked and trusted live hook when the runtime executable path changed", () => {
+  const original = [
+    'model = "gpt-6"',
+    "[mcp_servers.node_repl]",
+    'command = "keep-user-mcp"',
+    "[mcp_servers.node_repl.env]",
+    'KEEP = "verbatim"',
+    "",
+  ].join("\n");
+  const previousCommand = '"/opt/bridge-v1" "--home" "/fixture/live" "hook" "interrupt"';
+  const nextCommand = '"/opt/bridge-v2" "--home" "/fixture/live" "hook" "interrupt"';
+  const { text, installed } = installCodexInterruptHookCommand(original, "/fixture/config.toml", previousCommand);
+  const rebuilt = text
+    .replace(JSON.stringify(previousCommand), JSON.stringify(nextCommand))
+    .replace(installed.trustedHash, codexInterruptHookHash(nextCommand));
+  expect(rebuilt).not.toBe(text);
+  expect(codexInterruptHookProvablyAbsent(rebuilt, installed)).toBe(false);
+
+  // The hook still belongs to the same launcher home and has a fully valid
+  // current trust state. Only its executable changed across a hot rebuild.
+  const recovered = recoverCodexInterruptHookAbsence(rebuilt, installed);
+  expect(recovered).toBeDefined();
+  expect(Bun.TOML.parse(recovered!)).toEqual(Bun.TOML.parse(original));
+  expect(recovered).toContain('[mcp_servers.node_repl.env]\nKEEP = "verbatim"');
+  expect(restoreCodexInterruptHook(rebuilt, installed, { allowAbsent: true })).toBe(recovered);
+  const reinstalled = installCodexInterruptHookCommand(recovered!, "/fixture/config.toml", nextCommand);
+  verifyCodexInterruptHook(reinstalled.text, reinstalled.installed);
+
+  const differentHome = '"/opt/bridge-v2" "--home" "/fixture/installed" "hook" "interrupt"';
+  const foreign = rebuilt
+    .replace(JSON.stringify(nextCommand), JSON.stringify(differentHome))
+    .replace(codexInterruptHookHash(nextCommand), codexInterruptHookHash(differentHome));
+  const mismatchedHash = rebuilt.replace(codexInterruptHookHash(nextCommand), "sha256:" + "f".repeat(64));
+  const extraGroup = rebuilt + "\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = 'command'\ncommand = 'foreign-hook'\ntimeout = 3\n";
+  for (const unsafe of [foreign, mismatchedHash, extraGroup]) {
+    expect(recoverCodexInterruptHookAbsence(unsafe, installed)).toBeUndefined();
+    expect(() => restoreCodexInterruptHook(unsafe, installed, { allowAbsent: true }))
+      .toThrow("changed after setup");
+  }
+});
+
 test("trust-verified foreign Interrupt slot is preserved during explicit Reinstall", () => {
   const original = [
     'model = "gpt-6"',
