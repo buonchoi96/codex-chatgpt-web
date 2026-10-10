@@ -70,7 +70,7 @@ const fileSymlinksSupported = (() => {
   try {
     const target = join(root, "target.toml");
     const alias = join(root, "alias.toml");
-    writeFileSync(target, 'model = "example"\\n');
+    writeFileSync(target, 'model = "example"\n');
     try {
       symlinkSync(target, alias, "file");
     } catch (error) {
