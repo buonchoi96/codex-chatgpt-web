@@ -447,19 +447,28 @@ export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {
   assertJournalTargetsConfig(existing, getCodexConfigPath());
   if (!existsSync(existing.configPath)) throw new Error(`Codex config is missing: ${existing.configPath}`);
   const current = readFileSync(existing.configPath, "utf8");
+  let recoveredActiveHookBaseline: string | undefined;
   if (existing.version === 10 && existing.active) {
     try {
       verifyInstalledRoute(current, existing);
       return { changed: false, active: true };
     } catch (installedError) {
-      // Another managed codex-chatgpt-web owner (for example the installed launcher) may have
-      // cleanly restored this journal's baseline while the live process was not running. Recover
-      // only when the physical config proves that exact disconnected baseline; otherwise preserve
-      // the original fail-closed ownership error.
+      // A separately verified repair may have removed a stale Interrupt hook
+      // while retaining the active route and every unrelated Codex setting.
+      // Rebuild ONLY if the existing journal still proves the complete managed
+      // route and recoverCodexInterruptHookAbsence verifies the absent hook.
+      // Never adopt or discard a still-present hook belonging to another home.
       try {
-        verifyRestoredRoute(current, existing);
+        verifyManagedJournalState(current, existing, { allowAbsentHook: true });
+        recoveredActiveHookBaseline = restoreManagedRoute(current, existing, { allowAbsentHook: true });
       } catch {
-        throw installedError;
+        // Another managed owner might instead have restored the exact old route.
+        // Preserve fail-closed behavior if neither independent proof succeeds.
+        try {
+          verifyRestoredRoute(current, existing);
+        } catch {
+          throw installedError;
+        }
       }
     }
   }
@@ -469,9 +478,9 @@ export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {
     if (options.recoveryOnly && !existing.reconnectOnStartup) return { changed: false, active: false };
     baseline = current;
   } else if (existing.version === 10 && existing.active) {
-    // The active journal was stale, but the exact restored baseline was proven above. Reconnect
-    // directly from that baseline without trying to remove a hook that is no longer present.
-    baseline = current;
+    // The journal still owns the route and its hook was provably removed, or
+    // another owner has restored the disconnected baseline verbatim.
+    baseline = recoveredActiveHookBaseline ?? current;
   } else {
     verifyInstalledRoute(current, existing);
     baseline = restoreManagedRoute(current, existing);
