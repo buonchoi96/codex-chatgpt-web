@@ -722,7 +722,7 @@ function recoverSameHomeCodexInterruptHookDrift(
 ): string | undefined {
   if (codexInterruptHookHash(installed.command) !== installed.trustedHash
     || managedMarkerCount(text) !== 1
-    || text.split(MANAGED_INTERRUPT_HOOK_END).length - 1 !== 2) return undefined;
+    || text.split(MANAGED_INTERRUPT_HOOK_END).length - 1 !== 1) return undefined;
   let document: HookDocument;
   let ast: AST.TOMLProgram;
   try {
