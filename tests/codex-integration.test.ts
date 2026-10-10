@@ -174,6 +174,32 @@ describe("reversible native Codex route integration", () => {
     });
   });
 
+  test("restores baseline EOF spacing only when all nontrailing config bytes still match", () => {
+    for (const trailing of ["", "\n", "\n\n", "\r\n\r\n"]) {
+      const { codexHome } = fixture();
+      const path = join(codexHome, "config.toml");
+      const original = 'model = "gpt-6"\n[mcp_servers.keep]\ncommand = "user-mcp"' + trailing;
+      writeFileSync(path, original);
+      const journal = installCodexIntegration(nativeConfig("browser-only"));
+      expect(journal.format?.baselineTrailingEol).toBe(trailing);
+      const installed = readFileSync(path, "utf8");
+      writeFileSync(path, installed + "\n");
+      uninstallCodexIntegration();
+      expect(readFileSync(path, "utf8")).toBe(original);
+    }
+
+    const { codexHome } = fixture();
+    const path = join(codexHome, "config.toml");
+    writeFileSync(path, 'model = "gpt-6"\n[mcp_servers.keep]\ncommand = "user-mcp"\n');
+    installCodexIntegration(nativeConfig("browser-only"));
+    const installed = readFileSync(path, "utf8");
+    writeFileSync(path, installed.replace('model = "gpt-6"', 'model = "gpt-6" # user edited after setup') + "\n");
+    uninstallCodexIntegration();
+    const restored = readFileSync(path, "utf8");
+    expect(restored).toContain('model = "gpt-6" # user edited after setup');
+    expect((Bun.TOML.parse(restored) as any).mcp_servers.keep.command).toBe("user-mcp");
+  });
+
   test("Native Full Access owns danger-full-access plus never and restores the exact prior policy", () => {
     const { codexHome } = fixture();
     const configPath = join(codexHome, "config.toml");
