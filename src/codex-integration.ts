@@ -214,7 +214,7 @@ export function preflightCodexIntegration(
       return;
     }
     const baseline = managedJournalIsActive(existing)
-      ? restoreManagedRoute(currentText, existing, { allowAbsentHook: existing.version === 10 })
+      ? restoreManagedRoute(currentText, existing)
       : currentText;
     installConfiguredRoute(
       baseline,

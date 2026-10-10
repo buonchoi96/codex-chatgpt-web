@@ -309,8 +309,9 @@ test("direct Codex Native2 MCP result preserves a Swift image through broker and
       structuredContent,
     });
     const result = await pending;
+    const content = result.content as Array<{ type: string; text?: string; mimeType?: string; data?: string }>;
     expect(result.isError).not.toBe(true);
-    expect(result.content.filter(part => part.type === "image")).toEqual([
+    expect(content.filter(part => part.type === "image")).toEqual([
       { type: "image", mimeType: "image/png", data: pngFixture },
     ]);
     expect(result.structuredContent).toMatchObject(structuredContent);
@@ -330,9 +331,10 @@ test("metadata-only Codex Native result warns without changing completed operati
     });
     const result = await pending;
     expect(result.isError).not.toBe(true);
-    expect(result.content.filter(part => part.type === "image")).toHaveLength(0);
-    expect(result.content.some(part => part.type === "text" &&
-      part.text.includes("model has NOT observed"))).toBe(true);
+    const content = result.content as Array<{ type: string; text?: string }>;
+    expect(content.filter(part => part.type === "image")).toHaveLength(0);
+    expect(content.some(part => part.type === "text" &&
+      part.text?.includes("model has NOT observed"))).toBe(true);
     expect(result.structuredContent).toMatchObject(structuredContent);
   });
 }, 30_000);
