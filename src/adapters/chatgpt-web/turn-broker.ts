@@ -26,6 +26,7 @@ export interface BrokerToolRequest {
   arguments?: Record<string, unknown>;
   input?: string;
   requestedTool?: string;
+  requestedScreenshotFormat?: "png" | "jpeg";
   operationIntent?: NativeOperationIntent;
   registryGeneration?: string;
   backgroundReceiptNonce?: string;
@@ -236,6 +237,7 @@ interface BrokerRequest {
   expectedRevision?: number;
   contract?: "native" | "safe";
   requestedTool?: string;
+  requestedScreenshotFormat?: "png" | "jpeg";
   operationIntent?: NativeOperationIntent;
   operationFingerprint?: string;
   backgroundReceiptNonce?: string;
@@ -795,6 +797,14 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.finishDecision ??= invocation.perf?.start(surface);
     channel.toolCallsCompleted += 1;
     result = preserveNativeGatewayFailure(result, invocation.failureMarker);
+    if (invocation.request.requestedScreenshotFormat) {
+      // Never infer that the image arrived from its receipt. Retain only the
+      // encoding the model actually requested; no screenshot pixels are logged.
+      result = { ...result, _meta: {
+        ...(result._meta && typeof result._meta === "object" && !Array.isArray(result._meta) ? result._meta : {}),
+        nativeImageRequestedFormat: invocation.request.requestedScreenshotFormat,
+      } };
+    }
     const backgroundReceipt = nativeBackgroundReceipt(result.content, invocation.request.backgroundReceiptNonce);
     if (backgroundReceipt) {
       const prefix = `codex-native-receipt:${invocation.request.backgroundReceiptNonce}:`;
@@ -2020,6 +2030,8 @@ export class TurnBroker implements TurnBrokerOwner {
       ...(request.freeform === true ? { input: request.input ?? "" } : { arguments: request.arguments ?? {} }),
       ...(typeof request.requestedTool === "string" && /^[A-Za-z0-9_.-]{1,200}$/.test(request.requestedTool)
         ? { requestedTool: request.requestedTool } : {}),
+      ...(request.requestedScreenshotFormat === "png" || request.requestedScreenshotFormat === "jpeg"
+        ? { requestedScreenshotFormat: request.requestedScreenshotFormat } : {}),
       ...(sanitizedOperationIntent(request.operationIntent) ? { operationIntent: sanitizedOperationIntent(request.operationIntent) } : {}),
       ...(typeof request.registryGeneration === "string" && /^[a-f0-9]{12}$/.test(request.registryGeneration)
         ? { registryGeneration: request.registryGeneration } : {}),

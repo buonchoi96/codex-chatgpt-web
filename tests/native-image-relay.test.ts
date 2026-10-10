@@ -75,3 +75,37 @@ test("unrelated text-only tool results are unchanged", () => {
   expect(nativeImageRelayDiagnostic(value)).toBeUndefined();
   expect(annotateNativeImageRelay(value)).toBe(value);
 });
+
+test("JPEG requested while native declares PNG is a distinct safe diagnostic", () => {
+  const value = { ...receipt(), _meta: { nativeImageRequestedFormat: "jpeg" } };
+  expect(nativeImageRelayDiagnostic(value)).toMatchObject({
+    status: "missing",
+    image_items: 0,
+    requested_format: "jpeg",
+    requested_format_match: false,
+    declared_mime: "image/png",
+  });
+  const annotated = annotateNativeImageRelay(value);
+  const notice = (annotated.content.at(-1) as { text: string }).text;
+  expect(notice).toContain("requested jpeg, received image/png");
+  expect(notice).toContain("has NOT observed");
+  expect(annotateNativeImageRelay(annotated).content).toHaveLength(2);
+  expect(annotated.isError).not.toBe(true);
+
+  const image = { type: "image", mimeType: "image/png", data: png };
+  const withImage = { ...value, content: [...value.content, image] };
+  expect(nativeImageRelayDiagnostic(withImage)).toMatchObject({
+    status: "mismatch",
+    image_items: 1,
+    requested_format_match: false,
+  });
+  expect(withImage.content).toHaveLength(2);
+});
+
+test("matching JPEG hint is optional and cannot manufacture image contents", () => {
+  const value = { ...receipt({ screenshot_mime_type: "image/jpeg" }), _meta: { nativeImageRequestedFormat: "jpeg" } };
+  expect(nativeImageRelayDiagnostic(value)).toMatchObject({
+    status: "missing", image_items: 0, requested_format_match: true,
+  });
+  expect(annotateNativeImageRelay(value).content).toHaveLength(2);
+});

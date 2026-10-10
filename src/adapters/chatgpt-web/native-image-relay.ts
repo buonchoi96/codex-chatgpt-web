@@ -11,6 +11,8 @@ export interface NativeImageRelayDiagnostic {
   declared_mime?: string;
   declared_bytes?: number;
   sha256_match?: boolean;
+  requested_format?: "png" | "jpeg";
+  requested_format_match?: boolean;
   status: "delivered" | "missing" | "mismatch" | "skipped" | "unverified";
 }
 
@@ -76,6 +78,15 @@ export function nativeImageRelayDiagnostic(result: BrokerToolResult): NativeImag
     /^[0-9a-f]{64}$/i.test(screenshot.screenshot_sha256) ? screenshot.screenshot_sha256.toLowerCase() : undefined;
   const shaMatch = sha && images.length > 0 ? hashes.includes(sha) : undefined;
   const expectedMime = screenshot?.screenshot_mime_type;
+  // Compare the actual native encoding with the capture format requested by the caller.
+  const requestedFormat = object(result._meta) &&
+    (result._meta.nativeImageRequestedFormat === "png" || result._meta.nativeImageRequestedFormat === "jpeg")
+      ? result._meta.nativeImageRequestedFormat : undefined;
+  const requestedMime = requestedFormat === "jpeg" ? "image/jpeg"
+    : requestedFormat === "png" ? "image/png" : undefined;
+  const formatMatch = requestedMime === undefined ? undefined
+    : typeof expectedMime === "string" ? expectedMime === requestedMime
+    : images.length > 0 ? mimeTypes.every(mime => mime === requestedMime) : undefined;
   const mimeMismatch = images.length > 0 && typeof expectedMime === "string"
     && !mimeTypes.includes(expectedMime);
   const declaredBytes = screenshot?.screenshot_image_bytes;
@@ -83,7 +94,7 @@ export function nativeImageRelayDiagnostic(result: BrokerToolResult): NativeImag
     && total !== declaredBytes;
   const status = skipped && !expected && images.length === 0 ? "skipped"
     : expected && images.length === 0 ? "missing"
-    : images.length > 0 && (shaMatch === false || mimeMismatch || bytesMismatch || hashes.includes("invalid")) ? "mismatch"
+    : images.length > 0 && (shaMatch === false || mimeMismatch || bytesMismatch || formatMatch === false || hashes.includes("invalid")) ? "mismatch"
     : images.length > 0 && expected ? "delivered" : "unverified";
   return {
     ...(typeof envelope?.trace_id === "string" && /^[0-9a-f-]{36}$/i.test(envelope.trace_id)
@@ -95,6 +106,8 @@ export function nativeImageRelayDiagnostic(result: BrokerToolResult): NativeImag
     ...(typeof expectedMime === "string" && ["image/png","image/jpeg"].includes(expectedMime) ? { declared_mime: expectedMime } : {}),
     ...(Number.isSafeInteger(screenshot?.screenshot_image_bytes) ? { declared_bytes: screenshot!.screenshot_image_bytes as number } : {}),
     ...(shaMatch !== undefined ? { sha256_match: shaMatch } : {}),
+    ...(requestedFormat ? { requested_format: requestedFormat } : {}),
+    ...(formatMatch !== undefined ? { requested_format_match: formatMatch } : {}),
     status,
   };
 }
@@ -103,7 +116,11 @@ export function nativeImageRelayDiagnostic(result: BrokerToolResult): NativeImag
 export function annotateNativeImageRelay(result: BrokerToolResult): BrokerToolResult {
   const diagnostic = nativeImageRelayDiagnostic(result);
   if (!diagnostic || (diagnostic.status !== "missing" && diagnostic.status !== "mismatch")) return result;
-  const notice = diagnostic.status === "missing" ? MISSING_IMAGE_WARNING : INVALID_IMAGE_WARNING;
+  const received = diagnostic.declared_mime || diagnostic.mime_types.join(",") || "unknown";
+  const notice = (diagnostic.status === "missing" ? MISSING_IMAGE_WARNING : INVALID_IMAGE_WARNING)
+    + (diagnostic.requested_format_match === false
+      ? " [Native screenshot format mismatch: requested " + diagnostic.requested_format + ", received " + received + ".]"
+      : "");
   if (result.content.some(item => object(item) && item.type === "text" && item.text === notice)) return result;
   return {
     ...result,

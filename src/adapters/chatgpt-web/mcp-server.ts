@@ -476,6 +476,17 @@ function assertGatewayToolArguments(name: string, args: Record<string, unknown>)
   }
 }
 
+/** Observation-only metadata. This never mutates arguments sent to the native tool. */
+export function requestedNativeScreenshotFormat(
+  toolName: string,
+  args?: Record<string, unknown>,
+): "png" | "jpeg" | undefined {
+  if (!/(?:^|__)(?:game|desktop)[._](?:observe|execute_and_observe)$/.test(toolName)) return undefined;
+  const capture = /execute_and_observe$/.test(toolName) ? args?.observation : args;
+  if (!capture || typeof capture !== "object" || Array.isArray(capture)) return undefined;
+  const format = (capture as Record<string, unknown>).format;
+  return format === "jpeg" ? "jpeg" : format === undefined || format === "png" ? "png" : undefined;
+}
 export function chatGptMcpInvocationTimeout(
   environment: ChatGptTurnEnvironment & { expiresAt?: number },
   now = Date.now(),
@@ -846,6 +857,7 @@ export async function runChatGptMcpServer(options: {
     const callId = `call_${randomBytes(24).toString("base64url")}`;
     const requestedTool = payload.requestedTool ?? wireName(tool);
     const semanticArguments = payload.semanticArguments ?? payload.arguments;
+    const requestedScreenshotFormat = requestedNativeScreenshotFormat(requestedTool, semanticArguments);
     const semanticInput = payload.requestedTool ? payload.semanticInput : payload.input;
     const failureMarker = payload.gatewayResult ? JSON.stringify({ __codex_native_failure_v1: randomBytes(24).toString("hex") }) : undefined;
     const backgroundReceiptNonce = payload.gatewayResult ? randomBytes(24).toString("hex") : undefined;
@@ -880,6 +892,7 @@ export async function runChatGptMcpServer(options: {
         freeform: tool.freeform === true,
         ...(tool.freeform ? { input: nativeInput ?? "" } : { arguments: payload.arguments ?? {} }),
         requestedTool,
+        ...(requestedScreenshotFormat ? { requestedScreenshotFormat } : {}),
         operationIntent: payload.operationIntent ?? classifyNativeOperation(requestedTool, semanticArguments),
         operationFingerprint: operationFingerprint(requestedTool, semanticArguments, semanticInput),
         registryGeneration: createHash("sha256").update(JSON.stringify(bound.tools)).digest("hex").slice(0, 12),
