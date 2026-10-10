@@ -120,6 +120,7 @@ if (homeFlag !== -1 && !process.argv[homeFlag + 1]) {
             && suffix(currentCommand) !== null && suffix(currentCommand) === suffix(installed.command);
           output.actualCommandLooksLikeLifecycleHook = suffix(currentCommand) !== null;
           const productionHome = path.resolve(process.env.CODEX_WEB_GPT_PRODUCTION_HOME
+            || process.env.CODEX_CHATGPT_WEB_HOME
             || path.join(os.homedir(), ".codex-chatgpt-web"));
           const productionJournal = path.join(productionHome, "codex", "integration-journal.json");
           output.productionJournalPresent = productionHome !== home && fs.existsSync(productionJournal);
