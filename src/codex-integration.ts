@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { AppConfig } from "./config";
 import { getConfigPath, loadConfig, saveConfig, stripUtf8Bom } from "./config";
-import { installCodexInterruptHook, installCodexInterruptHookCommand, reclaimOrphanedCodexInterruptHook } from "./codex-interrupt-hook";
+import { installCodexInterruptHook, installCodexInterruptHookCommand, reclaimOrphanedCodexInterruptHook, recoverCodexInterruptHookAbsence } from "./codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   getCodexConfigPath,
@@ -459,6 +459,12 @@ export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {
       // route and recoverCodexInterruptHookAbsence verifies the absent hook.
       // Never adopt or discard a still-present hook belonging to another home.
       try {
+        // Do not use this recovery path for an intact hook, a different model
+        // provider, or any unproven ownership change.
+        if (recoverCodexInterruptHookAbsence(current, existing.interruptHook) === undefined) {
+          throw installedError;
+        }
+        assertBuiltinModelProvider(current);
         verifyManagedJournalState(current, existing, { allowAbsentHook: true });
         recoveredActiveHookBaseline = restoreManagedRoute(current, existing, { allowAbsentHook: true });
       } catch {
