@@ -706,13 +706,77 @@ function removeProvablyOrphanedCodexInterruptTrust(
   return codexInterruptHookProvablyAbsent(repaired, installed) ? repaired : undefined;
 }
 
+/**
+ * A source-runtime rebuild can change the launcher's executable while keeping
+ * its --home and hook lifecycle intent unchanged. Only reclaim such a drift when:
+ *  - there is exactly one hook and its exact trust slot, fully signed by Codex;
+ *  - both genuine TOML ownership comments survive;
+ *  - the command still targets the SAME launcher home as the saved journal.
+ *
+ * Different --home paths (e.g. installed versus dev:live), ambiguous hook
+ * groups or modified trust state stay fail-closed; they are not ours to remove.
+ */
+function recoverSameHomeCodexInterruptHookDrift(
+  text: string,
+  installed: InstalledCodexInterruptHook,
+): string | undefined {
+  if (codexInterruptHookHash(installed.command) !== installed.trustedHash
+    || managedMarkerCount(text) !== 1
+    || text.split(MANAGED_INTERRUPT_HOOK_END).length - 1 !== 2) return undefined;
+  let document: HookDocument;
+  let ast: AST.TOMLProgram;
+  try {
+    document = parseHookDocument(text);
+    ast = parseTOML(tomlAstSource(text), { tomlVersion: "1.0" });
+  } catch { return undefined; }
+  const markers = [MANAGED_INTERRUPT_HOOK_START, MANAGED_INTERRUPT_HOOK_END];
+  if (!markers.every(marker => ast.comments.filter(comment =>
+    text.slice(...comment.range) === marker).length === 1)) return undefined;
+  if (text.indexOf(MANAGED_INTERRUPT_HOOK_START) >= text.indexOf(MANAGED_INTERRUPT_HOOK_END)) return undefined;
+  const groups = document.hooks?.Interrupt;
+  const state = document.hooks?.state;
+  if (!Array.isArray(groups) || groups.length !== 1
+    || !state || typeof state !== "object" || Array.isArray(state)
+    || Object.keys(state).length !== 1 || !Object.hasOwn(state, installed.stateKey)
+    || installed.groupIndex !== 0) return undefined;
+  const group = normalizeExplicitDefaultAsync(groups[0]);
+  if (!group || typeof group !== "object" || Array.isArray(group)
+    || JSON.stringify(Object.keys(group).sort()) !== JSON.stringify(["hooks"])) return undefined;
+  const hooks = (group as { hooks?: unknown }).hooks;
+  if (!Array.isArray(hooks) || hooks.length !== 1) return undefined;
+  const hook = hooks[0];
+  if (!hook || typeof hook !== "object" || Array.isArray(hook)) return undefined;
+  const actual = hook as Record<string, unknown>;
+  if (JSON.stringify(Object.keys(actual).sort()) !== JSON.stringify(["command", "timeout", "type"])
+    || actual.type !== "command" || actual.timeout !== 3
+    || typeof actual.command !== "string") return undefined;
+  const trust = state[installed.stateKey];
+  if (!trust || typeof trust !== "object" || Array.isArray(trust)
+    || JSON.stringify(Object.keys(trust)) !== JSON.stringify(["trusted_hash"])
+    || (trust as Record<string, unknown>).trusted_hash !== codexInterruptHookHash(actual.command)) return undefined;
+
+  // Only the executable prefix may change. This exact quoted --home suffix
+  // avoids adopting the installed launcher's hook or an unrelated command.
+  const lifecycleSuffix = /(?:^|\s)((?:"--home"|'--home')\s+(?:"[^"\r\n]+"|'[^'\r\n]+')\s+(?:"hook"|'hook')\s+(?:"interrupt"|'interrupt'))\s*$/;
+  const oldSuffix = lifecycleSuffix.exec(installed.command)?.[1];
+  const newSuffix = lifecycleSuffix.exec(actual.command)?.[1];
+  if (!oldSuffix || !newSuffix || oldSuffix !== newSuffix) return undefined;
+  const path = installed.stateKey.replace(/:interrupt:\d+:0$/, "");
+  if (path === installed.stateKey) return undefined;
+  try {
+    const reclaimed = reclaimOrphanedCodexInterruptHook(text, path);
+    return reclaimed.reclaimed ? reclaimed.text : undefined;
+  } catch { return undefined; }
+}
+
 /** Non-mutating proof used by Setup preflight and journal selection. */
 export function recoverCodexInterruptHookAbsence(
   text: string,
   installed: InstalledCodexInterruptHook,
 ): string | undefined {
   if (codexInterruptHookProvablyAbsent(text, installed)) return text;
-  return removeProvablyOrphanedCodexInterruptTrust(text, installed);
+  return removeProvablyOrphanedCodexInterruptTrust(text, installed)
+    ?? recoverSameHomeCodexInterruptHookDrift(text, installed);
 }
 
 export function restoreCodexInterruptHook(
