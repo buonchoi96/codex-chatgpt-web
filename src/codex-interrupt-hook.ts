@@ -587,7 +587,11 @@ export function codexInterruptHookProvablyAbsent(
   if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
   const groups = hooks.Interrupt;
   if (groups !== undefined) {
-    if (!Array.isArray(groups)) return false;
+    if (!Array.isArray(groups) || groups.length === 0) return false;
+    // A group still occupying the launcher's original slot is ambiguous:
+    // its command may have been edited rather than the entire hook removed.
+    // Earlier foreign groups are safe only when the managed slot vanished.
+    if (groups.length > installed.groupIndex) return false;
     for (const group of groups) {
       if (!group || typeof group !== "object" || Array.isArray(group)) return false;
       const entries = (group as { hooks?: unknown }).hooks;
