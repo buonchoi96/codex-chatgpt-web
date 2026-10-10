@@ -11,6 +11,25 @@ export const MANAGED_INTERRUPT_HOOK_START =
 export const MANAGED_INTERRUPT_HOOK_END =
   "# End codex-chatgpt-web interrupt lifecycle hook.";
 
+/**
+ * Codex's TOML writer may materialize the implicit command-hook default
+ * `async = false`. The installed journal records that same default in the
+ * trusted hash, so this representation is semantically identical. Do not
+ * normalize `async = true` or any unknown field: those remain fail-closed.
+ */
+function normalizeExplicitDefaultAsync(group: unknown): unknown {
+  if (!group || typeof group !== "object" || Array.isArray(group)) return group;
+  const body = group as Record<string, unknown>;
+  const hooks = body.hooks;
+  if (!Array.isArray(hooks) || hooks.length !== 1) return group;
+  const hook = hooks[0];
+  if (!hook || typeof hook !== "object" || Array.isArray(hook)) return group;
+  if ((hook as Record<string, unknown>).async !== false) return group;
+  const normalizedHook = { ...(hook as Record<string, unknown>) };
+  delete normalizedHook.async;
+  return { ...body, hooks: [normalizedHook] };
+}
+
 function canonicalJson(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(canonicalJson);
@@ -260,7 +279,10 @@ export function reclaimOrphanedCodexInterruptHook(
       throw new Error("Codex config stale interrupt hook no longer matches the managed shape; refusing automatic repair");
     }
     const hook = hooks[0] as Record<string, unknown>;
-    if (JSON.stringify(Object.keys(hook).sort()) !== JSON.stringify(["command", "timeout", "type"])
+    const keys = JSON.stringify(Object.keys(hook).sort());
+    const plain = JSON.stringify(["command", "timeout", "type"]);
+    const explicitDefault = JSON.stringify(["async", "command", "timeout", "type"]);
+    if (!(keys === plain || (keys === explicitDefault && hook.async === false))
       || hook.type !== "command" || typeof hook.command !== "string" || !hook.command
       || hook.timeout !== 3) {
       throw new Error("Codex config stale interrupt hook contains unexpected fields; refusing automatic repair");
@@ -371,14 +393,14 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
 
   let effectiveGroupIndex = installed.groupIndex;
   let effectiveStateKey = installed.stateKey;
-  const installedPositionStillMatches = equal(groups[installed.groupIndex], expectedGroup)
+  const installedPositionStillMatches = equal(normalizeExplicitDefaultAsync(groups[installed.groupIndex]), expectedGroup)
     && equal(state[installed.stateKey], expectedState);
   if (!installedPositionStillMatches) {
     const stateKeyParts = interruptStateKeyParts(installed.stateKey);
     if (!stateKeyParts) throw changed();
 
     const matchingGroupIndices = groups
-      .map((group, index) => equal(group, expectedGroup) ? index : -1)
+      .map((group, index) => equal(normalizeExplicitDefaultAsync(group), expectedGroup) ? index : -1)
       .filter(index => index >= 0);
     const matchingStateKeys = Object.entries(state)
       .filter(([key, value]) => {
