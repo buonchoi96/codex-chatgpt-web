@@ -107,7 +107,7 @@ test("reinstall recognizes a fully removed managed hook without touching foreign
   // Removing a TOML table can leave an extra blank line; compare its semantic
   // document rather than requiring a byte-identical newline layout.
   expect(Bun.TOML.parse(recovered!)).toEqual(Bun.TOML.parse(without));
-  expect(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })).toBe(recovered);
+  expect(restoreCodexInterruptHook(orphanedTrust, installed.installed, { allowAbsent: true })).toBe(recovered!);
   expect(recovered).toContain('command = "foreign-interrupt"');
   expect(recovered).toContain('trusted_hash = "sha256:foreign"');
   const restored = Bun.TOML.parse(recovered!) as any;
@@ -153,7 +153,7 @@ test("reinstalls a uniquely marked and trusted live hook when the runtime execut
   expect(recovered).toBeDefined();
   expect(Bun.TOML.parse(recovered!)).toEqual(Bun.TOML.parse(original));
   expect(recovered).toContain('[mcp_servers.node_repl.env]\nKEEP = "verbatim"');
-  expect(restoreCodexInterruptHook(rebuilt, installed, { allowAbsent: true })).toBe(recovered);
+  expect(restoreCodexInterruptHook(rebuilt, installed, { allowAbsent: true })).toBe(recovered!);
   const reinstalled = installCodexInterruptHookCommand(recovered!, "/fixture/config.toml", nextCommand);
   verifyCodexInterruptHook(reinstalled.text, reinstalled.installed);
 
@@ -244,9 +244,9 @@ test("an exact orphaned launcher trust entry is removed without touching MCP tab
   expect(repaired).toBeDefined();
   expect(Bun.TOML.parse(repaired!)).toEqual(Bun.TOML.parse(original));
   expect(repaired).toContain('[mcp_servers.custom.env]\nPRIVATE_VALUE = "preserve-verbatim"');
-  expect(restoreCodexInterruptHook(orphan, installed.installed, { allowAbsent: true })).toBe(repaired);
+  expect(restoreCodexInterruptHook(orphan, installed.installed, { allowAbsent: true })).toBe(repaired!);
   const reinstalled = installCodexInterruptHookCommand(repaired!, "/fixture/config.toml", "launcher-hook");
-  expect(restoreCodexInterruptHook(reinstalled.text, reinstalled.installed)).toBe(repaired);
+  expect(restoreCodexInterruptHook(reinstalled.text, reinstalled.installed)).toBe(repaired!);
 
   for (const tampered of [
     orphan.replace(installed.installed.trustedHash, "sha256:" + "f".repeat(64)),
