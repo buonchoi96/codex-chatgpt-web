@@ -385,6 +385,29 @@ test("refuses to remove a modified or duplicated managed hook", () => {
     .toThrow("already contains");
 });
 
+test("native Codex may emit an explicit async=false default without changing managed hook ownership", () => {
+  const original = [
+    'model = "gpt-6"',
+    "[mcp_servers.node_repl]",
+    'command = "keep-user-mcp"',
+    "[mcp_servers.node_repl.env]",
+    'KEEP = "verbatim"',
+    "",
+  ].join("\n");
+  const { text, installed } = installCodexInterruptHookCommand(original, "/fixture/config.toml", "launcher-hook");
+  const native = text.replace(
+    `command = ${JSON.stringify(installed.command)}\ntimeout = 3`,
+    `command = ${JSON.stringify(installed.command)}\ntimeout = 3\nasync = false`,
+  );
+  expect(native).not.toBe(text);
+  verifyCodexInterruptHook(native, installed);
+  const restored = restoreCodexInterruptHook(native, installed);
+  expect(Bun.TOML.parse(restored)).toEqual(Bun.TOML.parse(original));
+  expect(restored).toContain('[mcp_servers.node_repl.env]\nKEEP = "verbatim"');
+  expect(() => restoreCodexInterruptHook(native.replace("async = false", "async = true"), installed))
+    .toThrow("changed after setup");
+});
+
 test("preserves native TOML editor tables inserted before the trailing hook comment", () => {
   for (const ending of ["\n", "\r\n"]) {
     const original = 'model = "gpt-5.6-sol"\n';
