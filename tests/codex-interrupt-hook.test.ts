@@ -170,6 +170,20 @@ test("reinstalls a uniquely marked and trusted live hook when the runtime execut
   }
 });
 
+test("same-home hook drift recovery supports Windows commands with spaces in paths", () => {
+  const original = 'model = "gpt-6"\n[mcp_servers.windows_tool]\ncommand = "preserve"\n';
+  const oldCommand = String.raw`"C:\Program Files\Codex Bridge\v1.exe" "--home" "C:\Users\Local User\.codex-chatgpt-web-live" "hook" "interrupt"`;
+  const newCommand = String.raw`"C:\Program Files\Codex Bridge\v2.exe" "--home" "C:\Users\Local User\.codex-chatgpt-web-live" "hook" "interrupt"`;
+  const installed = installCodexInterruptHookCommand(original, "/fixture/config.toml", oldCommand);
+  const changed = installed.text
+    .replace(JSON.stringify(oldCommand), JSON.stringify(newCommand))
+    .replace(installed.installed.trustedHash, codexInterruptHookHash(newCommand));
+  const recovered = recoverCodexInterruptHookAbsence(changed, installed.installed);
+  expect(recovered).toBeDefined();
+  expect(Bun.TOML.parse(recovered!)).toEqual(Bun.TOML.parse(original));
+  expect(recovered).toContain('[mcp_servers.windows_tool]\ncommand = "preserve"');
+});
+
 test("trust-verified foreign Interrupt slot is preserved during explicit Reinstall", () => {
   const original = [
     'model = "gpt-6"',
