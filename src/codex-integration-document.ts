@@ -10,6 +10,7 @@ import {
   MIN_COMPATIBILITY_V1_AGENT_DEPTH,
   getCodexConfigPath,
   managedAgentMaxDepthLine,
+  sha256,
 } from "./codex-integration-shared";
 import type {
   CodexIntegrationJournal,
@@ -258,9 +259,12 @@ export function assignments(lines: string[]): Record<ManagedAssignmentKey, Previ
 }
 
 export function textFormat(text: string): NonNullable<CodexIntegrationJournal["format"]> {
+  const baselineTrailingEol = /(?:\r\n|\n|\r)*$/.exec(text)?.[0] ?? "";
   return {
     lineEnding: text.includes("\r\n") ? "\r\n" : text.includes("\n") ? "\n" : text.includes("\r") ? "\r" : "\n",
-    trailingNewline: /(?:\r\n|\n|\r)$/.test(text),
+    trailingNewline: baselineTrailingEol.length > 0,
+    baselineTrailingEol,
+    baselineBodySha256: sha256(text.slice(0, text.length - baselineTrailingEol.length)),
   };
 }
 
