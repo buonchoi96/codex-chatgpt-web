@@ -167,7 +167,9 @@ test("manual and automatic compaction both normalize to the same compaction requ
       model,
       stream: false,
       client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) },
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "auto source" }] }],
+      input: [{ type: "message", role: "user", id: "msg_auto_compaction_source",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn_auto_compaction_parity" },
+        content: [{ type: "input_text", text: "auto source" }] }],
     }),
   }), config, factory);
   expect(automatic.status).toBe(200);
