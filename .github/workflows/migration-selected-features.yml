@@ -28,7 +28,7 @@ jobs:
           # Ascending original chronology; no unrelated Full Access, Native2 or archive changes.
           changes=(
             3f703cb5 f373fd8b 513cb318 6cac4942
-            d4d9267c 4977bac5 558a8669
+            d4d9267c 4977bac5
             e4faaeda cb152743 a1c83c04
             3759b9e6 e217c41e e30418ff 6fe555ef 02ecabff 93ff7097 79250934 d3cd6a3a
             e4e3345d 363fc768 1c7e1330 51a09041 6e0dafd2 102e6df5
