@@ -2940,12 +2940,13 @@ describe("ChatGPT outer-native harness v4", () => {
       const callStart = firstEvents.find((event): event is Extract<AdapterEvent, { type: "tool_call_start" }> => event.type === "tool_call_start");
       expect(callStart?.name).toBe("exec_command");
       expect(firstEvents.filter(event => event.type === "assistant_boundary")).toHaveLength(2);
-      expect(firstEvents.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
-        event.type === "text_delta" && event.phase === "commentary"
+      expect(firstEvents.filter((event): event is Extract<AdapterEvent, { type: "thinking_delta" }> => (
+        event.type === "thinking_delta"
       ))).toEqual([
-        { type: "text_delta", text: "Mapped the repository surface", phase: "commentary" },
-        { type: "text_delta", text: "Inspected the working directory", phase: "commentary" },
+        { type: "thinking_delta", thinking: "Mapped the repository surface" },
+        { type: "thinking_delta", thinking: "Inspected the working directory" },
       ]);
+      expect(firstEvents.filter(event => event.type === "text_delta" && event.phase === "commentary")).toEqual([]);
       const firstDone = firstEvents.at(-1) as Extract<AdapterEvent, { type: "done" }>;
       expect(firstDone).toMatchObject({ type: "done", stopReason: "tool_use", endTurn: false });
       expect(firstDone.usage?.estimated).toBe(true);
@@ -2953,9 +2954,13 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(Number.isFinite(firstDone.usage?.outputTokens)).toBe(true);
       const firstResponse = buildResponseJSON(firstEvents, "gpt-5.6-sol") as { output: Array<Record<string, unknown>>; usage: { total_tokens: number } };
       expect(firstResponse.usage.total_tokens).toBeGreaterThan(0);
-      expect(firstResponse.output.map(item => item.type)).toEqual(["message", "message", "function_call"]);
-      expect(firstResponse.output[0]).toMatchObject({ type: "message", role: "assistant", phase: "commentary" });
-      expect(firstResponse.output[1]).toMatchObject({ type: "message", role: "assistant", phase: "commentary" });
+      expect(firstResponse.output.map(item => item.type)).toEqual(["reasoning", "reasoning", "function_call"]);
+      expect(firstResponse.output[0]).toMatchObject({
+        type: "reasoning", summary: [{ type: "summary_text", text: "Mapped the repository surface" }],
+      });
+      expect(firstResponse.output[1]).toMatchObject({
+        type: "reasoning", summary: [{ type: "summary_text", text: "Inspected the working directory" }],
+      });
       expect(firstResponse.output[2]).toMatchObject({
         type: "function_call",
         call_id: callStart!.id,
@@ -3151,13 +3156,13 @@ describe("ChatGPT outer-native harness v4", () => {
       })).rejects.toMatchObject({ name: "AbortError" });
       await adapter.runTurn!(continuation, { headers: new Headers() }, event => finalEvents.push(event));
       expect(browserStarts).toBe(1);
-      expect(finalEvents.find((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
-        event.type === "text_delta" && event.phase === "commentary"
+      expect(finalEvents.find((event): event is Extract<AdapterEvent, { type: "thinking_delta" }> => (
+        event.type === "thinking_delta"
       ))).toEqual({
-        type: "text_delta",
-        text: "Pro received the native tool result",
-        phase: "commentary",
+        type: "thinking_delta",
+        thinking: "Pro received the native tool result",
       });
+      expect(finalEvents.some(event => event.type === "text_delta" && event.phase === "commentary")).toBeFalse();
       expect(finalEvents.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
         event.type === "text_delta" && event.phase === "final_answer"
       ))
