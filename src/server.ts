@@ -374,6 +374,10 @@ export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppCo
   parsed.options.reasoning = route.interactionMode === "automatic"
     ? route.adapterEffort
     : route.codexEffort;
+  // This bridge's automatic browser backend exposes only UI-visible reasoning
+  // summaries. Forward those summaries to Codex even when its client omits
+  // reasoning.summary; the manual/Zero Risk route retains the client setting.
+  if (route.interactionMode === "automatic") parsed.options.hideThinkingSummary = false;
   return route;
 }
 
