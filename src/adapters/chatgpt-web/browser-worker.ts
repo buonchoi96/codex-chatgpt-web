@@ -5755,6 +5755,8 @@ if (softRecoveryTracker.update({
           // progress. Mark them separately so the running watchdog can reset without treating
           // reconnect/status-control churn as model progress.
           activity: activitySummaryRoots.has(candidate),
+          reasoningSummary: kind === "commentary"
+            && candidate.closest('[data-testid^="cot-v5"]') !== null,
         }))
         .filter(block => block.text.length > 0)
         .forEach((block, index) => {
