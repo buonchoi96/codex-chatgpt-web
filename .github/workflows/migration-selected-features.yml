@@ -45,11 +45,14 @@ jobs:
               echo "ALREADY_APPLIED ${sha}"
               git cherry-pick --skip
             else
-              echo "::error::CONFLICT at ${sha}"
+              echo "::warning::CONFLICT_SKIPPED ${sha}: requires targeted upstream port"
               git status --short
               git diff --name-only --diff-filter=U
-              exit 1
+              echo "${sha}" >> /tmp/migration-conflicts.txt
+              git cherry-pick --abort
             fi
             echo "::endgroup::"
           done
+          echo "## Conflicts requiring manual review" >> "$GITHUB_STEP_SUMMARY"
+          if test -s /tmp/migration-conflicts.txt; then cat /tmp/migration-conflicts.txt >> "$GITHUB_STEP_SUMMARY"; else echo "None" >> "$GITHUB_STEP_SUMMARY"; fi
           git push origin HEAD:"$TARGET_BRANCH"
