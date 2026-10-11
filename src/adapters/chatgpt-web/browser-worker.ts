@@ -2383,9 +2383,11 @@ export class ChatGptVisibleTraceTracker {
     let statusSlot = 0;
     let commentarySlot = 0;
     for (const block of blocks) {
-      // Final-answer roots are carried by ChatGptMarkdownBuffer. Commentary roots are identified
-      // structurally by responseDomSnapshot before they reach this tracker.
-      if (block.kind === "answer") continue;
+      // Only a public reasoning-summary block enters the Thinking pane.
+      // Tool activity and generic status text remain observable for progress
+      // tracking but must not be represented as model reasoning.
+      if (block.kind === "answer" || block.reasoningSummary !== true
+        || block.activity === true || block.uiControl === true) continue;
       const index = block.kind === "status" ? statusSlot++ : commentarySlot++;
       const slot = block.key ? `${block.kind}:${block.key}` : `${block.kind}:${index}`;
       const stripped = block.text
