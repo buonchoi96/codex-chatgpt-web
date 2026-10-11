@@ -14,6 +14,24 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-package-smo
 const markerPath = path.join(scratch, "ready.json");
 const coreHome = path.join(scratch, "core-home");
 let macAppBundle;
+let windowsScratchDriveMapped = false;
+
+/**
+ * CI runners usually have no E: drive, while the customized NSIS installer
+ * deliberately defaults to E:\\Codex Web GPT\\App. Mount an isolated,
+ * throwaway E: test volume instead of changing the production installer
+ * path, and NEVER run the smoke installer against an existing real E: drive.
+ */
+function provisionWindowsSmokeDrive() {
+  if (fs.existsSync("E:\\")) {
+    throw new Error("Windows installer smoke requires an unused E: drive; refusing to modify an existing volume");
+  }
+  const volumeRoot = path.join(scratch, "windows-e-drive");
+  fs.mkdirSync(volumeRoot, { recursive: true });
+  run("subst.exe", ["E:", volumeRoot]);
+  windowsScratchDriveMapped = true;
+  if (!fs.existsSync("E:\\")) throw new Error("The isolated E: smoke drive was not mounted");
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -100,6 +118,7 @@ try {
     env.APPIMAGE_EXTRACT_AND_RUN = "1";
   } else if (process.platform === "win32") {
     const installer = artifact(/-win-x64\.exe$/, "Windows installer");
+    provisionWindowsSmokeDrive();
     run(installer, ["/S", "/currentuser"], { timeout: 120_000 });
     executable = path.join(windowsInstallLocation(), `${launcherManifest.build.productName}.exe`);
     command = executable;
@@ -154,6 +173,10 @@ try {
       run(launchServices, ["-gc"]);
     }
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    try {
+      if (windowsScratchDriveMapped) run("subst.exe", ["E:", "/D"]);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   }
 }
