@@ -827,6 +827,57 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
+const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN = /Message delivery timed out\\. Please try again\\./i;
+
+/** Error UI is not proof that an already-running model or MCP task has stopped. */
+export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<boolean> {
+  const alert = page.locator('[role="alert"]')
+    .filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN }).last();
+  if (await alert.isVisible().catch(() => false)) return true;
+  // Some ChatGPT deployments render the identical red banner without role="alert".
+  const plainBanner = page.locator('text="Message delivery timed out. Please try again."').last();
+  return plainBanner.isVisible().catch(() => false);
+}
+
+/** Begin the five-minute silence budget only after the delivery error becomes visible. */
+export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_GRACE_MS = 5 * 60_000;
+
+export class ChatGptMessageDeliveryTimeoutGrace {
+  private visibleSince?: number;
+  private lastSemanticAt?: number;
+  private lastSignature?: string;
+  update(state: {
+    alertVisible: boolean;
+    visibleText: string;
+    traceBlocks: readonly ChatGptVisibleTraceBlock[];
+    nativeLastProgressAt?: number;
+    nativeToolCallsInFlight: boolean;
+  }, now = Date.now()): boolean {
+    if (!state.alertVisible) {
+      this.visibleSince = undefined;
+      this.lastSemanticAt = undefined;
+      this.lastSignature = undefined;
+      return false;
+    }
+    if (this.visibleSince === undefined) this.visibleSince = now;
+    const signature = JSON.stringify([state.visibleText,
+      state.traceBlocks.filter(block => block.kind === "commentary" || block.activity === true)
+        .map(block => [block.kind, block.text, block.activity === true])]);
+    if (this.lastSignature !== signature) {
+      this.lastSignature = signature;
+      this.lastSemanticAt = now;
+    }
+    if (state.nativeLastProgressAt !== undefined
+      && state.nativeLastProgressAt > (this.lastSemanticAt ?? this.visibleSince)) {
+      this.lastSemanticAt = state.nativeLastProgressAt;
+    }
+    const last = Math.max(this.visibleSince, this.lastSemanticAt ?? this.visibleSince);
+    return !state.nativeToolCallsInFlight
+      && now - last >= CHATGPT_MESSAGE_DELIVERY_TIMEOUT_GRACE_MS;
+  }
+}
+
+
 // ChatGPT can reject an input with either HTTP 413 or a terminal error event inside HTTP 200 SSE.
 // Observe only browser-issued submissions from this owned page after Send is activated;
 // an old response, another tab, or a background endpoint cannot classify this turn.
@@ -5616,6 +5667,7 @@ export class ChatGptBrowserWorker {
         });
       };
       const domHealthTracker = new ChatGptTurnDomHealthTracker();
+      const deliveryTimeoutGrace = new ChatGptMessageDeliveryTimeoutGrace();
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
@@ -5709,7 +5761,8 @@ export class ChatGptBrowserWorker {
             continue;
           }
         }
-        if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
+        const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
+        if (!deliveryTimeoutVisible && snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
         if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
         // The page was read successfully, so the fault budget is genuinely consecutive even when
         // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
@@ -5732,7 +5785,19 @@ export class ChatGptBrowserWorker {
           Date.now(),
         );
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-        if (!snapshot.responsePresent && externalProgressLive) {
+        if (deliveryTimeoutGrace.update({
+          alertVisible: deliveryTimeoutVisible,
+          visibleText: snapshot.visibleText,
+          traceBlocks: snapshot.traceBlocks,
+          nativeLastProgressAt: externalProgressSnapshot?.lastProgressAt,
+          nativeToolCallsInFlight: externalToolCallsInFlight,
+        })) {
+          throw new ChatGptWebAdapterError(
+            "ChatGPT message delivery timed out and neither model output nor native-tool activity progressed for five minutes.",
+            { status: 503, errorType: "server_error", code: "message_delivery_stalled", retryable: true },
+          );
+        }
+        if (!snapshot.responsePresent && (externalProgressLive || deliveryTimeoutVisible)) {
           // Current-turn MCP activity proves that ChatGPT is still executing even if its renderer
           // temporarily cannot expose the response subtree. DOM remains authoritative for text and
           // completion; this only prevents a live turn from being misclassified as vanished.
@@ -5741,7 +5806,7 @@ export class ChatGptBrowserWorker {
           continue;
         }
         const stop = chatGptStopButton(page);
-        const running = await stop.isVisible().catch(() => false);
+        const running = deliveryTimeoutVisible || await stop.isVisible().catch(() => false);
         const responseStreamActive = generation.active();
         if (running || responseStreamActive) generation.progress();
         if (running) sawRunning = true;
