@@ -1,0 +1,55 @@
+name: Candidate cherry-pick (temporary)
+on:
+  push:
+    branches: [migration/upstream-6.1.8-plus-selected-features]
+    paths: [.github/workflows/migration-selected-features.yml]
+permissions:
+  contents: write
+concurrency:
+  group: candidate-cherry-pick
+  cancel-in-progress: false
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Cherry-pick four requested features onto upstream
+        shell: bash
+        env:
+          TARGET_BRANCH: migration/upstream-6.1.8-plus-selected-features
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin archive/custom-main-pre-upstream-2026-10-11
+          # Ascending original chronology; no unrelated Full Access, Native2 or archive changes.
+          changes=(
+            3f703cb5 f373fd8b 513cb318 6cac4942
+            1299f865 d4d9267c 4977bac5 558a8669
+            e4faaeda cb152743 a1c83c04
+            3759b9e6 e217c41e e30418ff 6fe555ef 02ecabff 93ff7097 79250934 d3cd6a3a
+            e4e3345d 363fc768 1c7e1330 51a09041 6e0dafd2 102e6df5
+            dc5a86a3 3e677ba2 6b6bd39b
+            0997a04f 68ec2234 dd7d2e11
+            0b327535 2a214809 72aa0eee c5978d4d
+            26e25f6e
+          )
+          for sha in "${changes[@]}"; do
+            echo "::group::Cherry-pick ${sha}"
+            if git cherry-pick -x "$sha"; then
+              echo "APPLIED ${sha}"
+            elif git diff --quiet && git diff --cached --quiet && test -f .git/CHERRY_PICK_HEAD; then
+              echo "ALREADY_APPLIED ${sha}"
+              git cherry-pick --skip
+            else
+              echo "::error::CONFLICT at ${sha}"
+              git status --short
+              git diff --name-only --diff-filter=U
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+          git push origin HEAD:"$TARGET_BRANCH"
