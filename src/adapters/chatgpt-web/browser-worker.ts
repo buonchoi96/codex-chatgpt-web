@@ -861,8 +861,8 @@ export class ChatGptMessageDeliveryTimeoutGrace {
     }
     if (this.visibleSince === undefined) this.visibleSince = now;
     const signature = JSON.stringify([state.visibleText,
-      state.traceBlocks.filter(block => block.kind === "commentary" || block.activity === true)
-        .map(block => [block.kind, block.text, block.activity === true])]);
+      state.traceBlocks.filter(block => block.kind === "commentary")
+        .map(block => [block.kind, block.text])]);
     if (this.lastSignature !== signature) {
       this.lastSignature = signature;
       this.lastSemanticAt = now;
