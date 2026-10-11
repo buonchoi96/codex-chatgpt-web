@@ -4211,7 +4211,7 @@ test("both response loops check explicit Stopped thinking before acknowledging f
   const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
   for (const method of ["private async waitForMultipartAcknowledgement(", "private async runBrowserTurn("]) {
     const loop = worker.slice(worker.indexOf(method));
-    const failure = loop.indexOf("if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();");
+    const failure = loop.indexOf("snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();");
     const acknowledgement = loop.indexOf(".acknowledgeToolBatch(", failure);
     expect(failure).toBeGreaterThan(0);
     expect(acknowledgement).toBeGreaterThan(failure);
