@@ -18,7 +18,7 @@ type Snapshot = {
   fullHtml: string;
   markdownSegments: ChatGptMarkdownSegment[];
   completionActionVisible: boolean;
-  traceBlocks: { kind: "answer" | "commentary" | "status"; text: string }[];
+  traceBlocks: { kind: "answer" | "commentary" | "status"; text: string; activity?: boolean; uiControl?: boolean; reasoningSummary?: boolean }[];
 };
 
 // Execute the production page callback, with only missing Domino browser APIs supplied.
@@ -104,9 +104,8 @@ test("captured activity summaries use the status stream and keep actual commenta
     .toEqual(["commentary 1", "commentary 2"]);
   const tracker = new ChatGptVisibleTraceTracker(0);
   const events = tracker.observe(result.traceBlocks, true);
-  expect(events.map(event => event.kind)).toEqual([
-    "reasoning", "commentary", ...Array(8).fill("reasoning"), "commentary", "reasoning",
-  ]);
+  // Activity summaries and ordinary commentary must not appear in Thinking.
+  expect(events).toEqual([]);
   expect(tracker.observe(result.traceBlocks, true)).toEqual([]);
 
   // Text, colour, and header placement do not determine the channel. The final
@@ -125,6 +124,29 @@ test("captured activity summaries use the status stream and keep actual commenta
       '<div style="display:none"><div data-markdown-text-style="assistant-message" data-markdown-text-tone="tertiary">')
     .replace('<p>status 1</p>\n</div>', '<p>status 1</p>\n</div></div>'));
   expect(hidden.traceBlocks.some(block => block.text === "status 1")).toBeFalse();
+});
+
+test("public reasoning summary streams but neighboring tool activity stays out of Thinking", async () => {
+  const marker = '<span hidden="" data-chatgpt-agent-turn-start="">\n</span>';
+  const html = powerActivityHtml.replace(marker, marker
+    + '<div data-testid="cot-v5-reasoning"><div data-markdown-text-style="assistant-message"><p>Public reasoning summary.</p></div></div>');
+  expect(html).not.toBe(powerActivityHtml);
+  const observed = await snapshot(html);
+  const publicSummary = observed.traceBlocks.find(block => block.text === "Public reasoning summary.");
+  expect(publicSummary).toMatchObject({ kind: "commentary", reasoningSummary: true });
+  const tracker = new ChatGptVisibleTraceTracker(0);
+  expect(tracker.observe(observed.traceBlocks, true))
+    .toEqual([{ kind: "reasoning", text: "Public reasoning summary." }]);
+  expect(tracker.observe(observed.traceBlocks, true)).toEqual([]);
+
+  const onlyActivity = new ChatGptVisibleTraceTracker(0);
+  expect(onlyActivity.observe([
+    { kind: "status", text: "Preparing visual testing", activity: true },
+    { kind: "status", text: "Reading files" },
+    { kind: "commentary", text: "Tool invocation progress" },
+    { kind: "status", text: "Thinking", reasoningSummary: true, uiControl: true },
+    { kind: "commentary", text: "Explicit public reasoning", reasoningSummary: true },
+  ], true)).toEqual([{ kind: "reasoning", text: "Explicit public reasoning" }]);
 });
 
 test("keeps an unfinished hyperlink buffered and detects changed destinations after delivery", async () => {
