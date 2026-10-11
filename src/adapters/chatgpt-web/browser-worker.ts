@@ -2414,12 +2414,10 @@ export class ChatGptVisibleTraceTracker {
       const previous = this.emittedTrace.get(slot);
       if (previous === text) continue;
       this.emittedTrace.set(slot, text);
-      const kind = block.kind === "commentary" ? "commentary" : "reasoning";
-
       if (previous && text.startsWith(previous)) {
-        output.push({ kind, text: text.slice(previous.length), continuation: true });
+        output.push({ kind: "reasoning", text: text.slice(previous.length), continuation: true });
       } else {
-        output.push({ kind, text });
+        output.push({ kind: "reasoning", text });
       }
     }
     return output;
