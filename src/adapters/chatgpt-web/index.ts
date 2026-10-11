@@ -373,7 +373,7 @@ function emitTraceEvents(trace: ChatGptTraceEvent[], emit: (event: AdapterEvent)
     // This is NOT a request to expose hidden chain-of-thought.
     if (!showPublicReasoning(event)) continue;
     if (!event.continuation) emit({ type: "assistant_boundary" });
-    emit({ type: "text_delta", text: event.text, phase: "commentary" });
+    emit({ type: "thinking_delta", thinking: event.text });
   }
 }
 
