@@ -2334,6 +2334,8 @@ export interface ChatGptVisibleTraceBlock {
   uiControl?: boolean;
   /** Public Activity-renderer summaries are semantic model progress, unlike status-control churn. */
   activity?: boolean;
+  /** Public reasoning summary marker supplied by the observed response UI. */
+  reasoningSummary?: boolean;
 }
 
 export interface ChatGptVisibleTraceEvent {
