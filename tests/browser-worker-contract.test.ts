@@ -4679,110 +4679,99 @@ test("browser stage diagnostics use safe bounded artifact names", () => {
   expect(browserDiagnosticCheckpoint("x".repeat(200))).toHaveLength(80);
 });
 
-test("visible DOM trace interleaves statuses and explicit intermediate commentary", () => {
+test("visible DOM trace includes explicit public reasoning but excludes tool statuses", () => {
   const tracker = new ChatGptVisibleTraceTracker(100);
   const initialBlocks = [
-    { kind: "status", text: "Reviewed architecture documentation" },
-    { kind: "commentary", text: "The implementation has a concrete state drift." },
+    { kind: "status", text: "Reviewed architecture documentation", activity: true },
+    { kind: "commentary", text: "The implementation has a concrete state drift.", reasoningSummary: true },
     { kind: "answer", text: "Final answer still streaming" },
   ] as const;
   expect(tracker.observe([...initialBlocks], false, 1_000)).toEqual([]);
   expect(tracker.observe([...initialBlocks], false, 1_100)).toEqual([
-    { kind: "reasoning", text: "Reviewed architecture documentation" },
-    { kind: "commentary", text: "The implementation has a concrete state drift." },
+    { kind: "reasoning", text: "The implementation has a concrete state drift." },
   ]);
-  const commentaryBlocks = [
-    { kind: "status", text: "Reviewed architecture documentation" },
-    { kind: "commentary", text: "The implementation has a concrete state drift." },
-    { kind: "status", text: "Inspecting runtime evidence" },
-    { kind: "commentary", text: "The browser DOM confirms the boundary." },
-    { kind: "answer", text: "Final answer still streaming" },
+  const next = [
+    ...initialBlocks,
+    { kind: "status", text: "Inspecting runtime evidence", activity: true },
+    { kind: "commentary", text: "The browser DOM confirms the boundary.", reasoningSummary: true },
   ] as const;
-  expect(tracker.observe([...commentaryBlocks], false, 1_200)).toEqual([]);
-  expect(tracker.observe([...commentaryBlocks], false, 1_300)).toEqual([
-    { kind: "reasoning", text: "Inspecting runtime evidence" },
-    { kind: "commentary", text: "The browser DOM confirms the boundary." },
+  expect(tracker.observe([...next], false, 1_200)).toEqual([]);
+  expect(tracker.observe([...next], false, 1_300)).toEqual([
+    { kind: "reasoning", text: "The browser DOM confirms the boundary." },
   ]);
-  expect(tracker.observe([
-    { kind: "answer", text: "Final answer complete" },
-  ], true)).toEqual([]);
+  expect(tracker.observe([{ kind: "answer", text: "Final answer complete" }], true)).toEqual([]);
 });
 
-test("visible DOM trace does not duplicate a phase after a transient DOM disappearance", () => {
+test("visible reasoning does not duplicate after a transient DOM disappearance", () => {
   const tracker = new ChatGptVisibleTraceTracker(100);
-  expect(tracker.observe([{ kind: "status", text: "Thinking" }], false, 1_000)).toEqual([]);
-  expect(tracker.observe([{ kind: "status", text: "Thinking" }], false, 1_100)).toEqual([
-    { kind: "reasoning", text: "Thinking" },
+  const summary = { kind: "status", text: "Thinking about the problem", reasoningSummary: true } as const;
+  expect(tracker.observe([summary], false, 1_000)).toEqual([]);
+  expect(tracker.observe([summary], false, 1_100)).toEqual([
+    { kind: "reasoning", text: "Thinking about the problem" },
   ]);
   expect(tracker.observe([], false, 1_150)).toEqual([]);
-  expect(tracker.observe([{ kind: "status", text: "Thinking" }], false, 1_300)).toEqual([]);
+  expect(tracker.observe([summary], false, 1_300)).toEqual([]);
 });
 
-test("streaming commentary resumes by delta after a transient DOM disappearance", () => {
+test("streaming public reasoning resumes by delta after transient DOM disappearance", () => {
   const tracker = new ChatGptVisibleTraceTracker(0);
-  expect(tracker.observe([{ kind: "commentary", text: "Checking sources" }], false, 1_000)).toEqual([
-    { kind: "commentary", text: "Checking sources" },
-  ]);
+  expect(tracker.observe([
+    { kind: "commentary", text: "Checking sources", reasoningSummary: true },
+  ], false, 1_000)).toEqual([{ kind: "reasoning", text: "Checking sources" }]);
   expect(tracker.observe([], false, 1_010)).toEqual([]);
   expect(tracker.observe([
-    { kind: "commentary", text: "Checking sources and dates" },
-  ], false, 1_020)).toEqual([
-    { kind: "commentary", text: " and dates", continuation: true },
-  ]);
+    { kind: "commentary", text: "Checking sources and dates", reasoningSummary: true },
+  ], false, 1_020)).toEqual([{ kind: "reasoning", text: " and dates", continuation: true }]);
 });
 
-test("visible DOM trace emits a short-lived reasoning label on its first observation", () => {
+test("visible DOM trace ignores unmarked tool labels but emits explicit public reasoning", () => {
   const tracker = new ChatGptVisibleTraceTracker(0);
   expect(tracker.observe([
     { kind: "status", text: "Binding Codex turn context" },
-  ], false, 1_000)).toEqual([
-    { kind: "reasoning", text: "Binding Codex turn context" },
-  ]);
+    { kind: "commentary", text: "Analyzing the request", reasoningSummary: true },
+  ], false, 1_000)).toEqual([{ kind: "reasoning", text: "Analyzing the request" }]);
 });
 
-test("completed-turn evidence flushes a short-lived reasoning label immediately", () => {
+test("completed-turn evidence flushes a short-lived public reasoning summary immediately", () => {
   const tracker = new ChatGptVisibleTraceTracker(10_000);
   expect(tracker.observe([
-    { kind: "status", text: "Reviewing ChatGPT Web Prompt and State Handling" },
-  ], true, 1_000)).toEqual([
-    { kind: "reasoning", text: "Reviewing ChatGPT Web Prompt and State Handling" },
-  ]);
+    { kind: "status", text: "Reviewing the request", reasoningSummary: true },
+  ], true, 1_000)).toEqual([{ kind: "reasoning", text: "Reviewing the request" }]);
 });
 
-test("a structurally completed trailing Pro commentary does not wait for another parsed trace block", () => {
+test("a structurally completed trailing public reasoning paragraph requires no next block", () => {
   const tracker = new ChatGptVisibleTraceTracker(100);
   const commentary = [{
     kind: "commentary",
     text: "The tracked worktree is clean; I’m preserving the untracked user artifacts.",
     complete: true,
+    reasoningSummary: true,
   }] as const;
   expect(tracker.observe([...commentary], false, 1_000)).toEqual([]);
   expect(tracker.observe([...commentary], false, 1_100)).toEqual([{
-    kind: "commentary",
+    kind: "reasoning",
     text: "The tracked worktree is clean; I’m preserving the untracked user artifacts.",
   }]);
 });
 
-test("visible DOM trace emits one complete commentary paragraph before the next action", () => {
+test("public reasoning emits a completed paragraph while tool activity stays silent", () => {
   const tracker = new ChatGptVisibleTraceTracker(100);
   const initial = [
-    { kind: "commentary", text: "I’m reading", complete: false },
+    { kind: "commentary", text: "I’m reading", complete: false, reasoningSummary: true },
   ] as const;
   expect(tracker.observe([...initial], false, 1_000)).toEqual([]);
   const expanded = [
-    { kind: "commentary", text: "I’m reading the repository’s mandatory architecture", complete: false },
+    { kind: "commentary", text: "I’m reading the repository’s mandatory architecture", complete: false, reasoningSummary: true },
   ] as const;
   expect(tracker.observe([...expanded], false, 1_150)).toEqual([]);
   const completed = [
-    { kind: "commentary", text: "I’m reading the repository’s mandatory architecture", complete: true },
-    { kind: "status", text: "Read context file contents" },
+    { kind: "commentary", text: "I’m reading the repository’s mandatory architecture", complete: true, reasoningSummary: true },
+    { kind: "status", text: "Read context file contents", activity: true },
   ] as const;
   expect(tracker.observe([...completed], false, 1_250)).toEqual([
-    { kind: "commentary", text: "I’m reading the repository’s mandatory architecture" },
+    { kind: "reasoning", text: "I’m reading the repository’s mandatory architecture" },
   ]);
-  expect(tracker.observe([...completed], false, 1_350)).toEqual([
-    { kind: "reasoning", text: "Read context file contents" },
-  ]);
+  expect(tracker.observe([...completed], false, 1_350)).toEqual([]);
   expect(tracker.observe([...completed], false, 1_450)).toEqual([]);
 });
 
@@ -4837,35 +4826,33 @@ test("stopped-thinking detection recognizes localized UI without matching respon
   expect(stopped('<button>Stop thinking</button>')).toBeFalse();
 });
 
-test("visible DOM trace keeps a complete action phrase instead of a nested count", () => {
+test("visible DOM trace excludes nested tool action counters from Thinking", () => {
   expect(new ChatGptVisibleTraceTracker(0).observe([
-    { kind: "status", text: "Searched\n5\nsites" },
-  ], false)).toEqual([
-    { kind: "reasoning", text: "Searched 5 sites" },
-  ]);
+    { kind: "status", text: "Searched\n5\nsites", activity: true },
+  ], false)).toEqual([]);
 });
 
 test("visible DOM trace waits out animated Pro fragments and appends genuine growth", () => {
   const tracker = new ChatGptVisibleTraceTracker(100);
-  expect(tracker.observe([{ kind: "status", text: "I" }], false, 1_000)).toEqual([]);
-  expect(tracker.observe([{ kind: "status", text: "I’m" }], false, 1_025)).toEqual([]);
-  expect(tracker.observe([{ kind: "status", text: "’m seeking" }], false, 1_050)).toEqual([]);
-  expect(tracker.observe([{ kind: "status", text: "a concrete stack" }], false, 1_075)).toEqual([]);
+  expect(tracker.observe([{ kind: "status", reasoningSummary: true, text: "I" }], false, 1_000)).toEqual([]);
+  expect(tracker.observe([{ kind: "status", reasoningSummary: true, text: "I’m" }], false, 1_025)).toEqual([]);
+  expect(tracker.observe([{ kind: "status", reasoningSummary: true, text: "’m seeking" }], false, 1_050)).toEqual([]);
+  expect(tracker.observe([{ kind: "status", reasoningSummary: true, text: "a concrete stack" }], false, 1_075)).toEqual([]);
   expect(tracker.observe([
-    { kind: "status", text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity" },
+    { kind: "status", reasoningSummary: true, text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity" },
   ], false, 1_100)).toEqual([]);
   expect(tracker.observe([
-    { kind: "status", text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity" },
+    { kind: "status", reasoningSummary: true, text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity" },
   ], false, 1_200)).toEqual([{
     kind: "reasoning",
     text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity",
   }]);
 
   expect(tracker.observe([
-    { kind: "status", text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity, including validation" },
+    { kind: "status", reasoningSummary: true, text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity, including validation" },
   ], false, 1_250)).toEqual([]);
   expect(tracker.observe([
-    { kind: "status", text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity, including validation" },
+    { kind: "status", reasoningSummary: true, text: "I’m seeking a concrete stack to automate dump.cs → RVA → Ghidra → rewrite → Unity, including validation" },
   ], false, 1_350)).toEqual([{
     kind: "reasoning",
     text: ", including validation",
