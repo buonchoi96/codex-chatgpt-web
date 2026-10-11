@@ -25,9 +25,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin archive/custom-main-pre-upstream-2026-10-11
-          # Ascending original chronology; no unrelated Full Access, Native2 or archive changes.
+          # Apply E: drive runtime and installer code without authoring workflow files from Actions.
+          # The standalone Windows workflow is installed later using the GitHub connector.
+          for sha in 3f703cb5 f373fd8b 513cb318 6cac4942; do
+            git cherry-pick --no-commit "$sha"
+          done
+          git rm -f --ignore-unmatch .github/workflows/build-fresh-e-drive-win.yml
+          git commit -m "port(win): E drive launcher and installer defaults from 3f703cb5–6cac4942"
+          # Remaining legacy commits are cherry-picked individually when safe.
           changes=(
-            3f703cb5 f373fd8b 513cb318 6cac4942
             d4d9267c 4977bac5
             e4faaeda
             3759b9e6 e217c41e e30418ff 6fe555ef 02ecabff 93ff7097 79250934 d3cd6a3a
@@ -35,7 +41,6 @@ jobs:
             dc5a86a3 3e677ba2 6b6bd39b
             0997a04f 68ec2234 dd7d2e11
             0b327535 2a214809 72aa0eee c5978d4d
-            26e25f6e
           )
           for sha in "${changes[@]}"; do
             echo "::group::Cherry-pick ${sha}"
