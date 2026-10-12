@@ -441,7 +441,6 @@ export function createChatGptWebAdapter(
     const conversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
       && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || experimentalBiggerContext)
-      && (mode.localTools || (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && experimentalBiggerContext))
       && retainedLauncherDescriptor
       ? chatGptConversationKey(checkpointInput.parsed, executionNamespace)
       : undefined;

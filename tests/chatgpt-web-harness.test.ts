@@ -369,8 +369,10 @@ describe("ChatGPT outer-native harness v4", () => {
   });
 
   test.each([
-    [false, false], [true, false], [false, true], [true, true],
-  ])("sequential native messages honor fresh conversation=%s and Luna Bigger Context=%s", async (freshConversation, luna) => {
+    [false, false, "thread", true], [true, false, "thread", true],
+    [false, true, "thread", true], [true, true, "thread", true],
+    [false, false, "prompt-cache-only", true], [false, false, "thread", false],
+  ])("sequential native messages honor fresh conversation=%s, Luna Bigger Context=%s, identity=%s, local tools=%s", async (freshConversation, luna, identityMode, localTools) => {
     const socketPath = brokerTestEndpoint(`cgw-retained-messages-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -380,7 +382,7 @@ describe("ChatGPT outer-native harness v4", () => {
         browserHostDescriptorPath: join(tempRoot, "retained-launcher.json"),
         experimentalFreshConversationPerTurn: freshConversation,
         brokerSocketPath: socketPath,
-        localToolsEnabled: true,
+        localToolsEnabled: localTools,
         solAvailable: !luna,
         experimentalBiggerContext: luna,
         extraHighAvailable: true, proAvailable: true,
@@ -402,8 +404,10 @@ describe("ChatGPT outer-native harness v4", () => {
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);
       const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
-      if (!token) throw new Error("retained message prompt has no current turn token");
-      tokens.push(token);
+      if (localTools) {
+        if (!token) throw new Error("retained message prompt has no current turn token");
+        tokens.push(token);
+      }
       prepared.release();
       browserMessages += 1;
       const answer = browserMessages === 1 ? "First retained answer" : "Second retained answer";
@@ -446,6 +450,15 @@ describe("ChatGPT outer-native harness v4", () => {
         },
       ],
     };
+    if (identityMode === "prompt-cache-only") {
+      for (const request of [first, second]) {
+        const body = request._rawBody as { client_metadata: Record<string, unknown> };
+        const key = "x-codex-turn-metadata";
+        const metadata = JSON.parse(body.client_metadata[key] as string) as Record<string, unknown>;
+        delete metadata.thread_id;
+        body.client_metadata[key] = JSON.stringify(metadata);
+      }
+    }
 
     try {
       const adapter = createChatGptWebAdapter(provider);
@@ -455,8 +468,9 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(browserMessages).toBe(2);
       expect(conversationKeys[0]).toBe(freshConversation
         ? undefined : chatGptConversationKey(first, chatGptWebExecutionNamespace(provider))!);
+      if (!freshConversation) expect(conversationKeys[0]).toBeDefined();
       expect(conversationKeys[1]).toBe(conversationKeys[0]);
-      expect(tokens[1]).not.toBe(tokens[0]);
+      if (localTools) expect(tokens[1]).not.toBe(tokens[0]);
       expect(preparedPrompts[0]).toContain("Inspect the project");
       expect(preparedPrompts[1]).toContain("Continue in the same repository");
       if (freshConversation) {
