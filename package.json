@@ -37,6 +37,7 @@
     "build": "bun run scripts/build-runtime-bundle.ts",
     "smoke": "bun run scripts/smoke-release.ts dist/runtime",
     "smoke:codex": "bun run scripts/smoke-codex-catalog.ts",
+    "smoke:backend-image": "bun run scripts/smoke-backend-image.ts",
     "smoke:cancel": "bun run scripts/smoke-codex-cancel.ts",
     "smoke:interrupt": "bun run scripts/smoke-codex-interrupt.ts",
     "smoke:subagents": "bun run scripts/smoke-codex-subagents.ts --v1 && bun run scripts/smoke-codex-subagents.ts --v2",
