@@ -16,6 +16,7 @@ interface RunMessage {
   id: string;
   config: {
     appName: string;
+    expectedConnectorTunnelId?: string;
     browserHostDescriptorPath: string;
     browserDiagnosticsPath?: string;
     turnTimeoutMs: number;
@@ -44,6 +45,7 @@ interface VerifyMessage {
   id: string;
   config: {
     appName: string;
+    expectedConnectorTunnelId?: string;
     browserHostDescriptorPath: string;
   };
 }
@@ -191,6 +193,7 @@ async function run(message: RunMessage): Promise<void> {
     baseUrl: "https://chatgpt.com",
     chatgptWeb: {
       appName: message.config.appName,
+      expectedConnectorTunnelId: message.config.expectedConnectorTunnelId,
       browserHost: "launcher",
       browserHostDescriptorPath: message.config.browserHostDescriptorPath,
       browserDiagnosticsPath: message.config.browserDiagnosticsPath,
@@ -368,7 +371,10 @@ function maintenanceWorker(message: MaintenanceMessage): ChatGptBrowserWorker {
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
     baseUrl: "https://chatgpt.com",
-    chatgptWeb: { appName, browserHost: "launcher", browserHostDescriptorPath },
+    chatgptWeb: {
+      appName, browserHost: "launcher", browserHostDescriptorPath,
+      expectedConnectorTunnelId: message.config.expectedConnectorTunnelId,
+    },
   };
   return ChatGptBrowserWorker.forProvider(provider);
 }

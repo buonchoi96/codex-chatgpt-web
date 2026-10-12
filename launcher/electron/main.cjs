@@ -739,7 +739,9 @@ function registerIpc({ logger, stateStore }) {
     }
     try {
       publishOperation({ name: operationName, status: "running", message: "Checking ChatGPT connector" });
-      await browserHost.verifyConnector(runtimeHost.mcpConnectorName());
+      await browserHost.verifyConnector(
+        runtimeHost.mcpConnectorName(), runtimeHost.runtimeConfigSnapshot().config?.tunnel?.tunnelId,
+      );
       const state = stateStore.update({ mcpSetupComplete: true });
       send("launcher:state-changed", state);
       const successMessage = IS_DEV_PROFILE

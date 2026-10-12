@@ -1433,7 +1433,7 @@ test("selected connector identity does not depend on its visible pill text", asy
   const { createDocument } = require("@mixmark-io/domino");
   const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
   worker.config = { appName: "Codex Native2" };
-  const selected = async (html: string) => {
+  const selected = async (html: string, expectedConnectorId?: string) => {
     const document = createDocument(`<div id="composer">${html}</div>`);
     const composer = {
       locator: (selector: string) => ({
@@ -1446,7 +1446,7 @@ test("selected connector identity does not depend on its visible pill text", asy
         }),
       }),
     };
-    return worker.connectorIsSelected(composer);
+    return worker.connectorIsSelected(composer, undefined, expectedConnectorId);
   };
   const pill = '<span data-id="plugin:configured" data-keyword="Codex Native2">表示名</span>';
   expect(await selected(pill)).toBeTrue();
@@ -1460,6 +1460,10 @@ test("selected connector identity does not depend on its visible pill text", asy
   expect(await selected(powerPill.replace('contenteditable="false"', 'contenteditable="true"'))).toBeFalse();
   expect(await selected(powerPill.replace('app-mention-display-name="Codex Native2"', 'app-mention-display-name="Other"'))).toBeFalse();
   await expect(selected(pill + powerPill)).rejects.toThrow("duplicate");
+  expect(await selected(pill, "configured")).toBeTrue();
+  expect(await selected(powerPill, "configured")).toBeTrue();
+  expect(await selected(pill, "replacement")).toBeFalse();
+  expect(await selected(powerPill, "replacement")).toBeFalse();
 });
 
 test("connector selection re-resolves the active composer after ChatGPT replaces it", async () => {
@@ -1869,6 +1873,7 @@ test("successful connector verification clears the proven selection before relea
   const diagnosticsRoot = mkdtempSync(join(tmpdir(), "cgw-connector-verification-success-"));
   const calls: string[] = [];
   const page = {
+    screenshot: async () => { throw new Error("synthetic screenshot unavailable"); },
     evaluate: async () => ({
       location: { origin: "https://chatgpt.com", pathSegments: 0, temporaryChat: true },
       surfaceBound: true,

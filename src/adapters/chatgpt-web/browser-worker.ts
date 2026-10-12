@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { observeChatGptAttachmentUploads } from "./attachment-upload";
+import { assertChatGptConnectorRoute } from "./connector-routing";
 import { chatGptResponseStructureLogEntries, chatGptResponseStructures } from "./browser-response-structure";
 import { BrowserDiagnosticHistory } from "./browser-diagnostic-history";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
@@ -1505,6 +1506,7 @@ interface ChatGptSubmissionDomCache {
 
 export interface ResolvedBrowserConfig {
   appName: string;
+  expectedConnectorTunnelId?: string;
   browserHost: "managed-chrome" | "launcher";
   browserHostDescriptorPath?: string;
   browserHelperScriptPath?: string;
@@ -2233,6 +2235,10 @@ class ChatGptBrowserDiagnostics {
 export function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBrowserConfig {
   const configured = provider.chatgptWeb ?? {};
   const appName = configured.appName?.trim() || CHATGPT_CONNECTOR_NAME;
+  const expectedConnectorTunnelId = configured.expectedConnectorTunnelId;
+  if (expectedConnectorTunnelId !== undefined && !/^tunnel_[a-f0-9]{32}$/.test(expectedConnectorTunnelId)) {
+    throw new Error("ChatGPT connector tunnel identity is invalid");
+  }
   const browserHost = configured.browserHost ?? "managed-chrome";
   const browserHostDescriptorPath = configured.browserHostDescriptorPath?.trim();
   const browserHelperScriptPath = configured.browserHelperScriptPath?.trim();
@@ -2261,6 +2267,7 @@ export function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBro
   }
   return {
     appName,
+    ...(expectedConnectorTunnelId !== undefined ? { expectedConnectorTunnelId } : {}),
     browserHost,
     ...(browserHostDescriptorPath ? { browserHostDescriptorPath: resolve(expandUserPath(browserHostDescriptorPath)) } : {}),
     ...(resolvedBrowserHelperScriptPath ? { browserHelperScriptPath: resolvedBrowserHelperScriptPath } : {}),
@@ -3439,19 +3446,26 @@ export class ChatGptBrowserWorker {
       .filter({ visible: true });
   }
 
-  private async connectorIsSelected(composer: Locator, abortSignal?: AbortSignal): Promise<boolean> {
+  private async connectorIsSelected(composer: Locator, abortSignal?: AbortSignal, expectedConnectorId?: string): Promise<boolean> {
     const selected = this.selectedConnectorControl(composer);
-    const keywords = await withBrowserTurnAbort(
+    const pills = await withBrowserTurnAbort(
       withChatGptBrowserObservationTimeout(selected.evaluateAll(elements => (
-        elements.map(element => element.getAttribute("data-keyword") ?? element.getAttribute("app-mention-display-name"))
+        elements.map(element => ({
+          name: element.getAttribute("data-keyword") ?? element.getAttribute("app-mention-display-name"),
+          legacyId: element.getAttribute("data-id"),
+          appPath: element.getAttribute("app-mention-path"),
+        }))
       ))),
       abortSignal,
     );
-    const exactMatches = keywords.filter(keyword => keyword === this.config.appName).length;
-    if (exactMatches > 1) {
+    const exactMatches = pills.filter(pill => pill.name === this.config.appName);
+    if (exactMatches.length > 1) {
       throw new Error(`ChatGPT composer exposed duplicate ${JSON.stringify(this.config.appName)} connector selections`);
     }
-    return exactMatches === 1;
+    const pill = exactMatches[0];
+    return pill !== undefined && (expectedConnectorId === undefined
+      || pill.appPath === `app://${expectedConnectorId}`
+      || (pill.appPath === null && pill.legacyId === `plugin:${expectedConnectorId}`));
   }
 
   private async connectorMentionRowTitles(
@@ -3538,6 +3552,10 @@ export class ChatGptBrowserWorker {
     attemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 },
     abortSignal?: AbortSignal,
   ): Promise<Locator> {
+    throwIfPromptAttachmentAborted(abortSignal);
+    const expectedConnectorId = await withBrowserTurnAbort(assertChatGptConnectorRoute(
+      page, this.config.appName, this.config.expectedConnectorTunnelId,
+    ), abortSignal);
     const capture = async (checkpoint: string): Promise<void> => {
       throwIfPromptAttachmentAborted(abortSignal);
       await withBrowserTurnAbort(captureDiagnostic?.(checkpoint) ?? Promise.resolve(), abortSignal);
@@ -3609,13 +3627,13 @@ export class ChatGptBrowserWorker {
     try {
       composer = await this.activeComposer(page, 30_000, abortSignal);
       if (await this.connectorIsSelected(composer, abortSignal)) {
-        if ((await this.attachedPromptText(page, abortSignal)).length === 0) {
+        if (await this.connectorIsSelected(composer, abortSignal, expectedConnectorId)
+          && (await this.attachedPromptText(page, abortSignal)).length === 0) {
           await capture("connector-already-selected");
           return composer;
         }
-        // A restored draft can include both the connector and an earlier request. Selecting
-        // that pill proves the connector, not an empty composer. Reset the owned draft before
-        // attaching this request so it cannot be appended to the previous one.
+        // Restored drafts can retain a renamed/replaced connector ID or an earlier request.
+        // Clear the owned draft and select the currently verified connector before attaching.
         await this.clearChatGptComposerState(page);
         throwIfPromptAttachmentAborted(abortSignal);
         composer = await this.activeComposer(page, 30_000, abortSignal);
@@ -3729,7 +3747,7 @@ export class ChatGptBrowserWorker {
         timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
         signal: abortSignal,
       });
-      if (!await this.connectorIsSelected(selectedComposer, abortSignal)) {
+      if (!await this.connectorIsSelected(selectedComposer, abortSignal, expectedConnectorId)) {
         throw new Error(`ChatGPT composer did not select ${JSON.stringify(this.config.appName)} connector`);
       }
       await capture("connector-selected");
