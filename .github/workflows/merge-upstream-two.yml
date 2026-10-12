@@ -1,0 +1,35 @@
+name: Merge upstream into custom main (temporary)
+on:
+  push:
+    branches: ["merge/upstream-two-commits-2026-10-12"]
+    paths: [".github/workflows/merge-upstream-two.yml"]
+permissions:
+  contents: write
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge upstream into main candidate (upstream takes conflict priority)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin main merge/upstream-two-commits-2026-10-12
+          git switch -c integrate-upstream origin/main
+          # First parent: preserved custom main. Second parent: upstream 0b6087c.
+          # -X theirs applies only to genuine conflicting hunks and retains all
+          # non-conflicting work from custom main.
+          git merge --no-ff --no-commit -X theirs origin/merge/upstream-two-commits-2026-10-12 || {
+            git status --short
+            echo "::error::Unresolved merge; refusing to publish partial work"
+            exit 1
+          }
+          git commit -m "merge: upstream fixes for browser replies and launcher supervisor"
+          git show --no-patch --pretty='parents=%P' HEAD
+          git push origin HEAD:refs/heads/merge/upstream-two-commits-2026-10-12
