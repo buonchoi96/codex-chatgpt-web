@@ -130,7 +130,7 @@ async function within<T>(promise: Promise<T>, timeoutMs: number, label: string):
 test("a code-only safety result is returned once, retires broker and browser authority, and rejects later effects", async () => {
   const ledgerDir = mkdtempSync(join(tmpdir(), "cgw-safety-ledger-"));
   const ledger = new BlockedOperationLedger(join(ledgerDir, "blocked.json"));
-  const socketPath = defaultBrokerEndpoint(join(tmpdir(), `cgw-safety-retirement-${process.pid}-${Date.now()}`), process.platform);
+  const socketPath = defaultBrokerEndpoint(join(process.platform === "win32" ? tmpdir() : "/tmp", `cgw-sr-${process.pid}-${Date.now()}`), process.platform);
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
     baseUrl: `browser://safety-retirement-${Date.now()}`,
