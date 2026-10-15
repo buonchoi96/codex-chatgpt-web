@@ -646,6 +646,41 @@ export class ChatGptTurnSessions {
     }
   }
 
+  /** Only an accepted native Web Send from the exact same turn can restore a missing compact source. */
+  acceptedSourceForNativeTurn(
+    threadId: string,
+    turnId: string,
+    modelId: string,
+    reasoning: CodexParsedRequest["options"]["reasoning"],
+  ): ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined {
+    const candidates = [...new Set(this.entries.values())].filter(session => {
+      const input = session.runtime.usageInput;
+      return session.nativeThreadId === threadId
+        && session.nativeTurnId === turnId
+        && session.runtime.submission?.phase === "accepted"
+        && input?.modelId === modelId
+        && input.options.reasoning === reasoning
+        && !input._compactionRequest;
+    });
+    let resolved: ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined;
+    for (const candidate of candidates) {
+      const input = candidate.runtime.usageInput!;
+      let revision: ReturnType<typeof extractChatGptCompactionSourceRevision>;
+      try {
+        revision = extractChatGptCompactionSourceRevision({ ...input, _compactionRequest: true });
+      } catch {
+        continue;
+      }
+      const original = extractChatGptTurnIdentity(input);
+      if (original.threadId !== threadId || original.turnId !== turnId
+        || (revision.turnId && revision.turnId !== turnId)) continue;
+      // Two distinct admitted revisions cannot silently substitute for each other.
+      if (resolved && JSON.stringify(resolved) !== JSON.stringify(revision)) return undefined;
+      resolved = revision;
+    }
+    return resolved ? structuredClone(resolved) : undefined;
+  }
+
   find(key: string): ChatGptTurnSession | undefined {
     const session = this.entries.get(key);
     session?.touch();
@@ -922,3 +957,36 @@ export class ChatGptTurnSessions {
 }
 
 export const chatGptTurnSessions = new ChatGptTurnSessions();
+
+/**
+ * Restore a real authenticated user message for compact-only /goal requests whose native
+ * input consists of tool results and synthetic goal fragments. This never invents content.
+ * The normal explicit native user message takes precedence over the retained owner.
+ */
+export function bindAcceptedCompactionSource(
+  parsed: CodexParsedRequest,
+  sessions: ChatGptTurnSessions = chatGptTurnSessions,
+): boolean {
+  if (!parsed._compactionRequest) return false;
+  try {
+    extractChatGptCompactionSourceRevision(parsed);
+    return true;
+  } catch (error) {
+    if (!(error instanceof ChatGptWebAdapterError)
+      || error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING") throw error;
+  }
+  const identity = extractChatGptTurnIdentity(parsed);
+  if (!identity.threadId || !identity.turnId) return false;
+  const accepted = sessions.acceptedSourceForNativeTurn(
+    identity.threadId, identity.turnId, parsed.modelId, parsed.options.reasoning,
+  );
+  if (!accepted) return false;
+  parsed._trustedCompactionSource = {
+    threadId: identity.threadId, turnId: identity.turnId,
+    modelId: parsed.modelId, reasoning: parsed.options.reasoning,
+    revision: accepted,
+  };
+  extractChatGptCompactionSourceRevision(parsed);
+  console.info("[chatgpt-web] compaction_source_recovered source=accepted_native_turn");
+  return true;
+}

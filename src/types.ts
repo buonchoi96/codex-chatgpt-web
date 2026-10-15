@@ -16,6 +16,14 @@ export interface CodexParsedRequest {
   _compactionRequest?: boolean;
   /** Native compact.rs expects assistant text; remote v2 (the default) expects a compaction item. */
   _compactionResponseFormat?: "message";
+  /** Authenticated real user revision from an accepted, exactly matching native Web turn. */
+  _trustedCompactionSource?: {
+    threadId: string;
+    turnId: string;
+    modelId: string;
+    reasoning: CodexRequestOptions["reasoning"];
+    revision: { content: unknown; turnId?: string; itemId?: string };
+  };
   /**
    * True when Codex MultiAgent V2 delegated an agent_message as provider-private encrypted_content.
    * ChatGPT Web has no OpenAI backend key for that blob; the Responses HTTP boundary rejects it

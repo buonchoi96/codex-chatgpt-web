@@ -315,8 +315,20 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
 /** A remote compaction may summarize an instruction from an earlier turn. */
 export function extractChatGptCompactionSourceRevision(parsed: CodexParsedRequest): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
-  const revision = latestChatGptTurnUserRevision(parsed, extractChatGptTurnIdentity(parsed).turnId);
-  if (!revision || (revision.turnId && priorChatGptAbortedTurnIds(parsed).includes(revision.turnId))) {
+  const identity = extractChatGptTurnIdentity(parsed);
+  const revision = latestChatGptTurnUserRevision(parsed, identity.turnId);
+  const trusted = parsed._trustedCompactionSource;
+  // The fallback is set only by the bridge after matching a previously accepted native
+  // browser submission. Browser text and caller-provided JSON never create this authority.
+  const restored = !revision && trusted
+    && identity.threadId === trusted.threadId
+    && identity.turnId === trusted.turnId
+    && parsed.modelId === trusted.modelId
+    && parsed.options.reasoning === trusted.reasoning
+    && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId)
+    ? trusted.revision : undefined;
+  const source = revision ?? restored;
+  if (!source || (source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
     // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
     // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.
     throw new ChatGptWebAdapterError(
@@ -324,7 +336,7 @@ export function extractChatGptCompactionSourceRevision(parsed: CodexParsedReques
       { status: 409, errorType: "invalid_request_error", code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING", retryable: false },
     );
   }
-  return revision;
+  return source;
 }
 
 /** A completed checkpoint binds an older instruction to this exact continuing native turn. */

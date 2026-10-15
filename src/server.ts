@@ -2,7 +2,7 @@ import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebTraceId, createChatGptWebAd
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
-import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
+import { chatGptTurnSessions, bindAcceptedCompactionSource } from "./adapters/chatgpt-web/turn-execution";
 import {
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
@@ -734,6 +734,7 @@ export async function responseRequest(
     try {
       // Resolve source provenance before changing the compact input or retiring any live
       // retained browser/tool owner. Native tool-only and /goal runtime fragments do not qualify.
+      bindAcceptedCompactionSource(parsed);
       extractChatGptCompactionSourceRevision(parsed);
     } catch (error) {
       if (!(error instanceof ChatGptWebAdapterError)) throw error;

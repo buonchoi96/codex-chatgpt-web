@@ -76,6 +76,14 @@ jobs:
             }
           }
       - run: bun run app:smoke
+      - name: Upload verified Windows NSIS installer
+        if: runner.os == 'Windows' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-web-gpt-windows-installer-${{ github.sha }}
+          path: launcher/artifacts/*-win-*.exe
+          if-no-files-found: error
+          retention-days: 14
 
   actionlint:
     runs-on: ubuntu-latest
