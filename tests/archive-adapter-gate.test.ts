@@ -6,6 +6,8 @@ import {TurnBroker,callTurnBroker} from '../src/adapters/chatgpt-web/turn-broker
 import {createArchiveReadProof} from '../src/adapters/chatgpt-web/archive-read-proof';
 import {parseRequest} from '../src/responses/parser';
 import {defaultBrokerEndpoint} from '../src/config';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {CHATGPT_WEB_MODEL_ID} from '../src/adapters/chatgpt-web/model';
 import type {CodexProviderConfig,AdapterEvent} from '../src/types';
 import {deflateSync} from 'node:zlib';
@@ -32,7 +34,7 @@ function fixturePng():string {
 }
 
 test('the real native adapter installs an archive read gate before exposing its first browser capability',async()=>{
-  const key=crypto.randomUUID(),broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/archive-adapter-${key}`));
+  const key=crypto.randomUUID(),broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-aa-${key}`)));
   const provider:CodexProviderConfig={adapter:'chatgpt-web',baseUrl:`fixture://${key}`,chatgptWeb:{browserHost:'launcher',
     browserHostDescriptorPath:`${process.cwd()}/fixture-launcher.json`,brokerSocketPath:broker.socketPath,
     localToolsEnabled:true,solAvailable:true,extraHighAvailable:true,proAvailable:true}};

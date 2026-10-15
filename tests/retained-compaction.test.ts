@@ -1826,7 +1826,7 @@ test.each([false, true])("compaction source progress renews waiting, but silent 
       expect(events.at(-1)).toMatchObject({ type: "done", endTurn: true });
     } else {
       await run;
-      expect(events.at(-1)).toMatchObject({ type: "error", code: "compaction_handoff_timeout" });
+      expect(events.at(-1)).toMatchObject({ type: "error", code: "COMPACTION_SOURCE_STALLED" });
     }
   } finally {
     finishSource("cleanup");

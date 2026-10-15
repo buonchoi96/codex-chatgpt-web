@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { defaultBrokerEndpoint } from "../src/config";
@@ -41,7 +43,7 @@ const environment = (nested = false): ChatGptTurnEnvironment => ({
 });
 
 async function connectedRelay(nested = false) {
-  const socketPath = defaultBrokerEndpoint(`${root}/.mcp-image-relay-${process.pid}-${Date.now()}-${nested ? "nested" : "direct"}`, process.platform);
+  const socketPath = defaultBrokerEndpoint(join(process.platform === "win32" ? tmpdir() : "/tmp", `cgw-ir-${process.pid}-${Date.now()}-${nested ? "n" : "d"}`), process.platform);
   const broker = TurnBroker.forSocket(socketPath);
   const requestToken = await broker.register(environment(nested), 30_000);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

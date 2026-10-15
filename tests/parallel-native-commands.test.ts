@@ -6,12 +6,14 @@ import {createChatGptMcpServer} from '../src/adapters/chatgpt-web/mcp-server';
 import {TurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 import type {BrokerToolRequest} from '../src/adapters/chatgpt-web/turn-broker';
 import {defaultBrokerEndpoint} from '../src/config';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const execTool={name:'exec_command',description:'Native command',parameters:{type:'object',properties:{
  cmd:{type:'string'},workdir:{type:'string'},yield_time_ms:{type:'integer'},max_output_tokens:{type:'integer'},tty:{type:'boolean'},
 }}};
 async function connected(tools:any[]=[execTool]){
- const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/parallel-fixture-${crypto.randomUUID()}`,process.platform));
+ const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-p-${crypto.randomUUID()}`),process.platform));
  const token=await broker.register({cwd:process.cwd(),roots:[process.cwd()],writableRoots:[],sandboxPolicy:{type:'readOnly',networkAccess:false},
   tools},30000);
  const [ct,st]=InMemoryTransport.createLinkedPair();

@@ -211,7 +211,13 @@ function isNativeInstruction(
   item: Record<string, unknown> | undefined,
   metadata?: Record<string, unknown>,
 ): item is Record<string, unknown> {
-  if (item?.type === "message" && item.role === "user") return !contextualUserMessage(item);
+  if (item?.type === "message" && item.role === "user") {
+    // A current-turn user may ask about literal <turn_aborted> markup. Only
+    // foreign/prior-turn notices are contextual; never lose an actual instruction.
+    if (isTurnAbortedNotice(item) && typeof metadata?.turn_id === "string"
+      && itemTurnId(item) === metadata.turn_id) return true;
+    return !contextualUserMessage(item);
+  }
   if (isDelegatedInstruction(item)) return true;
   if (item?.type !== "agent_message" || typeof item.id !== "string" || !item.id
     || metadata?.subagent_kind !== "thread_spawn"

@@ -4,10 +4,12 @@ import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createChatGptMcpServer} from '../src/adapters/chatgpt-web/mcp-server';
 import {TurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 import {defaultBrokerEndpoint} from '../src/config';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {ARCHIVE_READ_CONTROL_WIRE_NAME,createArchiveReadProof} from '../src/adapters/chatgpt-web/archive-read-proof';
 
 test('Native2 validates archive ingestion inside the current MCP response without another browser task or outer tool',async()=>{
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/archive-control-${crypto.randomUUID()}`));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-ac-${crypto.randomUUID()}`)));
   const [clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
   const server=await createChatGptMcpServer({brokerSocketPath:broker.socketPath,transport:serverTransport});
   const client=new Client({name:'archive-control-fixture',version:'1'});

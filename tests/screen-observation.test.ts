@@ -6,6 +6,8 @@ import {TurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 import {defaultBrokerEndpoint} from '../src/config';
 import {ScreenObservationRegistry,NativeScreenObservationError,type NativeScreenProvider,type ScreenReaderGrant} from '../src/adapters/chatgpt-web/screen-observation';
 import {randomUUID} from 'node:crypto';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const grant:ScreenReaderGrant={observer_protocol:1,reader_lease:'reader_'+'a'.repeat(64),session:randomUUID(),hwnd:'101',pid:202,
   consumer_owner:randomUUID(),capability_epoch:randomUUID(),owner_epoch:3,expires_in_ms:30000,
@@ -79,7 +81,7 @@ test('semantic readiness must reference the final frame and preserve the request
 });
 
 async function connection(enabled=true,override?:NativeScreenProvider,nested=false){
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/.screen-observer-${randomUUID()}`,process.platform));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-so-${randomUUID()}`),process.platform));
   const token=await broker.register({cwd:process.cwd(),roots:[process.cwd()],writableRoots:[],sandboxPolicy:{type:'readOnly',networkAccess:false},
     tools:nested?[{name:'exec',description:'Native gateway',freeform:true,parameters:{}}]:[{namespace:'mcp__swift',name:'swift_observer_reader_grant',description:'Native authorized reader grant',parameters:{type:'object',properties:{},additionalProperties:false}}]},30000);
   let calls=0;const provider={observe:async(_grant:ScreenReaderGrant,args:{operation_id:string})=>{++calls;return observation(args.operation_id);}};

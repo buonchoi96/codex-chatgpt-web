@@ -513,7 +513,7 @@ test("authenticated Interrupt hook endpoint also releases the exact native compa
     },
     body: JSON.stringify({
       model: "chatgpt-web/high",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "compact me" }] }],
+      input: [{ type: "message", role: "user", id: "msg_interrupt_compact_source", content: [{ type: "input_text", text: "compact me" }] }],
     }),
   });
 

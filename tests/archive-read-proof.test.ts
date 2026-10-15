@@ -2,6 +2,8 @@ import {expect,test} from 'bun:test';
 import {createArchiveReadProof} from '../src/adapters/chatgpt-web/archive-read-proof';
 import {TurnBroker,RemoteTurnBroker,callTurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 import {defaultBrokerEndpoint} from '../src/config';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import type {ChatGptTurnEnvironment} from '../src/adapters/chatgpt-web/environment';
 
 const environment:ChatGptTurnEnvironment={cwd:process.cwd(),roots:[process.cwd()],writableRoots:[],
@@ -14,7 +16,7 @@ test('archive read proof is derived from context bytes absent from the inline ca
 });
 
 test('a cached DEV broker without archive-proof support receives only a compatibility read, never a transaction mutation',async()=>{
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/old-archive-protocol-${crypto.randomUUID()}`));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-a0-${crypto.randomUUID()}`)));
   const token=await broker.register(environment),methods:string[]=[];
   const internal=broker as unknown as {dispatch(request:{method:string}):Promise<unknown>};
   const dispatch=internal.dispatch;
@@ -32,7 +34,7 @@ test('a cached DEV broker without archive-proof support receives only a compatib
 });
 
 test('archive read cancellation and capability retirement cannot leak a waiter or accept an old public receipt',async()=>{
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/archive-read-cancel-${crypto.randomUUID()}`));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-a1-${crypto.randomUUID()}`)));
   try{
     await broker.listen();
     const remote=new RemoteTurnBroker(broker.socketPath),token=await remote.register(environment);
@@ -48,7 +50,7 @@ test('archive read cancellation and capability retirement cannot leak a waiter o
 });
 
 test('shutdown refuses an already accepted owner registration after its startup await',async()=>{
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/archive-close-register-${crypto.randomUUID()}`));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-a2-${crypto.randomUUID()}`)));
   await broker.listen();
   const internal=broker as unknown as {start():Promise<void>};
   const start=internal.start;
@@ -64,7 +66,7 @@ test('shutdown refuses an already accepted owner registration after its startup 
 });
 
 test('an unread archive cannot admit task work or final completion; its exact read proof releases one existing capability',async()=>{
-  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(`${process.cwd()}/archive-proof-${crypto.randomUUID()}`));
+  const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(process.platform === 'win32' ? tmpdir() : '/tmp', `cgw-a3-${crypto.randomUUID()}`)));
   try{
     const token=await broker.register(environment),proof=createArchiveReadProof('Fixture historical context.',0,0);
     await broker.requireArchiveRead(token,proof);
