@@ -241,26 +241,26 @@ test("Bigger Context exposes bounded full-history windows for Sol and Luna", asy
   const store = new DevChatStore(join(root, "chats"));
   const normal = new DevChatDriver(config, store, factory, root);
   const normalState = normal.open("normal-window", "chatgpt-web/high").state;
-  expect(normal.status(normalState).autoCompactTokenLimit).toBe(95_000);
+  expect(normal.status(normalState).autoCompactTokenLimit).toBe(258_400);
 
   const biggerConfig = { ...config, experimentalBiggerContext: true };
   const bigger = new DevChatDriver(biggerConfig, store, factory, root, { biggerContext: true });
   const biggerState = bigger.open("bigger-window", "chatgpt-web/high").state;
   const biggerStatus = bigger.status(biggerState);
   expect(biggerStatus).toMatchObject({
-    autoCompactTokenLimit: 285_000,
-    contextWindow: 333_579,
+    autoCompactTokenLimit: 258_400,
+    contextWindow: 272_000,
   });
-  expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 285_000) * 1_000) / 10);
+  expect(biggerStatus.percent).toBe(Math.round((biggerStatus.inputTokens / 258_400) * 1_000) / 10);
   for (const [model, contextWindow, autoCompactTokenLimit] of [
-    ["chatgpt-web/gpt-6-sol", 240_000, 220_000],
-    ["chatgpt-web/gpt-6-sol-instant", 111_193, 95_000],
+    ["chatgpt-web/gpt-6-sol", 272_000, 258_400],
+    ["chatgpt-web/gpt-6-sol-instant", 272_000, 258_400],
   ] as const) {
     const state = bigger.open(model.split("/")[1]!, model).state;
     expect(bigger.status(state)).toMatchObject({ contextWindow, autoCompactTokenLimit });
   }
   const proState = bigger.open("six-pro", "chatgpt-web/gpt-6-pro").state;
-  expect(bigger.status(proState)).toMatchObject({ contextWindow: 336_579, autoCompactTokenLimit: 285_000 });
+  expect(bigger.status(proState)).toMatchObject({ contextWindow: 272_000, autoCompactTokenLimit: 258_400 });
   const luna = new DevChatDriver({
     ...biggerConfig,
     solAvailable: false,
@@ -268,7 +268,7 @@ test("Bigger Context exposes bounded full-history windows for Sol and Luna", asy
   }, store, factory, root, { biggerContext: true });
   for (const model of ["chatgpt-web/luna", "chatgpt-web/think"] as const) {
     const state = luna.open(model.split("/")[1]!, model).state;
-    expect(luna.status(state)).toMatchObject({ contextWindow: 84_000, autoCompactTokenLimit: 59_424 });
+    expect(luna.status(state)).toMatchObject({ contextWindow: 272_000, autoCompactTokenLimit: 258_400 });
   }
   await Promise.all([normal.close(), bigger.close(), luna.close()]);
 });
@@ -468,8 +468,8 @@ test("synthetic fill crosses the production threshold and triggers the real comp
   const store = new DevChatStore(join(root, "chats"));
   const driver = new DevChatDriver(config, store, factory, root);
   const state = driver.open("auto-compact", "chatgpt-web/light").state;
-  driver.fill(state, 30_000);
-  expect(driver.status(state).inputTokens).toBeGreaterThanOrEqual(32_000);
+  for (let i = 0; i < 9; i++) driver.fill(state, 30_000);
+  expect(driver.status(state).inputTokens).toBeGreaterThanOrEqual(258_400);
   const events: string[] = [];
   const result = await driver.send(state, "Continue after compacting the synthetic history.", event => events.push(event.type));
   expect(result).toMatchObject({ text: "DEV turn completed after compaction.", compactions: 1 });

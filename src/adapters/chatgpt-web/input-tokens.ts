@@ -45,6 +45,7 @@ export function estimateCompiledChatGptWebInputTokens(
   const imageTokens = estimateChatGptWebImageTokens(compiled);
   const messageTokens = compiledChatGptWebMessages(compiled)
     .reduce((total, message) => total + estimateTokens(message, modelId), 0);
+  const archiveTokens = compiled.contextArchive ? estimateTokens(compiled.contextArchive.contextText, modelId) : 0;
   const acknowledgementTokens = compiled.multipart
     ? compiled.multipart.parts.slice(0, -1).reduce((total, payload, index) => total + estimateTokens(
       formatChatGptWebMultipartStage(
@@ -56,7 +57,7 @@ export function estimateCompiledChatGptWebInputTokens(
       modelId,
     ), 0)
     : 0;
-  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + messageTokens + acknowledgementTokens + imageTokens + skillFileTokens(compiled.skillFiles, modelId);
+  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + messageTokens + archiveTokens + acknowledgementTokens + imageTokens + skillFileTokens(compiled.skillFiles, modelId);
 }
 
 export function estimateChatGptWebImageTokens(compiled: CompiledChatGptWebPrompt): number {

@@ -184,7 +184,10 @@ export class ChatGptThreadEnvironmentStore {
       // Root tasks also retain unattributed environment fragments after compaction.
       // They are historical only when the exact native record predates this task;
       // neither the fragment nor the cache supplies the current authority.
-      const historicalMessages = hasCurrentContext && !currentCompaction
+      // A recognized current claim may omit only its network statement. Resolve
+      // that field from the current turn_context; do not authenticate the newly
+      // generated envelope as if it were an older historical response_item.
+      const historicalMessages = hasCurrentContext && !currentCompaction && !initialClaim
         ? unattributedChatGptEnvironmentMessages(parsed) : undefined;
       const steeringClaim = hasCurrentContext && !currentCompaction
         ? extractChatGptSteeringEnvironmentClaim(parsed) : undefined;

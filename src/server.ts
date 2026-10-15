@@ -731,6 +731,22 @@ export async function responseRequest(
     );
   }
   if (compaction) {
+    try {
+      // Resolve source provenance before changing the compact input or retiring any live
+      // retained browser/tool owner. Native tool-only and /goal runtime fragments do not qualify.
+      extractChatGptCompactionSourceRevision(parsed);
+    } catch (error) {
+      if (!(error instanceof ChatGptWebAdapterError)) throw error;
+      const identity = extractChatGptTurnIdentity(parsed);
+      const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+      console.warn(`[chatgpt-web] compaction_preflight ${JSON.stringify({
+        code: error.code,
+        native_thread_id: identity.threadId ? "present" : "missing",
+        native_turn_id: identity.turnId ? "present" : "missing",
+        raw_input_items: Array.isArray(input) ? input.length : 0,
+      })}`);
+      return formatErrorResponse(error.status, error.errorType, error.message, error.code);
+    }
     // History compaction is a dedicated summarization turn. It must never bind the active Codex
     // tool bridge or continue an in-flight MCP round; the returned summary becomes the next turn's
     // replacement history through the Responses compaction contract.

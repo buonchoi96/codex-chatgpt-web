@@ -836,8 +836,12 @@ test.each(["low", "high"] as const)("GPT-6 Plus stages High but keeps the Instan
   let browserStages = 0;
   const prepared = { ...compileChatGptWebPrompt({
     modelId: CHATGPT_WEB_MODEL_ID, stream: true, options: { reasoning },
-    context: { messages: [{ role: "user", content: "Keep the entire task.", timestamp: 1 }] },
+    // No ZIP is available in this fixture. These complete records exceed the real
+    // composer limit together, while each verified multipart stage still fits.
+    context: { messages: Array.from({length:reasoning==='low'?2:6},(_,index)=>({
+      role:"user" as const,content:'A'.repeat(reasoning==='low'?120000:100000),timestamp:index+1})) },
   }, capabilities, undefined, { experimentalMultipartParts: 2 }), release() { released = true; } };
+  expect(prepared.multipart?.parts).toHaveLength(2);
   const worker: any = ChatGptBrowserWorker.forProvider({
     adapter: "chatgpt-web", baseUrl: `browser://${root}`, chatgptWeb: { browserDiagnosticsPath: root },
   });
@@ -858,10 +862,11 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
   const prepared = { ...compileChatGptWebPrompt({
     modelId: CHATGPT_WEB_MODEL_ID, stream: true, options: { reasoning: "low" },
     context: { systemPrompt: ["Keep literal paths."], messages: [
-      { role: "user", content: "Read the first file.", timestamp: 1 },
-      { role: "user", content: "Compare it with the second file.", timestamp: 2 },
+      { role: "user", content: "Read the first file.\n"+'A'.repeat(120000), timestamp: 1 },
+      { role: "user", content: "Compare it with the second file.\n"+'B'.repeat(120000), timestamp: 2 },
     ] },
   }, capabilities, undefined, { experimentalMultipartParts: 2 }), release() {} };
+  expect(prepared.multipart?.parts).toHaveLength(2);
   const worker: any = ChatGptBrowserWorker.forProvider({
     adapter: "chatgpt-web", baseUrl: `browser://${root}`,
     chatgptWeb: { useSavedChats: true, browserDiagnosticsPath: root },
@@ -877,6 +882,7 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
     evaluate: async () => { throw new Error("No real browser in the transport fixture"); },
   });
   let sends = 0;
+  let draftText='';
   const finished = new Error("final send reached with a current effort proof");
   Object.assign(worker, {
     prepareChatSurface: async (_page: unknown, _capture: unknown, saved: boolean) => { expect(saved).toBeTrue(); },
@@ -887,7 +893,9 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
         selection: { url, label: "Instant" } };
     },
     captureSubmissionBaseline: async () => ({}),
-    attachPrompt: async () => {}, attachPromptWithCompactionRetry: async () => {}, attachFiles: async () => {},
+    attachPrompt: async (_page:unknown,text:string) => {draftText=text;},
+    attachPromptWithCompactionRetry: async (_page:unknown,text:string) => {draftText=text;},
+    attachedPromptText:async()=>draftText,attachFiles: async () => {},
     waitForNewAssistantTurn: async () => ({}),
     waitForMultipartAcknowledgement: async () => ({ identity: "stage:1" }),
     sendAttachedPrompt: async (_page: unknown, _baseline: unknown, _capture: unknown, _signal: unknown,
@@ -3464,12 +3472,12 @@ test("browser preflight separates model context from one-message transport limit
 
   expect(() => assertChatGptWebInputWithinLimits(40_999, 32_807, "gpt-5.6-sol", "low", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(41_000, 32_808, "gpt-5.6-sol", "low", plus)).toThrow(
-    "41,000-token context window",
+    "41,000-token browser transport envelope",
   );
   expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "medium", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "high", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "high", plus)).toThrow(
-    "90,000-token context window",
+    "90,000-token browser transport envelope",
   );
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "xhigh", pro)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "max", pro)).not.toThrow();
@@ -3583,10 +3591,10 @@ test("GPT-6 staged input enforces its measured account and effort ceiling before
   )).toThrow("GPT-6 Instant uses standard context");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     333_578, 60_000, "gpt-5.6-sol", "high", pro, 250_000, 6, undefined, "5.6",
-  )).not.toThrow();
+  )).toThrow('272,000-token six-part ceiling');
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     336_578, 60_000, "gpt-5.6-sol", "max", pro, 250_000, 6, undefined, "6",
-  )).not.toThrow();
+  )).toThrow('272,000-token six-part ceiling');
 });
 
 test("Bigger Context fits mixed-density whole records within both token and composer limits", () => {
@@ -3638,7 +3646,7 @@ test("Bigger Context fits mixed-density whole records within both token and comp
   }
 }, 90_000);
 
-test("Bigger Context preflight expands only the total context ceiling and keeps each message boundary", () => {
+test("Bigger Context respects the unified context ceiling and each measured message boundary", () => {
   const plus = {
     localToolsEnabled: false,
     solAvailable: true,
@@ -3652,7 +3660,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     experimentalBiggerContext: true,
   };
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_578,
+    271_999,
     95_000,
     "gpt-5.6-sol",
     "high",
@@ -3661,7 +3669,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     6,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_579,
+    272_000,
     95_000,
     "gpt-5.6-sol",
     "high",

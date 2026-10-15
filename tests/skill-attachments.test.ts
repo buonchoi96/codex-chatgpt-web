@@ -75,7 +75,9 @@ test("retained turns reuse prior attachments; fresh chats rebuild them and new s
 test("skill content counts toward input and final-message budgets, including multipart", () => {
   const parsed = parse([input(text("testing", "check this carefully\n".repeat(1000))), input("Do it", ["user.text"])]);
   for (const parts of [undefined, 6] as const) {
-    const compiled = compileChatGptWebPrompt(parsed, capabilities, token, { experimentalSkillAttachments: true, experimentalMultipartParts: parts });
+    const full = structuredClone(parsed);
+    if (parts) full.context.systemPrompt = Array.from({ length: 6 }, (_, index) => `whole-system-record-${index}: ${"x".repeat(90_000)}`);
+    const compiled = compileChatGptWebPrompt(full, capabilities, token, { experimentalSkillAttachments: true, experimentalMultipartParts: parts });
     const withoutFiles = { ...compiled, skillFiles: undefined };
     const fileTokens = skillFileTokens(compiled.skillFiles, parsed.modelId);
     expect(fileTokens).toBeGreaterThan(1000);
@@ -83,6 +85,14 @@ test("skill content counts toward input and final-message budgets, including mul
       - estimateCompiledChatGptWebInputTokens(withoutFiles, parsed.modelId)).toBe(fileTokens);
     expect(estimateCompiledChatGptWebMessageTokens(compiled, parsed.modelId)).toBeGreaterThan(fileTokens);
     if (parts) {
+      expect(compiled.transportDecision!.measurements.composerChars).toBeGreaterThan(compiled.transportDecision!.measurements.composerCharLimit!);
+      const records = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records);
+      expect(records.filter((record: { kind: string }) => record.kind === "system").map((record: { content: string }) => record.content)).toEqual(full.context.systemPrompt!);
+      expect(records.filter((record: { kind: string }) => record.kind === "message").map((record: { message: unknown }) => record.message)).toEqual([
+        { role: "user", origin: "codex_skill", content: [{ type: "skill_attachment", filename: compiled.skillFiles![0]!.name }] },
+        { role: "user", content: "Do it" },
+      ]);
+      expect(compiled.skillFiles![0]!.text).toBe(text("testing", "check this carefully\n".repeat(1000)));
       expect(compiled.multipart!.parts.join(" ")).not.toContain("check this carefully");
       expect(compiled.multipart!.commit).toContain("skill_attachment");
     }
@@ -93,7 +103,7 @@ test("over-limit, malformed and manual requests fail explicitly without silently
   const ten = Array.from({ length: 10 }, (_, i) => input(text(`skill-${i}`)));
   expect(chatGptPromptFilePayloads(compile(ten))).toHaveLength(10);
   expect(() => chatGptPromptFilePayloads(compile([...ten, input(text("eleventh"))]))).toThrow("10 attachments");
-  const image = { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,iVBORw==" }] };
+  const image = { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==" }] };
   expect(() => chatGptPromptFilePayloads(compile([...ten, image]))).toThrow("10 attachments");
   expect(() => compile([input("Not a skill envelope")])).toThrow("invalid Codex envelope");
   expect(() => compileChatGptWebPrompt(parse([input(text())]), capabilities, token, {

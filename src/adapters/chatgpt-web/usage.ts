@@ -5,7 +5,6 @@ import {
   CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER,
   CHATGPT_WEB_PLATFORM_RESERVE_TOKENS,
   isChatGptWebZeroRiskBackendModel,
-  resolveChatGptWebContextLimits,
   resolveChatGptWebMessageTokenBudget,
   resolveChatGptWebTransportLimits,
   supportsChatGptWebBiggerContext,
@@ -22,6 +21,7 @@ import {
 import { extractChatGptTurnIdentity } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
 import type { BrokerToolRequest } from "./turn-broker";
+import { ChatGptWebAdapterError } from "./adapter-error";
 
 // The real capability has the same length. Keeping it out of usage accounting would make
 // estimates differ slightly between the prepared browser prompt and later Codex tool rounds.
@@ -53,12 +53,21 @@ export function estimateChatGptWebInputTokens(
     mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
     {
       ...options,
+      // Measurement must remain available to status/fill/autocompaction planning even when
+      // the eventual send is blocked by the account or per-message transport ceiling.
+      measurementOnly: true,
+      // Usage is over the canonical context, so allow the compiler's ZIP path to measure
+      // histories whose inline attachment count exceeds the single-message cap. Manual
+      // Zero Risk still suppresses archives inside the prompt compiler.
+      contextArchive: true,
       ...(manual ? { manualControl: true as const } : {}),
       captureLunaCheckpoint: options.captureLunaCheckpoint ?? (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
         && !parsed._compactionRequest
         && Boolean(identity.threadId && identity.turnId)),
     },
   );
+  if(!compiled.multipart&&!compiled.contextArchive&&compiled.transportDecision)
+    return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS+compiled.transportDecision.measurements.canonicalTokens;
   return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId);
 }
 
@@ -79,21 +88,20 @@ export function resolveBiggerContextMultipartParts(
   if (!supportsChatGptWebBiggerContext(parsed.modelId, mode.effort, parsed._chatgptModelFamily)) return undefined;
   if (parsed._compactionRequest) return CHATGPT_BIGGER_CONTEXT_PARTS;
   const backendModel = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID ? CHATGPT_WEB_LUNA_MODEL_ID : CHATGPT_WEB_BACKEND_MODEL;
-  const { autoCompactTokenLimit } = resolveChatGptWebContextLimits(
-    backendModel,
-    mode.effort,
-    { ...capabilities, experimentalBiggerContext: false },
-  );
   const contextWindow = resolveChatGptWebMessageTokenBudget(backendModel, mode.effort, capabilities)
     + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
   const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(
     parsed, capabilities, mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
-    { experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
+    { contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
   );
-  const inline = compile();
-  const inputTokens = estimateCompiledChatGptWebInputTokens(inline, parsed.modelId);
-  const initialParts = biggerContextPartCount(inputTokens, Math.min(contextWindow, autoCompactTokenLimit), false);
-  if (initialParts === CHATGPT_BIGGER_CONTEXT_PARTS) return initialParts;
+  const tryCompile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt | undefined => {
+    try {
+      return compile(parts);
+    } catch (error) {
+      if (error instanceof ChatGptWebAdapterError && error.code === "context_transport_unsupported") return undefined;
+      throw error;
+    }
+  };
 
   const fits = (compiled: CompiledChatGptWebPrompt): boolean => {
     const messages = compiledChatGptWebMessages(compiled);
@@ -113,8 +121,13 @@ export function resolveBiggerContextMultipartParts(
     return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId)
       < contextWindow * Math.min(messages.length, CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER);
   };
-  if (initialParts === undefined && fits(inline)) return undefined;
-  return fits(compile(2)) ? 2 : CHATGPT_BIGGER_CONTEXT_PARTS;
+  // Let the adaptive compiler retain a fitting single-message transport even when Bigger
+  // Context is enabled. Only plan multipart when both inline and ZIP candidates are blocked.
+  const singleMessage = tryCompile();
+  if (singleMessage && !singleMessage.multipart) return undefined;
+  const twoParts = tryCompile(2);
+  if (twoParts && !twoParts.multipart) return undefined;
+  return twoParts && fits(twoParts) ? 2 : CHATGPT_BIGGER_CONTEXT_PARTS;
 }
 
 export function biggerContextPartCount(

@@ -7,9 +7,12 @@ import { join } from "node:path";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import {
   createChatGptWebAdapter,
+  chatGptWebExecutionNamespace,
   type ChatGptZeroRiskManualControl,
 } from "../src/adapters/chatgpt-web/index";
 import { chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
+import { retainedConversationProofs } from '../src/adapters/chatgpt-web/retained-followup-proof';
+import { chatGptConversationKey } from '../src/adapters/chatgpt-web/conversation-key';
 import { callTurnBroker, TurnBroker, type BrokerToolResult } from "../src/adapters/chatgpt-web/turn-broker";
 import { encodeCompactionSummary, SUMMARY_PREFIX } from "../src/responses/compaction";
 import { LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
@@ -450,6 +453,9 @@ test("Zero Risk offers only the new Codex suffix when the launcher reuses its re
   const config = provider("incremental-resume");
   const broker = TurnBroker.forSocket(config.chatgptWeb!.brokerSocketPath!);
   const input = request("turn_safe_incremental");
+  // This fixture represents a previously completed canonical browser turn, not merely a matching thread ID.
+  retainedConversationProofs.commit(chatGptConversationKey(input,chatGptWebExecutionNamespace(config))!,
+    structuredClone(input), 'Earlier answer already visible in ChatGPT.');
   input.context.messages.push(
     { role: "assistant", content: [{ type: "text", text: "Earlier answer already visible in ChatGPT." }], timestamp: 3 },
     { role: "user", content: "Continue with only this new request.", timestamp: 4 },

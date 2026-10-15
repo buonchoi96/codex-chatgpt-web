@@ -30,6 +30,14 @@ export function chatGptToolTimeoutError(tool: string, timeoutMs: number): ChatGp
   );
 }
 
+export function chatGptSafetyStatusUnknownOrBlockedError(tool: string): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    `Codex tool ${tool} was blocked because OpenAI could not determine the safety status. `
+    + "The current browser turn was stopped; do not retry or route this action elsewhere.",
+    { status: 403, errorType: "permission_error", code: "safety_status_unknown_or_blocked", retryable: false },
+  );
+}
+
 export function chatGptResponseIncompleteError(message: string): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(message, {
     status: 502, errorType: "server_error", code: "chatgpt_response_incomplete", retryable: false,
@@ -61,6 +69,14 @@ export function chatGptTurnSupersededError(): ChatGptWebAdapterError {
     "A newer Codex instruction superseded this ChatGPT response.",
     { status: 499, errorType: "client_closed_request", code: "client_cancelled", retryable: false },
   );
+}
+
+/** Only observer handoff uses this brand; user/tab cancellation still retires execution. */
+export class ChatGptSteeringObserverSuperseded extends ChatGptWebAdapterError {
+  constructor() {
+    super('A newer Codex instruction superseded this ChatGPT response.',
+      {status:499,errorType:'client_closed_request',code:'client_cancelled',retryable:false});
+  }
 }
 
 export function chatGptStoppedThinkingError(): ChatGptWebAdapterError {

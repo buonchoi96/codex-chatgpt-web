@@ -782,6 +782,35 @@ test("active compaction waits for an ordinary response with no available tool bo
   expect(requested).toBe(1);
 });
 
+test("active compaction preserves a source that settles after the historical 15s grace", async () => {
+  let finishBrowser!: (answer: string) => void;
+  const browser = new Promise<string>(resolve => { finishBrowser = resolve; });
+  let cancellations = 0;
+  let revoked = 0;
+  const broker = {
+    requestCompaction: () => 0,
+    compactionDeliveryCount: () => 0,
+    completeTool() { throw new Error("no pending tool results"); },
+    revoke() { revoked += 1; },
+  } as unknown as TurnBroker;
+  const source = new ChatGptTurnSession({
+    mode: "tools", token: Promise.resolve("turn_slow_but_live"),
+    externalProgress: { recordToolResult() {} } as never,
+    browser, physicalSettlement: browser.then(() => undefined),
+    trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(),
+    cancel: () => { cancellations += 1; },
+  });
+  // Scale the original 15s grace down to 15ms to keep this deterministic and cheap.
+  setTimeout(() => finishBrowser("Late but valid final response"), 35);
+  await expect(settleActiveCompactionSource(
+    request(true), source, broker, undefined, 15,
+  )).resolves.toEqual({
+    answer: "Late but valid final response", compactionInstructionDelivered: false,
+  });
+  expect(cancellations).toBe(0);
+  expect(revoked).toBe(1);
+});
+
 test("active compaction aborts its source when the shared handoff deadline expires", async () => {
   const controller = new AbortController();
   const deadlineError = new Error("shared compaction deadline expired");

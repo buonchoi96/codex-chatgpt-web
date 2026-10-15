@@ -31,6 +31,8 @@ interface RunMessage {
     capabilities: ChatGptWebCapabilities;
     nativeConnector?: boolean;
     resumeAvailable?: boolean;
+    recoveryAvailable?: boolean;
+    steeringAvailable?:boolean;
     retainConversation?: boolean;
     requireRetainedConversation?: boolean;
     conversationKey?: string;
@@ -73,6 +75,9 @@ type MaintenanceMessage = VerifyMessage | InspectMessage | SmokeMessage | Limits
 type InputMessage = RunMessage
   | MaintenanceMessage
   | { type: "prepared_selected_ack"; id: string; prepared: CompiledChatGptWebPrompt }
+  | { type: "prepare_recovery_ack"; id: string; prepared: CompiledChatGptWebPrompt }
+  | {type:'steering_progress';id:string;snapshot:{revision:number;pending:boolean}}
+  | { type: "steering_submitted_ack"; id: string; deltaId: string }
   | { type: "send_activation_ack"; id: string }
   | { type: "completion_fence_begin_ack"; id: string; requestId: number; revision: number | null }
   | { type: "completion_fence_commit_ack"; id: string; requestId: number; committed: boolean }
@@ -105,6 +110,14 @@ const sendActivationWaiters = new Map<string, {
   resolve: () => void;
   reject: (error: Error) => void;
 }>();
+const recoveryWaiters = new Map<string, {resolve:(prepared:CompiledChatGptWebPrompt)=>void;reject:(error:Error)=>void}>();
+const steeringProgress=new Map<string,{revision:number;pending:boolean}>();
+const steeringReceiptWaiters = new Map<string, { deltaId: string; resolve: () => void; reject: (error: Error) => void }>();
+function rejectSteeringReceipt(id: string, message: string): void {
+  const waiter = steeringReceiptWaiters.get(id);
+  steeringReceiptWaiters.delete(id);
+  waiter?.reject(new DOMException(message, "AbortError"));
+}
 const completionFenceBeginWaiters = new Map<string, {
   requestId: number;
   resolve: (revision: number | undefined) => void;
@@ -135,6 +148,9 @@ function requestShutdown(): Promise<void> {
     waiter.reject(new DOMException("Browser helper is shutting down", "AbortError"));
   }
   sendActivationWaiters.clear();
+  for (const waiter of recoveryWaiters.values()) waiter.reject(new DOMException('Browser helper shutdown', 'AbortError'));
+  recoveryWaiters.clear();
+  for (const id of steeringReceiptWaiters.keys()) rejectSteeringReceipt(id, "Browser helper is shutting down");
   for (const waiter of completionFenceBeginWaiters.values()) {
     waiter.reject(new DOMException("Browser helper is shutting down", "AbortError"));
   }
@@ -166,6 +182,10 @@ async function run(message: RunMessage): Promise<void> {
   if (message.turn.resumeAvailable !== undefined && typeof message.turn.resumeAvailable !== "boolean") {
     throw new Error("Browser helper resume availability is invalid");
   }
+  if (message.turn.recoveryAvailable !== undefined && typeof message.turn.recoveryAvailable !== 'boolean')
+    throw new Error('Browser helper recovery availability is invalid');
+  if (message.turn.steeringAvailable !== undefined && typeof message.turn.steeringAvailable !== "boolean")
+    throw new Error("Browser helper steering availability is invalid");
   if (message.turn.nativeConnector !== undefined && typeof message.turn.nativeConnector !== "boolean") {
     throw new Error("Browser helper native connector flag is invalid");
   }
@@ -228,6 +248,24 @@ async function run(message: RunMessage): Promise<void> {
     ...(message.turn.nativeConnector ? { nativeConnector: true } : {}),
     prepare: prepareSelected,
     ...(message.turn.resumeAvailable ? { prepareResume: prepareSelected } : {}),
+    ...(message.turn.steeringAvailable?{steering:{snapshot:()=>steeringProgress.get(message.id)??{revision:0,pending:false}},
+      onSteeringSubmitted: (deltaId: string) => new Promise<void>((resolve, reject) => {
+        if (abortController.signal.aborted || steeringReceiptWaiters.has(message.id)) {
+          reject(new Error("Steering receipt cannot be committed in the current helper state")); return;
+        }
+        steeringReceiptWaiters.set(message.id, { deltaId, resolve, reject });
+        if (!writeProtocol({ type: "event", id: message.id, event: "steering_submitted", deltaId })) {
+          steeringReceiptWaiters.delete(message.id);
+          reject(new Error("Steering receipt transport failed"));
+        }
+      })}:{}),
+    ...(message.turn.recoveryAvailable ? { prepareRecovery: (request?:{steering?:boolean}) => new Promise<CompiledChatGptWebPrompt & {release:()=>void}>((resolve,reject)=>{
+      if (recoveryWaiters.has(message.id)) {reject(new Error('Concurrent recovery preparation'));return;}
+      recoveryWaiters.set(message.id,{resolve:prepared=>resolve({...prepared,release:()=>{}}),reject});
+      if (!writeProtocol({type:'event',id:message.id,event:'prepare_recovery',steering:request?.steering===true})) {
+        recoveryWaiters.delete(message.id); reject(new Error('Recovery preparation transport failed'));
+      }
+    }) } : {}),
     ...(message.turn.retainConversation ? { retainConversation: true } : {}),
     ...(message.turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
     ...(message.turn.conversationKey ? { conversationKey: message.turn.conversationKey } : {}),
@@ -236,7 +274,7 @@ async function run(message: RunMessage): Promise<void> {
     ...(progress ? {
       externalProgress: progress,
       completionFence: {
-        begin: () => new Promise<number | undefined>((resolve, reject) => {
+        begin: forRecovery => new Promise<number | undefined>((resolve, reject) => {
           if (completionFenceBeginWaiters.has(message.id)) {
             reject(new Error("Browser helper completion fence already awaits a begin result"));
             return;
@@ -244,7 +282,7 @@ async function run(message: RunMessage): Promise<void> {
           completionFenceRequestId += 1;
           const requestId = completionFenceRequestId;
           completionFenceBeginWaiters.set(message.id, { requestId, resolve, reject });
-          if (!writeProtocol({ type: "event", id: message.id, event: "completion_fence_begin", requestId })) {
+          if (!writeProtocol({ type: "event", id: message.id, event: "completion_fence_begin", requestId,forRecovery })) {
             completionFenceBeginWaiters.delete(message.id);
             reject(new Error("Browser helper could not begin the broker completion fence"));
           }
@@ -331,6 +369,10 @@ async function run(message: RunMessage): Promise<void> {
   } finally {
     preparedSelections.get(message.id)?.cancel();
     preparedSelections.delete(message.id);
+    steeringProgress.delete(message.id);
+    rejectSteeringReceipt(message.id, "Browser turn ended before steering receipt acknowledgement");
+    const recoveryWaiter = recoveryWaiters.get(message.id); recoveryWaiters.delete(message.id);
+    recoveryWaiter?.reject(new DOMException('Browser recovery ended before capability acknowledgement','AbortError'));
     const sendWaiter = sendActivationWaiters.get(message.id);
     sendActivationWaiters.delete(message.id);
     sendWaiter?.reject(new DOMException("Browser helper turn ended before Send acknowledgement", "AbortError"));
@@ -411,7 +453,32 @@ input.on("line", line => {
     writeProtocol({ type: "error", id: "protocol", message: "Browser helper received invalid JSON" });
     return;
   }
-  if (message.type === "prepared_selected_ack") {
+  if (message.type === 'prepare_recovery_ack') {
+    const waiter = recoveryWaiters.get(message.id);
+    if (!waiter) return;
+    recoveryWaiters.delete(message.id);
+    const prepared = message.prepared;
+    if (!prepared || typeof prepared.text !== 'string' || !Array.isArray(prepared.images)
+      || prepared.contextArchive || prepared.multipart || prepared.steeringDeltaId!==undefined&&!/^steering-[0-9a-f-]{36}$/.test(prepared.steeringDeltaId)) {
+      waiter.reject(new Error('Invalid recovery capability delta')); return;
+    }
+    waiter.resolve(prepared);
+  } else if (message.type === "steering_submitted_ack") {
+    const waiter = steeringReceiptWaiters.get(message.id);
+    if (!waiter) return;
+    if (message.deltaId !== waiter.deltaId) {
+      rejectSteeringReceipt(message.id, "Steering receipt acknowledgement does not match the reserved delta");
+      abortControllers.get(message.id)?.abort();
+      return;
+    }
+    steeringReceiptWaiters.delete(message.id);
+    waiter.resolve();
+  } else if(message.type==='steering_progress'){
+    if(!abortControllers.has(message.id))return;
+    const snapshot=message.snapshot;
+    if(!snapshot||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0||typeof snapshot.pending!=='boolean')return;
+    if(snapshot.revision>(steeringProgress.get(message.id)?.revision??0))steeringProgress.set(message.id,snapshot);
+  } else if (message.type === "prepared_selected_ack") {
     const prepared = message.prepared;
     if (!prepared || typeof prepared.text !== "string" || !Array.isArray(prepared.images)) {
       writeProtocol({ type: "error", id: message.id, message: "Browser helper prompt selection is invalid" });
@@ -491,7 +558,10 @@ input.on("line", line => {
     abortControllers.get(message.id)?.abort(message.reason === "compaction_handoff_accepted"
       ? new ChatGptCompactionHandoffAccepted()
       : undefined);
+    rejectSteeringReceipt(message.id, "Browser steering receipt request aborted");
     preparedSelections.get(message.id)?.cancel();
+    const recoveryWaiter = recoveryWaiters.get(message.id); recoveryWaiters.delete(message.id);
+    recoveryWaiter?.reject(new DOMException('Browser recovery capability request aborted', 'AbortError'));
     const waiter = sendActivationWaiters.get(message.id);
     sendActivationWaiters.delete(message.id);
     waiter?.reject(new DOMException("Browser helper turn aborted before Send acknowledgement", "AbortError"));
@@ -542,4 +612,4 @@ process.once("SIGTERM", () => {
 });
 
 // Advertise the optional frames this helper understands so the daemon can negotiate them explicitly.
-writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "multipart-stage-ack", "skill-attachments"] });
+writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "multipart-stage-ack", "skill-attachments", "context-archive", "context-archive-single-send-v1", "same-chat-recovery", "live-steering", "steering-receipt-ack"] });

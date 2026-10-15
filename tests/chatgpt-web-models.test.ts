@@ -16,7 +16,7 @@ import {
   CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE,
   CHATGPT_WEB_MODEL_ROUTES,
   requireChatGptWebModelRoute,
-  resolveChatGptWebContextLimits,
+  resolveChatGptWebTransportContextLimits as resolveChatGptWebContextLimits,
   resolveChatGptWebTransportLimits,
 } from "../src/chatgpt-web-models";
 import { defaultConfig } from "../src/config";

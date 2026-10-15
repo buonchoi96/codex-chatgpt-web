@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isReadableCompactionSummaryText, OPAQUE_COMPACTION_NOTE } from "../../responses/compaction";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
+import { ChatGptWebAdapterError } from "./adapter-error";
 import { isAcceptedCompactionContinuation, recoverCompactionInstruction } from "./compaction-continuation";
 
 export type ChatGptSandboxPolicy =
@@ -179,6 +180,9 @@ export function unattributedChatGptEnvironmentMessages(
 function contextualUserMessage(value: Record<string, unknown>): boolean {
   const text = rawMessageText(value).trim();
   return hasEnvironmentContextFragment(value)
+    || /^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(text)
+    || /^<goal_context>[\s\S]*<\/goal_context>$/.test(text)
+    || /^<turn_aborted>[\s\S]*<\/turn_aborted>$/.test(text)
     || /^<subagent_notification>[\s\S]*<\/subagent_notification>$/.test(text)
     || isReadableCompactionSummaryText(text)
     || text === OPAQUE_COMPACTION_NOTE;
@@ -312,7 +316,14 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
 export function extractChatGptCompactionSourceRevision(parsed: CodexParsedRequest): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
   const revision = latestChatGptTurnUserRevision(parsed, extractChatGptTurnIdentity(parsed).turnId);
-  if (!revision) throw new Error("ChatGPT web compaction requires a source user message");
+  if (!revision || (revision.turnId && priorChatGptAbortedTurnIds(parsed).includes(revision.turnId))) {
+    // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
+    // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.
+    throw new ChatGptWebAdapterError(
+      "ChatGPT web compaction requires a canonical source user message; preserve the active task and supply an authentic Codex instruction before retrying.",
+      { status: 409, errorType: "invalid_request_error", code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING", retryable: false },
+    );
+  }
   return revision;
 }
 
