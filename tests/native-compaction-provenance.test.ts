@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {recoverCompactionInstruction} from '../src/adapters/chatgpt-web/compaction-continuation';
 import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compaction';
 import {parseRequest} from '../src/responses/parser';
-import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision} from '../src/adapters/chatgpt-web/environment';
+import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
@@ -452,4 +452,74 @@ test('an id-only new human message following a compact supersedes stale native p
     if(prior===undefined)delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME=prior;
   }
+});
+
+test('standalone compact authenticates latest native user when the persisted turn_context belongs to a different turn',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  // The earlier user source is still the most recent native human instruction,
+  // but neither its turn nor the compact turn equals the latest persisted context.
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const result=resolveNativeCompactionSource(f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home});
+  expect(result?.source.itemId).toBe(f.source.id);
+});
+
+test.each(['different-source','newer-native-instruction','altered-source','wrong-current-model'] as const)(
+  'standalone compact never borrows an obsolete native source when latest turn differs: %s',change=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  if(change==='different-source'){
+    const native=f.records[1]!.payload as Record<string,unknown>;
+    native.id='msg_not_the_original_source';
+  }
+  if(change==='newer-native-instruction'){
+    const newer=structuredClone(f.source);newer.id='msg_newer_task';
+    newer.content=[{type:'input_text',text:'Newer unrelated user instruction'}];
+    f.records.splice(2,0,{type:'response_item',payload:newer});
+  }
+  if(change==='altered-source'){
+    const native=f.records[1]!.payload as Record<string,unknown>;
+    native.content=[{type:'input_text',text:'Mutated native source'}];
+  }
+  if(change==='wrong-current-model'){
+    (f.records.at(-1)!.payload as Record<string,unknown>).model='chatgpt-web/gpt-6-pro';
+  }
+  f.write();
+  const diagnostics:string[]=[];
+  expect(()=>{
+    const source=resolveNativeCompactionSource(f.parsed,extractChatGptTurnIdentity(f.parsed),{
+      codexHome:f.home,onDiagnostic:code=>diagnostics.push(code),
+    });
+    if(source!==undefined)throw new Error('Unexpectedly accepted a mismatched source');
+  }).toThrow();
+  expect(diagnostics).toContain(change==='wrong-current-model'?'model_effort_mismatch':'latest_turn_mismatch');
+});
+
+test('ordinary replay is not authorized by a latest-native-user compaction witness',()=>{
+  const f=fixture();
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  (f.parsed._rawBody as {input:unknown[]}).input.push(structuredClone(f.source));
+  f.write();
+  expect(()=>resolveNativeCompactionSource(
+    f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
+  )).toThrow('latest_turn_mismatch');
+});
+
+test('standalone compact is never mistaken for the consumer of its earlier installed checkpoint',()=>{
+  const f=fixture();
+  f.parsed._compactionRequest=true;
+  expect(isChatGptCompactionContinuation(f.parsed)).toBe(false);
 });

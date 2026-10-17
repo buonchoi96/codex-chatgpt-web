@@ -438,6 +438,9 @@ export function extractChatGptCompactionSourceRevision(
 
 /** A completed checkpoint identifies the current turn's rebuilt environment preamble. */
 export function isChatGptCompactionContinuation(parsed: CodexParsedRequest): boolean {
+  // A new /compact operation is the producer of a checkpoint, not a consumer of
+  // an earlier checkpoint's continued native turn. Its source is checked separately.
+  if (parsed._compactionRequest) return false;
   const identity = extractChatGptTurnIdentity(parsed);
   const revision = latestChatGptTurnUserRevision(parsed, identity.turnId);
   if (revision?.turnId && identity.turnId && revision.turnId !== identity.turnId

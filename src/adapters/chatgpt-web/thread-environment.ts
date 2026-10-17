@@ -265,8 +265,15 @@ export class ChatGptThreadEnvironmentStore {
       const rolloutIdentity = lineage ?? extractChatGptRootThreadMetadata(parsed);
       // Automatic compaction has a current turn_context; standalone compaction has only its
       // source turn_context. Either must be the latest native record, never an arbitrary ancestor.
-      const compactionSourceTurnId = parsed._compactionRequest
-        ? extractChatGptCompactionSourceRevision(parsed).turnId : undefined;
+      const compactionSourceRevision = parsed._compactionRequest
+        ? extractChatGptCompactionSourceRevision(parsed) : undefined;
+      const compactionSourceTurnId = compactionSourceRevision?.turnId;
+      const compactionSource = compactionSourceRevision?.turnId && compactionSourceRevision.itemId
+        ? {
+          id: compactionSourceRevision.itemId,
+          turnId: compactionSourceRevision.turnId,
+          content: compactionSourceRevision.content,
+        } : undefined;
       if (rolloutIdentity && identity.turnId) {
         const rolloutEnvironment = resolveCurrentCodexRolloutEnvironment({
           codexHome: this.codexHome,
@@ -274,6 +281,7 @@ export class ChatGptThreadEnvironmentStore {
           lineage: rolloutIdentity,
           turnId: identity.turnId,
           ...(compactionSourceTurnId ? { compactionSourceTurnId } : {}),
+          ...(compactionSource ? { compactionSource } : {}),
           ...(historicalMessages ? { historicalEnvironmentMessages: historicalMessages } : {}),
           tools: parsed.context.tools,
         });

@@ -145,12 +145,15 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
     : undefined;
   const compactionSourceTurnId = nativeSource?.turnId && nativeSource.turnId !== identity.turnId
     ? nativeSource.turnId : undefined;
+  const compactionSource = nativeSource?.itemId && nativeSource.turnId
+    ? { id: nativeSource.itemId, turnId: nativeSource.turnId, content: nativeSource.content } : undefined;
   let installationDigest:string|undefined;
   const installationHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'undefined').digest('hex');
   try{
     return inspectCurrentCodexRollout({codexHome:options.codexHome??getCodexHome(),
       ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),lineage,turnId:identity.turnId,
-      ...(compactionSourceTurnId?{compactionSourceTurnId}:{})},({fd,size,turn})=>{
+      ...(compactionSourceTurnId?{compactionSourceTurnId}:{}),
+      ...(compactionSource?{compactionSource}:{})},({fd,size,turn})=>{
       // An omitted request preference is not a claimed model setting. The current
       // native turn must still supply actual effort evidence; never infer a default.
       if(typeof body?.model!=='string'||turn.model!==body.model||!boundedString(turn.effort)||!NATIVE_EFFORTS.has(turn.effort)||
