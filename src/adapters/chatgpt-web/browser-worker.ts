@@ -5594,7 +5594,10 @@ export class ChatGptBrowserWorker {
           }
           return draft;
         });
-        return withBrowserTurnAbort(pending, signal);
+        // Let runStage own its stage-deadline error. The caller's actual
+        // cancellation remains immediate; stage abort still releases any
+        // late draft through the signal observed above.
+        return withBrowserTurnAbort(pending, turn.abortSignal);
       },
     );
     const diagnostics = new ChatGptBrowserDiagnostics(

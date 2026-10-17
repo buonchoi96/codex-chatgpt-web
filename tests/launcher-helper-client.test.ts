@@ -233,7 +233,13 @@ test("accepted compaction retires through the helper as completed without hiding
     const run = ChatGptBrowserWorker.prototype.run;
     ChatGptBrowserWorker.prototype.run = function(turn) {
       // Substitute the browser wait only. Actual worker catch/finally, IPC and launcher end run.
-      this.runStage = async () => {
+      const originalRunStage = this.runStage.bind(this);
+      this.runStage = async (traceId, stage, timeoutMs, action, ...rest) => {
+        // The actual pre-Send handshake now has its own bounded stage. Do not
+        // emulate Send before it has finished selecting the helper draft.
+        if (stage === "prompt_preparation") {
+          return originalRunStage(traceId, stage, timeoutMs, action, ...rest);
+        }
         const stopped = new Promise((resolve, reject) => {
           turn.abortSignal.addEventListener("abort", () => reject(
             turn.traceId === "compaction_real_failure"
