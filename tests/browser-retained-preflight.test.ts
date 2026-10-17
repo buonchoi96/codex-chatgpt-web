@@ -23,13 +23,17 @@ test('a prepared but aborted canonical bootstrap does not retire a retained tab'
   expect(seen).toEqual(['prepare','prepared-released']);
 });
 
-test('a successful canonical preflight retires the old tab only after releasing its draft', async()=>{
+test('a successful canonical preflight retires tab after compiling, and returns exact draft for Send', async()=>{
   const seen:string[]=[];
-  await preflightCanonicalBeforeRetainedRetirement(
-    async()=>{seen.push('prepare');return {release:()=>{seen.push('prepared-released');}};},
+  const drafted = { text:'canonical message', release:()=>{seen.push('prepared-released');} };
+  const exact=await preflightCanonicalBeforeRetainedRetirement(
+    async()=>{seen.push('prepare');return drafted;},
     async()=>{seen.push('retire');},
   );
-  expect(seen).toEqual(['prepare','prepared-released','retire']);
+  expect(exact).toBe(drafted);
+  expect(seen).toEqual(['prepare','retire']);
+  exact.release();
+  expect(seen).toEqual(['prepare','retire','prepared-released']);
 });
 
 test('failed draft cleanup cannot destroy the retained tab',async()=>{

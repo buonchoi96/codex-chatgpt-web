@@ -2458,19 +2458,23 @@ export function insertPlainTextIntoComposer(element: HTMLElement, value: string)
  * The compiled draft is not submitted here; the canonical history remains
  * authoritative and no response/tool action has been replayed.
  */
-export async function preflightCanonicalBeforeRetainedRetirement(
-  prepare: () => Promise<{ release: () => void }>,
+export async function preflightCanonicalBeforeRetainedRetirement<T extends { release: () => void }>(
+  prepare: () => Promise<T>,
   retire: () => Promise<void>,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<T> {
   signal?.throwIfAborted();
   const prepared = await prepare();
   try {
     signal?.throwIfAborted();
-  } finally {
+    await retire();
+    // The verified exact draft must be reused for Send, not compiled again
+    // after the tab was retired. The caller owns its eventual release.
+    return prepared;
+  } catch (error) {
     prepared.release();
+    throw error;
   }
-  await retire();
 }
 
 export class ChatGptBrowserWorker {
@@ -5379,16 +5383,27 @@ export class ChatGptBrowserWorker {
 
     // A process restart or changed canonical ancestry invalidates suffix authority.
     // Retire the prior owned lease before acquiring a fresh canonical bootstrap.
+    let canonicalPreflight: Awaited<ReturnType<BrowserTurn["prepare"]>> | undefined;
     if (turn.conversationKey && !turn.prepareResume && !turn.requireRetainedConversation) {
-      // An over-budget canonical prompt can fail before Web Send. If we retire
-      // the last retained tab first, that failure irreversibly loses the only
-      // currently accessible browser context. Validate the canonical bootstrap
-      // before retiring the tab, and never treat its preparation as a Send.
-      await preflightCanonicalBeforeRetainedRetirement(
+      // Never retire the last retained Web tab until the exact canonical
+      // bootstrap has passed prompt compilation and transport preflight.
+      const ready = await preflightCanonicalBeforeRetainedRetirement(
         turn.prepare,
         () => releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey!),
         turn.abortSignal,
       );
+      let released = false;
+      canonicalPreflight = {
+        ...ready,
+        release: () => {
+          if (released) return;
+          released = true;
+          ready.release();
+        },
+      };
+      // Send the SAME prepared draft; a second compiler pass could reject
+      // after the retained history is already discarded.
+      turn = { ...turn, prepare: async () => canonicalPreflight! };
     }
 
     const lease = await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
@@ -5402,6 +5417,7 @@ export class ChatGptBrowserWorker {
         : {}),
       ...(turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
     }, undefined, turn.abortSignal).catch(error => {
+      canonicalPreflight?.release();
       if (error instanceof LauncherBrowserTurnCancelledError) throw chatGptBrowserTabClosedError();
       if (error instanceof LauncherRetainedConversationUnavailableError) {
         throw chatGptRetainedConversationUnavailableError();
@@ -5477,6 +5493,7 @@ export class ChatGptBrowserWorker {
       terminalMessage = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
       throw error;
     } finally {
+      canonicalPreflight?.release();
       activityFinished = true;
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       try {
