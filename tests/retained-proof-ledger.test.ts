@@ -78,6 +78,16 @@ test('late final receipts cannot roll durable retained ancestry backwards',()=>{
   // The next genuine follow-up can still advance the ledger monotonically.
   expect(reopened().commit(f.key,after,'Completed third turn')).toBe(true);
 });
+test('a fresh accepted canonical answer repairs a corrupt proof file',()=>{
+  const f=fixture();
+  const store=new RetainedConversationProofStore(()=>100,()=>f.file);
+  expect(store.commit(f.key,f.source,'Completed previous turn')).toBe(true);
+  writeFileSync(f.file,'corrupt prior process write');
+  expect(store.check(f.key,f.next).reason).toBe('ledger_invalid');
+  // The accepted Web send is the new authority; the invalid ledger is not.
+  expect(store.commit(f.key,f.source,'Completed previous turn')).toBe(true);
+  expect(new RetainedConversationProofStore(()=>110,()=>f.file).check(f.key,f.next).reason).toBe('verified');
+});
 test('expired durable proof cannot authorize a stale browser suffix',()=>{
   const f=fixture();
   new RetainedConversationProofStore(()=>100,()=>f.file).commit(f.key,f.source,'Completed previous turn');

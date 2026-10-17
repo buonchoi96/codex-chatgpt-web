@@ -77,7 +77,9 @@ export class RetainedConversationProofStore {
     }
   }
   commit(key: string, parsed: CodexParsedRequest, answer: string): boolean {
-    if (!this.load()) return false;
+    // A newly accepted canonical Web Send may repair an invalid old ledger;
+    // only reusable ancestry needs a previously valid proof.
+    this.load();
     this.prune();
     const messages = parsed.context.messages;
     const prefixLength = messages.length;
@@ -94,7 +96,8 @@ export class RetainedConversationProofStore {
       if (prefixLength === previous.prefixLength) {
         // An exact duplicate is idempotent; a competing answer or ancestry
         // must not displace the already committed browser response.
-        return prefixHash === previous.prefixHash && answerHash === previous.answerHash;
+        if (prefixHash !== previous.prefixHash || answerHash !== previous.answerHash) return false;
+        return this.save();
       }
       // A longer history must include the exact prior canonical input and
       // final reply at their original boundary. Do not accept an unrelated
