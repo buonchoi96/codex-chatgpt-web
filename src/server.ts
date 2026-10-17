@@ -724,7 +724,7 @@ export async function responseRequest(
       v1Source = extractChatGptCompactionSourceRevision({
         ...parsed,
         _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
-      }, { recoverCheckpoint: false });
+      }, { recoverCheckpoint: false, allowAbortedRetainedComparison: true });
     } catch (error) {
       // A v1 compact can retain only an already-aborted older human instruction when
       // the live task was a synthetic delegation. That retained instruction must not
