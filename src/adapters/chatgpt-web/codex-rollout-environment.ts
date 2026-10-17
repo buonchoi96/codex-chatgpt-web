@@ -331,6 +331,15 @@ export type LatestNativeCompactionSourceReason =
   | "native_source_owner_differs"
   | "native_source_content_differs";
 
+/** Native-tagged context is not a human instruction even when its content is
+ * prose (e.g. the AGENTS.md instruction refresh). This allowlist is intentionally
+ * closed: unknown or missing kinds must never be silently treated as context. */
+const NATIVE_NONHUMAN_USER_KINDS=new Set([
+  "agents_md.instructions",
+  "environments.environment_context",
+  "additional_content.codex_apps_open_page",
+]);
+
 /** Diagnostic classification only: no file path, instruction text, ids, or hashes
  * are logged. A failed witness never grants permission to compact. */
 export function diagnoseLatestNativeCompactionSource(
@@ -344,6 +353,7 @@ export function diagnoseLatestNativeCompactionSource(
   let pending=Buffer.alloc(0);
   let latest: { id:string;turnId:string;content:unknown } | undefined;
   let sawCandidateId=false;
+  let untypedAfterLatest=false;
   while(offset<size){
     const length=Math.min(ROLLOUT_READ_CHUNK_BYTES,size-offset);
     const chunk=Buffer.alloc(length);
@@ -371,9 +381,20 @@ export function diagnoseLatestNativeCompactionSource(
         ||/^<(environment_context|goal_context|turn_aborted|subagent_notification)>[\s\S]*<\/\1>$/.test(trimmed)
         ||bodyText.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
         ||trimmed==="[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
-      if(nativeContext)continue;
+      // Native metadata provides stronger evidence than text wrapping: some
+      // control-plane context is normal prose without XML markers. Ignore it
+      // only when the native record has a complete, known non-human kind and
+      // an authenticated owner. Never extend this to arbitrary untyped items.
+      const typedNativeContext=typeof payload.id==="string"&&payload.id.length>0
+        &&typeof metadata?.turn_id==="string"&&metadata.turn_id.length>0
+        &&Array.isArray(kinds)&&kinds.length>0
+        &&kinds.every(kind=>typeof kind==="string"&&NATIVE_NONHUMAN_USER_KINDS.has(kind));
+      if(nativeContext||typedNativeContext)continue;
       if(!Array.isArray(kinds)||!kinds.some(kind=>kind==="user.text"||kind==="user.image")){
-        if(latest!==undefined)return reject("untyped_native_user_after_instruction");
+        // Order matters: an untyped item BETWEEN two typed human instructions
+        // cannot supersede the *later* typed human. Defer rejection until the
+        // entire native rollout is read; only a trailing untyped item is fatal.
+        if(latest!==undefined)untypedAfterLatest=true;
         continue;
       }
       const id=payload.id,turnId=metadata?.turn_id;
@@ -381,12 +402,14 @@ export function diagnoseLatestNativeCompactionSource(
         return reject("native_user_identity_missing");
       if(id===source.id)sawCandidateId=true;
       latest={id,turnId,content:payload.content};
+      untypedAfterLatest=false;
     }
     pending=Buffer.from(data.subarray(start));
     if(pending.length>MAX_ROLLOUT_JSON_LINE_BYTES)return reject("native_record_oversize");
   }
   if(pending.length!==0)return reject("native_record_incomplete");
   if(latest===undefined)return reject("no_typed_native_user");
+  if(untypedAfterLatest)return reject("untyped_native_user_after_instruction");
   if(latest.id!==source.id)return reject(sawCandidateId
     ?"superseded_by_newer_native_user":"source_not_in_native_rollout");
   if(source.turnId!==undefined&&latest.turnId!==source.turnId)

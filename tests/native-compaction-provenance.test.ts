@@ -825,3 +825,58 @@ test('native compact mismatch diagnostics distinguish owner, content, newer inst
   f.records.splice(2,0,{type:'response_item',payload:later});f.write();
   expect(check(exact).reason).toBe('superseded_by_newer_native_user');
 });
+
+test('native AGENTS, environment and open-page context kinds cannot supersede a verified human instruction',()=>{
+  const f=fixture();
+  const witness={id:f.source.id,turnId:f.oldTurn,content:f.source.content};
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  for(const [i,kind] of ['agents_md.instructions','environments.environment_context',
+    'additional_content.codex_apps_open_page'].entries()){
+    f.records.splice(2+i,0,{type:'response_item',payload:{
+      type:'message',role:'user',id:'native_context_'+i,
+      // Ordinary prose must not be mistaken for an actual human instruction:
+      content:[{type:'input_text',text:'System-injected context without an XML wrapper.'}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.turn,content_item_kinds:[kind]},
+    }});
+  }
+  f.write();
+  const fd=openSync(f.file,'r');
+  try{
+    expect(diagnoseLatestNativeCompactionSource(fd,statSync(f.file).size,witness))
+      .toEqual({matches:true,reason:'matched'});
+  }finally{closeSync(fd);}
+});
+
+test('an untyped native user between old and latest typed human does not invalidate the latest witness',()=>{
+  const f=fixture();
+  const older=structuredClone(f.source);older.id='earlier_human';
+  f.records.splice(1,0,
+    {type:'response_item',payload:older},
+    {type:'response_item',payload:{type:'message',role:'user',id:'intervening_untyped',
+      content:[{type:'input_text',text:'Unknown intermediate context.'}]}},
+    {type:'response_item',payload:structuredClone(f.source)},
+  );
+  f.write();
+  const fd=openSync(f.file,'r');
+  try{
+    expect(diagnoseLatestNativeCompactionSource(fd,statSync(f.file).size,
+      {id:f.source.id,turnId:f.oldTurn,content:f.source.content}))
+      .toEqual({matches:true,reason:'matched'});
+  }finally{closeSync(fd);}
+});
+
+test('an unknown native kind after the latest typed instruction still fails closed',()=>{
+  const f=fixture();
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)},
+    {type:'response_item',payload:{type:'message',role:'user',id:'unknown_context',
+      content:[{type:'input_text',text:'Potential later human task.'}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.turn,content_item_kinds:['unknown.provider_kind']}}},
+  );
+  f.write();
+  const fd=openSync(f.file,'r');
+  try{
+    expect(diagnoseLatestNativeCompactionSource(fd,statSync(f.file).size,
+      {id:f.source.id,turnId:f.oldTurn,content:f.source.content}))
+      .toEqual({matches:false,reason:'untyped_native_user_after_instruction'});
+  }finally{closeSync(fd);}
+});
