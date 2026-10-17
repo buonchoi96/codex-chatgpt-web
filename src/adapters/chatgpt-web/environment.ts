@@ -329,7 +329,7 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
     // An older-turn item inside a compact request is NOT a source merely
     // because Codex replayed it. The only alternatives to the direct native
     // newest-human witness above are an exact authenticated checkpoint source.
-    if (recovered?.source.itemId === latest.itemId
+    if (recovered && recovered.source.itemId === latest.itemId
       && recovered.source.turnId === latest.turnId
       && isDeepStrictEqual(recovered.source.content, latest.content)) return recovered.source;
     throw new ChatGptWebAdapterError(
