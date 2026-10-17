@@ -77,12 +77,37 @@ export class RetainedConversationProofStore {
     }
   }
   commit(key: string, parsed: CodexParsedRequest, answer: string): boolean {
-    this.load();
+    if (!this.load()) return false;
     this.prune();
+    const messages = parsed.context.messages;
+    const prefixLength = messages.length;
+    const prefixHash = messagesHash(messages);
+    const currentPolicyHash = policyHash(parsed);
+    const answerHash = hash(answer.replaceAll("\r\n", "\n").trimEnd());
+    const previous = this.proofs.get(key);
+    if (previous && previous.policyHash === currentPolicyHash) {
+      // Completion events can arrive after a newer /goal follow-up has already
+      // committed. Never let a stale observer roll the retained browser head
+      // back to an older canonical prefix, which would force an over-budget
+      // cold bootstrap on the next turn.
+      if (prefixLength < previous.prefixLength) return false;
+      if (prefixLength === previous.prefixLength) {
+        // An exact duplicate is idempotent; a competing answer or ancestry
+        // must not displace the already committed browser response.
+        return prefixHash === previous.prefixHash && answerHash === previous.answerHash;
+      }
+      // A longer history must include the exact prior canonical input and
+      // final reply at their original boundary. Do not accept an unrelated
+      // branch merely because its message count increased.
+      const priorAnswer = answerText(messages[previous.prefixLength]!);
+      if (messagesHash(messages.slice(0, previous.prefixLength)) !== previous.prefixHash
+        || !priorAnswer || hash(priorAnswer) !== previous.answerHash) return false;
+    }
+    // A policy change is a cold bootstrap, handled by launcher retirement.
+    // That path explicitly invalidates the old proof before committing anew.
     this.proofs.delete(key);
-    this.proofs.set(key, { prefixLength: parsed.context.messages.length,
-      prefixHash: messagesHash(parsed.context.messages), policyHash: policyHash(parsed),
-      answerHash: hash(answer.replaceAll("\r\n", "\n").trimEnd()), at: this.now() });
+    this.proofs.set(key, { prefixLength, prefixHash, policyHash: currentPolicyHash,
+      answerHash, at: this.now() });
     this.prune();
     return this.save();
   }

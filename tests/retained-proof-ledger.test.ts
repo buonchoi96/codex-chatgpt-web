@@ -52,6 +52,32 @@ test('durable proof rejects mutated policy, changed answer, missing ownership an
   writeFileSync(f.file,JSON.stringify(data));
   expect(new RetainedConversationProofStore(()=>110,()=>f.file).check(f.key,f.next).reason).toBe('ledger_invalid');
 });
+test('late final receipts cannot roll durable retained ancestry backwards',()=>{
+  const f=fixture();
+  const store=new RetainedConversationProofStore(()=>100,()=>f.file);
+  expect(store.commit(f.key,f.source,'Completed previous turn')).toBe(true);
+  // The next browser turn saw the previous verified answer and all new input.
+  expect(store.commit(f.key,f.next,'Completed next turn')).toBe(true);
+  const after=structuredClone(f.next);
+  after.context.messages.push(
+    {role:'assistant',content:[{type:'text',text:'Completed next turn'}],timestamp:4},
+    {role:'user',content:'Continue with a third operation',timestamp:5},
+  );
+  const reopened=()=>new RetainedConversationProofStore(()=>110,()=>f.file);
+  expect(reopened().check(f.key,after).reason).toBe('verified');
+  // An observer from the first response completes later, after daemon restart.
+  expect(reopened().commit(f.key,f.source,'Completed previous turn')).toBe(false);
+  expect(reopened().check(f.key,after).reason).toBe('verified');
+  // Same canonical round and a different answer must not overwrite a winner.
+  expect(reopened().commit(f.key,f.next,'Conflicting late answer')).toBe(false);
+  expect(reopened().commit(f.key,f.next,'Completed next turn')).toBe(true);
+  const diverted=structuredClone(after);
+  diverted.context.messages[0]!.content='Different canonical ancestry';
+  expect(reopened().commit(f.key,diverted,'Foreign answer')).toBe(false);
+  expect(reopened().check(f.key,after).reason).toBe('verified');
+  // The next genuine follow-up can still advance the ledger monotonically.
+  expect(reopened().commit(f.key,after,'Completed third turn')).toBe(true);
+});
 test('expired durable proof cannot authorize a stale browser suffix',()=>{
   const f=fixture();
   new RetainedConversationProofStore(()=>100,()=>f.file).commit(f.key,f.source,'Completed previous turn');
