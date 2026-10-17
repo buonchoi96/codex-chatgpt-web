@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {recoverCompactionInstruction} from '../src/adapters/chatgpt-web/compaction-continuation';
 import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compaction';
 import {parseRequest} from '../src/responses/parser';
-import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
+import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
@@ -522,4 +522,49 @@ test('standalone compact is never mistaken for the consumer of its earlier insta
   const f=fixture();
   f.parsed._compactionRequest=true;
   expect(isChatGptCompactionContinuation(f.parsed)).toBe(false);
+});
+
+test('an end-to-end compact source read survives a later turn_context when its native input is still the newest human message',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  f.records.push({type:'response_item',payload:{
+    type:'message',role:'user',id:'msg_goal_context',
+    content:[{type:'input_text',text:'<codex_internal_context source="goal">Continue active goal</codex_internal_context>'}],
+  }});
+  (f.records[3]!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const previous=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try{
+    expect(extractChatGptCompactionSourceRevision(f.parsed)).toEqual({
+      content:f.source.content,turnId:f.oldTurn,itemId:f.source.id,
+    });
+  }finally{
+    if(previous===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=previous;
+  }
+});
+
+test('a later untyped native user item cannot silently reinstate the earlier compact source',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)},
+    {type:'response_item',payload:{
+      type:'message',role:'user',id:'msg_untyped_new_task',
+      content:[{type:'input_text',text:'A newer untyped request'}],
+    }});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  expect(()=>resolveNativeCompactionSource(f.parsed,extractChatGptTurnIdentity(f.parsed),{
+    codexHome:f.home,
+  })).toThrow('latest_turn_mismatch');
 });

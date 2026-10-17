@@ -342,7 +342,21 @@ export function verifyLatestNativeCompactionSource(
       if (item.type !== "response_item" || payload?.type !== "message" || payload.role !== "user") continue;
       const metadata = record(payload.internal_chat_message_metadata_passthrough);
       const kinds = metadata?.content_item_kinds;
-      if (!Array.isArray(kinds) || !kinds.some(kind => kind === "user.text" || kind === "user.image")) continue;
+      const content = payload.content;
+      const bodyText = typeof content === "string" ? content
+        : Array.isArray(content) && content.every(part => (
+          record(part)?.type === "input_text" && typeof record(part)?.text === "string"
+        )) ? content.map(part => record(part)!.text).join("\n") : "";
+      const nativeContext = /^<(?:codex_internal_context\s+source="[a-z][a-z0-9_]*"|environment_context|goal_context|turn_aborted|subagent_notification)\b/.test(bodyText.trim())
+        || bodyText.startsWith("The following is a summary of the conversation so far:");
+      // Native context fragments are not human instructions even when serialized as user.
+      if (nativeContext) continue;
+      if (!Array.isArray(kinds) || !kinds.some(kind => kind === "user.text" || kind === "user.image")) {
+        // An untyped native user item after our last proven human message might
+        // be a newer instruction. It must not silently preserve an older source.
+        if (latest !== undefined) return false;
+        continue;
+      }
       const id = payload.id;
       const turnId = metadata?.turn_id;
       if (typeof id !== "string" || !id || typeof turnId !== "string" || !turnId) return false;
