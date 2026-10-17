@@ -694,7 +694,15 @@ test.each(['altered-content','newer-human','missing-native-source','untyped-nati
   }
   if(change==='ordinary-replay')f.parsed._compactionRequest=false;
   f.write();
-  expect(()=>resolveNativeCompactionSource(
-    f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
-  )).toThrow('latest_turn_mismatch');
+  if(change==='ordinary-replay'){
+    // An ordinary replay without an eligible current checkpoint may reject
+    // by returning no authenticated source instead of raising a diagnostic.
+    expect(resolveNativeCompactionSource(
+      f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
+    )).toBeUndefined();
+  }else{
+    expect(()=>resolveNativeCompactionSource(
+      f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
+    )).toThrow('latest_turn_mismatch');
+  }
 });
