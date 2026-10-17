@@ -8,6 +8,7 @@ import {
   CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
 } from "./chatgpt-web-models";
 import type { CodexProviderConfig } from "./types";
+import { parseNativeScreenObserverConfig, type NativeScreenObserverConfig } from "./native-screen-observer-config";
 import { VERSION } from "./version";
 
 export type RuntimeMode = "browser-only" | "full";
@@ -133,6 +134,7 @@ export interface AppConfig {
   tunnel?: TunnelConfig;
   automaticTunnel?: TunnelConfig;
   manualTunnel?: TunnelConfig;
+  nativeScreenObserver?: NativeScreenObserverConfig;
 }
 
 export function tunnelConfigForInteractionMode(
@@ -417,6 +419,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
   }
   if (typeof parsed.releaseVersion !== "string" || !parsed.releaseVersion.trim()) throw new Error(`Missing releaseVersion in ${path}`);
   if (parsed.mode !== "browser-only" && parsed.mode !== "full") throw new Error(`Invalid runtime mode in ${path}`);
+  const nativeScreenObserver = parseNativeScreenObserverConfig(parsed.nativeScreenObserver);
   const subagentProtocol = parsed.subagentProtocol ?? "compatibility-v1";
   if (subagentProtocol !== "compatibility-v1" && subagentProtocol !== "native") {
     throw new Error(`Invalid subagentProtocol in ${path}`);
@@ -592,6 +595,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
     experimentalFreshConversationPerTurn,
     useSavedChats,
     zeroRiskProEnabled,
+    ...(nativeScreenObserver ? { nativeScreenObserver } : {}),
   } as AppConfig;
 }
 

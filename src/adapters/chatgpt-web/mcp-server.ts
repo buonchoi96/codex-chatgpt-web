@@ -11,8 +11,10 @@ import { callTurnBroker, TurnBrokerTimeoutError, type BrokerRetirementDiagnostic
 import { observeMcpToolCalls } from "./mcp-observation";
 import {ARCHIVE_READ_CONTROL_WIRE_NAME,assertArchiveReadProof} from './archive-read-proof';
 import {gatewayMetadataProgram,restoreGatewayResultMetadata} from './gateway-result-metadata';
+import {nativeCommandRegistryProgram,resolveNativeCommandDescriptor,nativeCommandDescriptorGuard} from './native-command-schema';
 import {classifyChatGptToolFailure} from './tool-failure-classification';
 import { BlockedOperationLedger } from './blocked-operation-ledger';
+import {readBlockedOperationReview,SAFETY_REVIEW_CONTROL_WIRE_NAME,type BlockedOperationReviewOptions} from './blocked-operation-review';
 import {CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME,parallelCommandBatchSchema,NativeCommandCapacity,runParallelNativeCommands,isIndependentLiteralRead,type ParallelCommand} from './parallel-native-commands';
 import {ScreenObservationRegistry,screenObserveArguments,NativeScreenObservationError,type NativeScreenProvider} from './screen-observation';
 
@@ -34,6 +36,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_apply_patch",
   "codex_view_image",
   "codex_screen_observe",
+  "codex_safety_review",
   "codex_tool_inventory",
   "codex_tool_call",
   "codex_turn_complete",
@@ -47,6 +50,9 @@ const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
 
 const turnTokenSchema = z.string().min(20).max(256);
 const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
+const safetyReviewShape={offset:z.number().int().min(0).max(10_000).optional(),
+  limit:z.number().int().min(1).max(50).optional(),snapshot_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()};
+const safetyReviewArgumentsSchema=z.strictObject(safetyReviewShape);
 // Match Codex's default wait interval while returning before the MCP invocation deadline.
 export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
@@ -547,6 +553,20 @@ export async function createChatGptMcpServer(options: {
     }
   };
 
+  const safetyReview=(claimed:ClaimedTurn,input:BlockedOperationReviewOptions)=>{
+    const review=readBlockedOperationReview(blockedOperationLedger,claimed.environment,input);
+    const isError=['unavailable','snapshot_changed','invalid_cursor'].includes(review.status);
+    return result({...review,...(isError?{error:{code:`safety_review_${review.status}`,retryable:false,
+      message:'The unresolved-operation review could not complete. Preserve the original blocker; no native operation was executed or retried.'}}:{})},isError);
+  };
+  server.registerTool('codex_safety_review',{
+    title:'Review unresolved native operation records',
+    description:afterSafeStart(contract,'Read one page of local unresolved-operation bookkeeping for the current workspace. No command execution, retry, approval or resolution is performed. Complete pagination using next_offset and snapshot_sha256; changed snapshots require a fresh review. Local records do not prove execution or grant permission.'+(contract==='native'?' The same read-only operation is available through codex_tool_call wire_name codex.control.safety_review.':'')),
+    inputSchema:z.strictObject({...turnReferenceInput(contract),...safetyReviewShape}),
+    annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+  },async(input,extra)=>withClaimedTurn('codex_safety_review',turnReference(contract,input),extra,
+    claimed=>safetyReview(claimed,{offset:input.offset,limit:input.limit,snapshot_sha256:input.snapshot_sha256})));
+
   if (contract === "safe") {
     server.registerTool(
       "codex_turn_start",
@@ -592,7 +612,12 @@ export async function createChatGptMcpServer(options: {
     const releaseCommand=!commandCapacityReserved&&(nativeCommand||opaqueGateway)
       ?commandCapacity.acquire(commandOwner,1,read?'read':'exclusive'):undefined;
     const timeoutMs = chatGptMcpInvocationTimeout(bound);
+    const observationId = randomBytes(16).toString("hex");
+    let safetyObservationRecorded = false;
+    let safetyLedgerFailure = false;
     const recordSafetyRefusal = (): void => {
+      if (safetyObservationRecorded) return;
+      safetyObservationRecorded = true;
       // A refusal is not proof that native dispatch never happened. Persist an unresolved
       // prerequisite without command text, images, tokens or other raw arguments.
       try {
@@ -601,14 +626,24 @@ export async function createChatGptMcpServer(options: {
           arguments: tool.freeform ? payload.input : payload.arguments,
           owner: bindingId,
           targetScope: { cwd: bound.cwd, roots: bound.roots },
+          observationId,
         });
         console.error(`[chatgpt-web-mcp] safety_blocker_recorded ${JSON.stringify({
           blocker_id: blocker.blocker_id, tool: wireName(tool), resolution: blocker.resolution,
         })}`);
       } catch (journalError) {
+        safetyLedgerFailure = true;
         console.error(`[chatgpt-web-mcp] safety_blocker_persistence_failed ${journalError instanceof Error ? journalError.name : "UnknownError"}`);
       }
     };
+    const ledgerFailure = () => ({
+      code: "safety_blocker_persistence_failed",
+      classification: "SAFETY_STATUS_UNDETERMINED",
+      resolution: "PENDING_RECEIPT_RECONCILIATION",
+      execution_state: "unknown",
+      retryable: false,
+      message: "The safety refusal remains binding. Its persistent record could not be verified; retain this receipt for review. Do not retry or switch tools.",
+    });
     try {
       const response = await callTurnBroker<BrokerToolResult>(options.brokerSocketPath, {
         method: "invoke",
@@ -638,7 +673,12 @@ export async function createChatGptMcpServer(options: {
           );
         }
       }
-      return asMcpResult(restoredResponse);
+      // Keep the exact native error, structured payload, metadata and images. Persistence
+      // failure is an additional unresolved receipt, never a successful/forgotten blocker.
+      return asMcpResult(safetyLedgerFailure ? {
+        ...restoredResponse,
+        content: [...restoredResponse.content, { type: "text", text: JSON.stringify(ledgerFailure()) }],
+      } : restoredResponse);
     } catch (error) {
       releaseCommand?.retainUncertain();
       const thrownSafetyRefusal = classifyChatGptToolFailure({ isError: true, error }).classification
@@ -683,6 +723,7 @@ export async function createChatGptMcpServer(options: {
       if (thrownSafetyRefusal) {
         return result({
           code: "safety_status_unknown_or_blocked", tool: wireName(tool), retryable: false,
+          ...(safetyLedgerFailure ? { safety_ledger: ledgerFailure() } : {}),
           message: "Codex Native reported an explicit OpenAI safety refusal. Execution is unverified; do not replay this operation or switch tools to bypass the refusal.",
         }, true);
       }
@@ -708,7 +749,7 @@ export async function createChatGptMcpServer(options: {
     }, signal,marker,nestedToolName==='write_stdin',nestedToolName);
   };
 
-  const parallelCommands = (claimed: ClaimedTurn, commands: ParallelCommand[], signal?: AbortSignal) => {
+  const parallelCommands = async (claimed: ClaimedTurn, commands: ParallelCommand[], signal?: AbortSignal) => {
     if(claimed.commandAdmission!=='active')throw new Error('Parallel native task admission is unavailable or control-only; no command was dispatched');
     const bound=claimed.environment;
     const execCandidates=bound.tools.filter(tool=>!tool.namespace&&tool.name==='exec_command');
@@ -718,31 +759,45 @@ export async function createChatGptMcpServer(options: {
     const direct=selected[0];
     const gateway=direct?undefined:execGateway(bound);
     if(!direct&&!gateway)throw new Error('This Codex turn does not expose a native command interface; no command was dispatched');
+    // Validate read-only admission before even the metadata inventory request.
+    if(commands.some(command=>!isIndependentLiteralRead(command)))throw new Error('Parallel commands require independent literal reads; no command was dispatched');
+    let selectedCommand=direct;
+    if(!selectedCommand){
+      const marker=`codex-tool-catalog:${randomBytes(16).toString('hex')}:`;
+      const response=await invoke(claimed.bindingId,bound,gateway!,{input:nativeCommandRegistryProgram(marker)},signal);
+      const catalog=gatewayToolCatalogPage(response,new Set(),marker);
+      selectedCommand=resolveNativeCommandDescriptor(catalog.tools);
+    }
     const commandArguments=(command:ParallelCommand):Record<string,unknown>=>{
-      if(!direct)throw new Error('Parallel dispatch through the nested native gateway cannot verify its command schema before dispatch; no command was dispatched');
-      const properties=direct.parameters.properties&&typeof direct.parameters.properties==='object'&&!Array.isArray(direct.parameters.properties)
-        ?direct.parameters.properties as Record<string,unknown>:{};
-      const args:Record<string,unknown>={ [direct.name==='exec_command'?'cmd':'command']:command.cmd };
+      const properties=selectedCommand.parameters.properties&&typeof selectedCommand.parameters.properties==='object'&&!Array.isArray(selectedCommand.parameters.properties)
+        ?selectedCommand.parameters.properties as Record<string,unknown>:{};
+      const args:Record<string,unknown>={ [selectedCommand.name==='exec_command'?'cmd':'command']:command.cmd };
       for(const field of ['workdir','yield_time_ms','max_output_tokens','tty'] as const){
         const value=command[field];
         if(value===undefined)continue;
         if(!Object.prototype.hasOwnProperty.call(properties,field)){
-          const semanticNote=field==='yield_time_ms'&&direct.name==='shell_command'
+          const semanticNote=field==='yield_time_ms'&&selectedCommand.name==='shell_command'
             ?' A shell_command timeout_ms is not equivalent to yield_time_ms.' : '';
-          throw new Error(`Native ${direct.name} does not advertise ${field}; the parallel batch was rejected before dispatch.${semanticNote}`);
+          throw new Error(`Native ${selectedCommand.name} does not advertise ${field}; the parallel batch was rejected before dispatch.${semanticNote}`);
         }
         args[field]=value;
       }
-      const commandField=direct.name==='exec_command'?'cmd':'command';
+      const commandField=selectedCommand.name==='exec_command'?'cmd':'command';
       if(!Object.prototype.hasOwnProperty.call(properties,commandField))
-        throw new Error(`Native ${direct.name} does not advertise ${commandField}; the parallel batch was rejected before dispatch`);
+        throw new Error(`Native ${selectedCommand.name} does not advertise ${commandField}; the parallel batch was rejected before dispatch`);
+      for(const field of Array.isArray(selectedCommand.parameters.required)?selectedCommand.parameters.required:[])
+        if(typeof field!=='string'||!Object.hasOwn(args,field))throw new Error('Native command schema requires an unsupported or missing argument; no command was dispatched');
       return args;
     };
     // Validate every item's requested options before scheduling the first native call.
     const mappedCommands=commands.map(command=>commandArguments(command));
     return runParallelNativeCommands({owner:claimed.commandOwnerId??claimed.bindingId,commands,capacity:commandCapacity,signal,
       invoke:async (_command,index)=>{
-        return invoke(claimed.bindingId,bound,direct!,{arguments:mappedCommands[index]!},signal,undefined,true);
+        if(direct)return invoke(claimed.bindingId,bound,direct,{arguments:mappedCommands[index]!},signal,undefined,true);
+        const marker=`codex-tool-result:${randomBytes(24).toString('hex')}:`;
+        const input=nativeCommandDescriptorGuard(selectedCommand)+'\n'+execGatewayProgram(selectedCommand.name,false,
+          {arguments:mappedCommands[index]!},bound.tools.map(wireName),marker);
+        return invoke(claimed.bindingId,bound,gateway!,{input},signal,marker,true,selectedCommand.name);
       }}).then(asMcpResult);
   };
 
@@ -930,7 +985,7 @@ export async function createChatGptMcpServer(options: {
 
   if(contract==='native'&&screenObservers)server.registerTool('codex_screen_observe',{
     title:'Observe the delegated native screen target',
-    description:'Read the exact target authorized by a fresh Swift reader grant in this turn. One bounded native final-frame observation returns local CV/UIA metadata. Image delivery is UNAVAILABLE; semantic readiness and OCR may be PARTIAL. No input, screenshots, composer attachments or viewer fallback.',
+    description:'Read the exact target authorized by a fresh Swift reader grant in this turn. One bounded native final-frame observation returns local CV/UIA/OCR metadata. Optional tree_format adds a bounded source-tagged compact/JSON tree with ephemeral observation IDs; UIA pixel correspondence remains unverified and observed patterns grant no input permission. Image delivery is UNAVAILABLE; semantic readiness and OCR may be PARTIAL. No input, screenshots, composer attachments or viewer fallback.',
     inputSchema:{...turnReferenceInput(contract),...screenObserveArguments},
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:false,openWorldHint:false},
   },async(input,extra)=>withClaimedTurn('codex_screen_observe',turnReference(contract,input),extra,async claimed=>{
@@ -1078,6 +1133,7 @@ export async function createChatGptMcpServer(options: {
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
+          'This connector also implements reserved codex.control.safety_review with arguments {offset?,limit?,snapshot_sha256?}. It uses the same read-only scoped journal review as codex_safety_review; it cannot execute, retry, approve or resolve an operation.',
         ] : []),
       ].join(" ")),
       inputSchema: {
@@ -1091,6 +1147,11 @@ export async function createChatGptMcpServer(options: {
     async (toolInput, extra) => {
       const { wire_name, arguments: args, input } = toolInput;
       const requestId = turnReference(contract, toolInput);
+      if(contract==='native'&&wire_name===SAFETY_REVIEW_CONTROL_WIRE_NAME){
+        if(input!==undefined)throw new Error('Safety review does not accept freeform input');
+        const parsed=safetyReviewArgumentsSchema.parse(args??{});
+        return withClaimedTurn('codex_safety_review',requestId,extra,claimed=>safetyReview(claimed,parsed));
+      }
       if(contract==='native'&&wire_name===CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME){
         if(input!==undefined)throw new Error('Parallel command control does not accept freeform input');
         const parsed=parallelCommandBatchSchema.parse(args??{});

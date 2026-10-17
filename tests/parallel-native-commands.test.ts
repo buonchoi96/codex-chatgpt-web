@@ -37,6 +37,61 @@ const call=(f:Awaited<ReturnType<typeof connected>>,reserved:boolean,items:Recor
  ?{name:'codex_tool_call',arguments:{turn_token:f.token,wire_name:'codex.control.parallel_exec',arguments:{commands:items}}}
  :{name:'codex_parallel_exec',arguments:{turn_token:f.token,commands:items}}).then(value=>CallToolResultSchema.parse(value));
 
+const nativeRegistry=[{name:'exec_command',description:'Native command\n```ts\ndeclare const tools: { exec_command(args: { cmd: string; workdir?: string; yield_time_ms?: number; max_output_tokens?: number; tty?: boolean; }): Promise<unknown>; };\n```'}];
+async function executeGateway(request:BrokerToolRequest,registry=nativeRegistry,tool:((args:any)=>Promise<any>)=async args=>({output:args.cmd,exit_code:0})){
+ const content:any[]=[];
+ const AsyncFunction=Object.getPrototypeOf(async()=>{}).constructor;
+ try{
+  await new AsyncFunction('ALL_TOOLS','tools','text','image','audio',request.input!)(registry,{exec_command:tool},
+   (v:unknown)=>content.push({type:'text',text:typeof v==='string'?v:JSON.stringify(v)}),
+   (v:unknown)=>content.push(v),(v:unknown)=>content.push(v));
+  return {content};
+ }catch(error){return {content:[{type:'text',text:String(error)}],isError:true};}
+}
+
+test.each([false,true])('nested gateway discovers native schema then dispatches eight separately; reserved=%s',async reserved=>{
+ const f=await connected([{name:'exec',description:'Native gateway',parameters:{},freeform:true}]);
+ try{
+  const pending=call(f,reserved);
+  const discovery=await f.broker.nextToolBatch(f.token,AbortSignal.timeout(1000)).catch(()=>[]);
+  expect(discovery).toHaveLength(1);
+  expect(discovery[0]!.wireName).toBe('exec');
+  await f.broker.completeTool(f.token,discovery[0]!.callId,await executeGateway(discovery[0]!));
+  const requests=await Promise.race([collectRequests(f,8),pending.then(result=>{throw Error('Batch completed before child dispatch: '+JSON.stringify(result));})]);
+  expect(new Set(requests.map(r=>r.callId)).size).toBe(8);
+  let invocations=0;
+  for(const request of requests){
+   expect(request.wireName).toBe('exec');
+   await f.broker.completeTool(f.token,request.callId,await executeGateway(request,nativeRegistry,async args=>{
+    invocations++;expect(args.yield_time_ms).toBe(250);return {output:args.cmd,exit_code:0};
+   }));
+  }
+  expect(invocations).toBe(8);
+  expect((await pending).isError).toBe(false);
+  expect(f.broker.beginCompletionFence(f.token)).toBeNumber();
+ }finally{await f.close();}
+});
+
+test.each(['missing','duplicate','wrong-type','required-option','unsupported-option'] as const)('nested schema %s rejects the entire batch before child dispatch',async change=>{
+ const f=await connected([{name:'exec',description:'Native gateway',parameters:{},freeform:true}]);
+ try{
+  const items:Record<string,unknown>[]=commands(2);
+  if(change==='unsupported-option')items[1]!.tty=false;
+  let registry=structuredClone(nativeRegistry);
+  if(change==='missing')registry=[];
+  if(change==='duplicate')registry.push(registry[0]!);
+  if(change==='wrong-type')registry[0]!.description=registry[0]!.description.replace('yield_time_ms?: number','yield_time_ms?: string');
+  if(change==='required-option')registry[0]!.description=registry[0]!.description.replace('workdir?: string','workdir: string');
+  if(change==='unsupported-option')registry[0]!.description=registry[0]!.description.replace('tty?: boolean;','');
+  const pending=call(f,false,items);
+  const discovery=await f.broker.nextToolBatch(f.token,AbortSignal.timeout(1000));
+  expect(discovery).toHaveLength(1);
+  await f.broker.completeTool(f.token,discovery[0]!.callId,await executeGateway(discovery[0]!,registry));
+  const result=await pending;expect(result.isError).toBe(true);
+  expect(f.broker.beginCompletionFence(f.token)).toBeNumber();
+ }finally{await f.close();}
+});
+
 test.each([false,true])('eight separate broker invocations overlap before any completion; reserved=%s',async reserved=>{
  const f=await connected();try{
   const pending=call(f,reserved);const requests=await collectRequests(f,8);

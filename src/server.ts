@@ -772,6 +772,12 @@ export async function responseRequest(
   try {
     traceId = chatGptWebTraceId(provider, parsed);
   } catch (error) {
+    // Standalone v1 compaction can carry a canonical source item without a live
+    // replay turn. Its dedicated source preflight above remains authoritative;
+    // failure to derive an optional replay trace must not reject that protocol.
+    if(error instanceof ChatGptWebAdapterError&&['CURRENT_TURN_USER_REVISION_MISSING','REPLAY_PROVENANCE_UNVERIFIED'].includes(error.code)
+      && !(compaction&&!extractChatGptTurnIdentity(parsed).turnId))
+      return formatErrorResponse(error.status,error.errorType,error.message,error.code);
     // A cancelled browser session can only exist after the adapter accepted canonical native
     // turn identity and user-revision metadata. Requests without that identity have no matching
     // trace tombstone; preserve the adapter's existing strict validation/error path below.

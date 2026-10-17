@@ -1214,6 +1214,18 @@ test("active composer resolution waits for exactly one visible editor", async ()
   expect(await activeComposer.call({}, page, 500)).toBe(composer);
 });
 
+test("canonical composer integrity does not require a rendered layout read", async () => {
+  const { createWindow } = require("@mixmark-io/domino");
+  const window = createWindow('<div id="composer"><p>Complete fixture task.</p></div>');
+  const composer = window.document.getElementById("composer");
+  Object.defineProperty(composer, "innerText", { get() { throw new Error("Unnecessary rendered layout read"); } });
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    activeComposer: async () => ({ evaluate: async (callback: Function, argument: unknown) => callback(composer, argument) }),
+  }) as any;
+  expect(await worker.attachedPromptText({})).toBe("Complete fixture task.");
+  await worker.assertPromptAttached({}, "Complete fixture task.");
+});
+
 test("composer verification ignores icon markup while preserving the exact prompt and live editor", async () => {
   const { createWindow } = require("@mixmark-io/domino");
   const links = Array.from({ length: 6 }, (_, index) => `https://drive.google.com/file/d/example-${index}`);
@@ -1236,7 +1248,7 @@ test("composer verification ignores icon markup while preserving the exact promp
   const expected = `${links.join(" ")}\n${literal}\n\n  Keep  two spaces, 日本語 and ordinary rich text.`;
   const original = composer.innerHTML;
   const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
-    activeComposer: async () => ({ evaluate: async (callback: Function) => callback(composer) }),
+    activeComposer: async () => ({ evaluate: async (callback: Function, argument: unknown) => callback(composer, argument) }),
   }) as {
     attachedPromptText(page: unknown): Promise<string>;
     assertPromptAttached(page: unknown, prompt: string): Promise<void>;

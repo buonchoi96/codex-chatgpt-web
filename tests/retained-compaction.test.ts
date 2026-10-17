@@ -228,15 +228,17 @@ test("active compaction delivers the current result and converts every later MCP
     broker.completeTool(token, request!.callId, {
       content: [{ type: "text", text: "current result" }],
     });
-    await expect(current).resolves.toMatchObject({
+    // Settle named-pipe I/O outside Bun 1.4's promise matcher. On Windows the
+    // matcher can stall the event loop before the broker response is drained.
+    expect(await current).toMatchObject({
       content: [{ type: "text", text: "current result" }],
     });
-    await expect(callTurnBroker(broker.socketPath, {
+    expect(await callTurnBroker(broker.socketPath, {
       method: "invoke",
       bindingId: claimed.bindingId,
       wireName: "exec_command",
       arguments: { cmd: "git status --short" },
-    })).resolves.toMatchObject({
+    })).toMatchObject({
       content: [{ type: "text", text: "compact now" }],
       isError: true,
     });
@@ -278,7 +280,7 @@ test("active compaction drains an MCP call already queued without an outer Codex
       isError: true,
     });
     expect(interrupted).toBe(1);
-    await expect(invocation).resolves.toMatchObject({
+    expect(await invocation).toMatchObject({
       content: [{ type: "text", text: "compact instead" }],
       isError: true,
     });
@@ -808,6 +810,77 @@ test("active compaction preserves a source that settles after the historical 15s
     answer: "Late but valid final response", compactionInstructionDelivered: false,
   });
   expect(cancellations).toBe(0);
+  expect(revoked).toBe(1);
+});
+
+test("active compaction preserves a native tool that has no settled Codex result yet", async () => {
+  let cancellations = 0;
+  let compactionRequests = 0;
+  let revoked = 0;
+  const broker = {
+    requestCompaction: () => { compactionRequests += 1; return 0; },
+    compactionDeliveryCount: () => 0,
+    completeTool() { throw new Error("an unresolved native tool has no result to deliver"); },
+    revoke() { revoked += 1; },
+  } as unknown as TurnBroker;
+  const source = new ChatGptTurnSession({
+    mode: "tools",
+    token: Promise.resolve("turn_pending_native_tool"),
+    externalProgress: { recordToolResult() {} } as never,
+    browser: new Promise<string>(() => {}),
+    physicalSettlement: new Promise<void>(() => {}),
+    trace: new ChatGptTraceFeed(),
+    text: new ChatGptTextFeed(),
+    cancel: () => { cancellations += 1; },
+  });
+  source.setOutstanding([{ callId: "call_waiting_for_approval", wireName: "exec_command", freeform: false }]);
+
+  await expect(settleActiveCompactionSource(request(true), source, broker))
+    .rejects.toThrow("Codex supplied 0 of 1 required tool results for compaction");
+
+  expect(source.isActive()).toBeTrue();
+  expect(cancellations).toBe(0);
+  expect(compactionRequests).toBe(0);
+  expect(revoked).toBe(0);
+});
+
+test("active compaction does not release its native tool owner before physical settlement", async () => {
+  let finishBrowser!: (answer: string) => void;
+  let settlePhysical!: () => void;
+  const browser = new Promise<string>(resolve => { finishBrowser = resolve; });
+  const physicalSettlement = new Promise<void>(resolve => { settlePhysical = resolve; });
+  let revoked = 0;
+  const broker = {
+    requestCompaction: () => 0,
+    compactionDeliveryCount: () => 0,
+    completeTool() { throw new Error("no pending tool results"); },
+    revoke() { revoked += 1; },
+  } as unknown as TurnBroker;
+  const source = new ChatGptTurnSession({
+    mode: "tools",
+    token: Promise.resolve("turn_physical_settlement_fence"),
+    externalProgress: { recordToolResult() {} } as never,
+    browser,
+    physicalSettlement,
+    trace: new ChatGptTraceFeed(),
+    text: new ChatGptTextFeed(),
+    cancel() {},
+  });
+  let settled = false;
+  const settlement = settleActiveCompactionSource(request(true), source, broker)
+    .then(result => { settled = true; return result; });
+
+  finishBrowser("Browser answer completed before helper cleanup");
+  await source.browserOutcome;
+  await Bun.sleep(0);
+  expect(settled).toBeFalse();
+  expect(revoked).toBe(0);
+
+  settlePhysical();
+  await expect(settlement).resolves.toEqual({
+    answer: "Browser answer completed before helper cleanup",
+    compactionInstructionDelivered: false,
+  });
   expect(revoked).toBe(1);
 });
 

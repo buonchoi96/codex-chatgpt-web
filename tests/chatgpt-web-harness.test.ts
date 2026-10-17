@@ -2968,6 +2968,7 @@ describe("ChatGPT outer-native harness v4", () => {
         "codex_apply_patch",
         "codex_exec",
         "codex_parallel_exec",
+        "codex_safety_review",
         "codex_tool_call",
         "codex_tool_inventory",
         "codex_view_image",
@@ -2977,10 +2978,13 @@ describe("ChatGPT outer-native harness v4", () => {
       // six-tool ABI and reach the same executor through the reserved stable route.
       // Keep every original cached schema/description byte stable; refreshing an
       // installed connector to expose the extension is a separate owner action.
-      const publicConnectorAbi = listed.tools.filter(tool=>tool.name!=="codex_parallel_exec").map(tool => ({
+      const publicConnectorAbi = listed.tools.filter(tool=>!["codex_parallel_exec", "codex_safety_review"].includes(tool.name)).map(tool => ({
         name: tool.name,
         title: tool.title ?? null,
-        description: tool.description ?? null,
+        // The additive safety review paragraph does not change the legacy tool-call ABI.
+        description: tool.name === "codex_tool_call"
+          ? (tool.description ?? "").split(" This connector also implements reserved codex.control.safety_review")[0]
+          : tool.description ?? null,
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema ?? null,
         annotations: tool.annotations ?? null,

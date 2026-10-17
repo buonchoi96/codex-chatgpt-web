@@ -4,6 +4,177 @@ import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer } from "../src/adapters/chatgpt-web/markdown";
 import { readFileSync } from "node:fs";
 
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER).each(['chip-decoration', 'nbsp-run', 'intentional-nbsp-loss'] as const)("submitted proof retains canonical task text through editor encoding %s", async variant => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    const page = await browser.newPage();
+    const prompt = variant === 'intentional-nbsp-loss' ? 'First line.\n\u00a0\u00a0Keep  exact task spacing.' : 'First line.\n            Keep  exact task spacing.';
+    await page.setContent('<main></main><div id="prompt-textarea" contenteditable="true" style="white-space:pre-wrap"><p><span app-mention-path="app://fixture-native2" app-mention-display-name="Native2" contenteditable="false"></span> </p></div>');
+    await page.locator('#prompt-textarea p').evaluate((node, options) => {
+      node.querySelector('span')!.textContent = options.variant === 'chip-decoration' ? '\uFEFFNative2\uFEFF' : 'Native2';
+      node.append(document.createTextNode(options.variant === 'nbsp-run' ? options.prompt.replace('            ', '\u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 ') : options.prompt));
+    }, { variant, prompt });
+    const baseline = await worker.captureSubmissionBaseline(page, prompt);
+    await worker.assertPromptAttached(page, prompt, undefined, baseline);
+    await page.locator('main').evaluate(root => { root.innerHTML = '<div data-turn-key="fallback-turn-0"><span hidden data-chatgpt-agent-turn-start></span></div>'; });
+    const binding = await worker.waitForNewAssistantTurn(page, baseline, Date.now() + 2_000);
+    await page.locator('main').evaluate((root, text) => {
+      root.innerHTML = '<div data-turn-key="submitted"><div data-user-message-bubble><div data-search-result-target style="white-space:pre-wrap"><span data-prompt-link-href="app://fixture-native2">Native2</span> </div></div><span hidden data-chatgpt-agent-turn-start></span></div>';
+      root.querySelector('[data-search-result-target]')!.append(document.createTextNode(text));
+    }, variant === 'intentional-nbsp-loss' ? prompt.replaceAll('\u00a0', ' ') : prompt);
+    const outcome = await worker.reconcileAssistantTurnBinding(page, baseline, binding)
+      .then((result: any) => ({ result }), (error: Error) => ({ error }));
+    if (variant === 'intentional-nbsp-loss') expect(outcome.error).toBeInstanceOf(Error);
+    else expect(outcome.result?.identity).toBe('group:assistant:submitted');
+    await page.close();
+  } finally { await browser.close(); }
+}, 15_000);
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER).each(['observation', 'steering'] as const)("collapsed submitted text is expanded once and then fully verified in %s", async path => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    const prompt = 'Remember this complete inert fixture. ' + 'data '.repeat(2_500) + 'AUTHENTIC_END';
+    for (const scenario of ['complete', 'changed-tail', 'inside-content', 'duplicate-control', 'submit-control'] as const) {
+      const page = await browser.newPage();
+      await page.setContent('<main></main><div id="prompt-textarea" contenteditable="true"><p><span app-mention-path="app://fixture-native2" app-mention-display-name="Native2" contenteditable="false">Native2</span> </p></div>');
+      await page.locator('#prompt-textarea p').evaluate((node, text) => node.append(document.createTextNode(text)), prompt);
+      const baseline = await worker.captureSubmissionBaseline(page, prompt);
+      await worker.assertPromptAttached(page, prompt, undefined, baseline);
+      await page.locator('main').evaluate(root => { root.innerHTML = '<div data-turn-key="fallback-turn-0"><span hidden data-chatgpt-agent-turn-start></span></div>'; });
+      const binding = await worker.waitForNewAssistantTurn(page, baseline, Date.now() + 2_000);
+      await page.locator('main').evaluate((root, options) => {
+        root.innerHTML = '<div data-turn-key="submitted"><div data-user-message-bubble><div data-search-result-target></div><button type="button">Show more</button></div><span hidden data-chatgpt-agent-turn-start></span></div>';
+        (window as any).actions = { expand: 0, send: 0 };
+        const bubble = root.querySelector('[data-user-message-bubble]')!;
+        const content = root.querySelector('[data-search-result-target]')!;
+        const render = (text: string) => {
+          content.innerHTML = '<span data-prompt-link-href="app://fixture-native2">Native2</span> ';
+          content.append(document.createTextNode(text));
+        };
+        render(options.prompt.slice(0, 200));
+        const button = root.querySelector('button')!;
+        button.onclick = () => {
+          (window as any).actions.expand++;
+          render(options.scenario === 'changed-tail' ? options.prompt.replace('AUTHENTIC_END', 'FOREIGN_END') : options.prompt);
+          button.textContent = 'Show less';
+        };
+        if (options.scenario === 'inside-content') content.append(button);
+        if (options.scenario === 'duplicate-control') bubble.append(button.cloneNode(true));
+        if (options.scenario === 'submit-control') {
+          const form = document.createElement('form'); button.type = 'submit'; bubble.append(form); form.append(button);
+          form.onsubmit = event => { event.preventDefault(); (window as any).actions.send++; };
+        }
+      }, { scenario, prompt });
+      const reconcile = () => path === 'observation' ? worker.reconcileAssistantTurnBinding(page, baseline, binding)
+        : worker.prepareSteeringRecoveryBinding(page, baseline, binding).then((value: any) => value.binding);
+      const outcome = await reconcile().then((result: any) => ({ result }), (error: Error) => ({ error }));
+      if (scenario === 'complete') expect(outcome.result?.identity).toBe('group:assistant:submitted');
+      else expect(outcome.error).toBeInstanceOf(Error);
+      const expectedExpansions = ['complete', 'changed-tail'].includes(scenario) ? 1 : 0;
+      expect(await page.evaluate(() => (window as any).actions)).toEqual({ expand: expectedExpansions, send: 0 });
+      if (scenario === 'changed-tail') {
+        const second = await reconcile().then(() => undefined, (error: Error) => error);
+        expect(second).toBeInstanceOf(Error);
+        expect(await page.evaluate(() => (window as any).actions)).toEqual({ expand: 1, send: 0 });
+      }
+      await page.close();
+    }
+  } finally { await browser.close(); }
+}, 25_000);
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("generation-only reattachment handles an accepted group remounting with the same key", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    for (const changed of [false, true]) {
+      const page = await browser.newPage(); await page.setContent('<main></main>');
+      const prompt = 'Original inert fixture request.';
+      const baseline = await worker.captureSubmissionBaseline(page, prompt);
+      await page.locator('main').evaluate(root => { root.innerHTML = '<div id="old-wrapper" data-turn-key="fallback-turn-0"><span hidden data-chatgpt-agent-turn-start></span></div>'; });
+      const observed = await worker.waitForNewAssistantTurn(page, baseline, Date.now() + 2_000);
+      const binding = { ...observed, locator: page.locator('#old-wrapper') };
+      await page.locator('main').evaluate((root, text) => {
+        root.innerHTML = '<div data-turn-key="fallback-turn-0"><div data-user-message-bubble><div data-search-result-target></div></div><span hidden data-chatgpt-agent-turn-start></span></div>';
+        root.querySelector('[data-search-result-target]')!.textContent = text;
+      }, changed ? 'Another request.' : prompt);
+      expect(await binding.locator.count()).toBe(0);
+      const outcome = await worker.reconcileAssistantTurnBinding(page, baseline, binding)
+        .then((result: any) => ({ result }), (error: Error) => ({ error }));
+      if (changed) expect(outcome.error).toBeInstanceOf(Error);
+      else {
+        expect(outcome.error).toBeUndefined();
+        expect(outcome.result.identity).toBe(binding.identity);
+        expect(await outcome.result.locator.count()).toBe(1);
+      }
+      await page.close();
+    }
+  } finally { await browser.close(); }
+}, 15_000);
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER).each(['observation', 'steering'] as const)("verified draft proof survives paragraph rendering in %s", async path => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    const page = await browser.newPage();
+    const prompt = 'First fixture line.\nSecond  fixture line.';
+    await page.setContent('<main></main><div id="prompt-textarea" contenteditable="true"><p><span app-mention-path="app://fixture-native2" app-mention-display-name="Codex Native2 DEV" contenteditable="false">Codex Native2 DEV</span> First fixture line.</p><p>Second  fixture line.</p></div>');
+    const baseline = await worker.captureSubmissionBaseline(page, prompt);
+    await worker.assertPromptAttached(page, prompt, undefined, baseline);
+    await page.locator('main').evaluate(root => { root.innerHTML = '<div data-turn-key="fallback-turn-0"><span hidden data-chatgpt-agent-turn-start></span></div>'; });
+    const binding = await worker.waitForNewAssistantTurn(page, baseline, Date.now() + 2_000);
+    await page.locator('main').evaluate(root => {
+      root.innerHTML = '<div data-turn-key="submitted"><div data-user-message-bubble><div data-search-result-target><p><span data-prompt-link-href="app://fixture-native2">Codex Native2 DEV</span> First fixture line.<br>Second  fixture line.</p></div></div><span hidden data-chatgpt-agent-turn-start></span></div>';
+    });
+    const result = await (path === 'observation' ? worker.reconcileAssistantTurnBinding(page, baseline, binding)
+      : worker.prepareSteeringRecoveryBinding(page, baseline, binding).then((value: any) => value.binding));
+    expect(result.identity).toBe('group:assistant:submitted');
+    expect(await result.locator.count()).toBe(1);
+    await page.close();
+  } finally { await browser.close(); }
+}, 15_000);
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("generation-only ownership preserves the verified rendered draft including its Native2 mention", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    const prompt = "Read fixture.txt.\nKeep  two spaces.";
+    const connector = "Codex Native2 DEV";
+    for (const path of ["observation", "steering"] as const) {
+      for (const scenario of ["same-draft", "changed-connector", "changed-connector-id", "changed-prompt", "changed-spaces", "competing-user"] as const) {
+        const page = await browser.newPage();
+        await page.setContent(`<main></main><div id="prompt-textarea" contenteditable="true" role="textbox" class="ProseMirror" style="white-space:pre-wrap"><p><span app-mention-path="app://fixture-native2" app-mention-display-name="${connector}" contenteditable="false">${connector}</span> </p></div>`);
+        await page.locator("#prompt-textarea p").evaluate((node, text) => node.append(document.createTextNode(text)), prompt);
+        const baseline = await worker.captureSubmissionBaseline(page, prompt);
+        // This is the same pre-Send integrity boundary as the live worker. No Send
+        // occurs here; the browser only renders a controlled transport fixture.
+        await worker.assertPromptAttached(page, prompt, undefined, baseline);
+        await page.locator("main").evaluate(root => {
+          root.innerHTML = '<div data-turn-key="fallback-turn-0"><span hidden data-chatgpt-agent-turn-start></span></div>';
+        });
+        const binding = await worker.waitForNewAssistantTurn(page, baseline, Date.now() + 2_000);
+        expect(baseline.acceptedUserIdentity).toBeUndefined();
+        await page.locator("main").evaluate((root, data) => {
+          root.innerHTML = '<div data-turn-key="submitted"><div data-user-message-bubble><div data-search-result-target style="white-space:pre-wrap"><p><span data-prompt-link-href="app://fixture-native2"></span> </p></div></div><span hidden data-chatgpt-agent-turn-start></span></div>';
+          root.querySelector("[data-prompt-link-href]")!.textContent = data.scenario === "changed-connector" ? "Different connector" : data.connector;
+          if (data.scenario === "changed-connector-id") root.querySelector("[data-prompt-link-href]")!.setAttribute("data-prompt-link-href", "app://foreign-connector");
+          root.querySelector("p")!.append(document.createTextNode(data.scenario === "changed-prompt" ? "Another task." : data.scenario === "changed-spaces" ? data.prompt.replace("  ", " ") : data.prompt));
+          if (data.scenario === "competing-user") root.insertAdjacentHTML("beforeend", '<div data-turn-key="foreign"><div data-user-message-bubble>Another user turn.</div></div>');
+        }, { scenario, prompt, connector });
+        const outcome = await (path === "observation"
+          ? worker.reconcileAssistantTurnBinding(page, baseline, binding)
+          : worker.prepareSteeringRecoveryBinding(page, baseline, binding).then((result: any) => result.binding))
+          .then((result: any) => ({ identity: result.identity }), (error: Error) => ({ error: error.message }));
+        if (scenario === "same-draft") expect(outcome).toEqual({ identity: "group:assistant:submitted" });
+        else expect(outcome).toHaveProperty("error");
+        expect(await page.locator("#prompt-textarea").innerText()).toBe(`${connector} ${prompt}`);
+        await page.close();
+      }
+    }
+  } finally { await browser.close(); }
+}, 30_000);
+
 test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("CodeMirror language invalidates the response cache and incomplete code is not delivered", async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
   try {
@@ -339,7 +510,9 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("an exchange rekeys only with
         expect(rebound.identity).toBe(`group:assistant:${scenario === "same-key" ? "optimistic" : "persisted"}`);
         expect(await rebound.locator.count()).toBe(1);
       } else {
-        await expect(result).rejects.toThrow();
+        // Settle the real browser I/O before entering Bun's matcher on Windows.
+        const failure = await result.then(() => undefined, (error: unknown) => error);
+        expect(failure).toBeInstanceOf(Error);
       }
       await page.close();
     }

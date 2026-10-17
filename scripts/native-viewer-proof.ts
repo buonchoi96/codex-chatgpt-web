@@ -32,14 +32,69 @@ export function withViewerDeadline<T>(operation:()=>Promise<T>,timeoutMs:number,
 }
 
 /** Main owns HTTP/stream/RPC timeouts and must call fail() on their first error. */
+export interface NativeViewerFailureDiagnostic{
+ origin:'rpc'|'notification'|'turn';code:string;retryable:boolean;
+ messageSha256?:string;messageLength?:number;
+ threadIdDeclared:boolean;threadIdMatched:boolean;turnIdDeclared:boolean;turnIdMatched:boolean;
+}
+const MAX_NATIVE_ERROR_FIELDS=32,MAX_NATIVE_ERROR_MESSAGE_LENGTH=8192;
+type NativeDataRecord=Record<string,unknown>;
+function nativeDataRecord(value:unknown):NativeDataRecord|undefined{
+ if(!object(value))return undefined;
+ try{
+  const prototype=Object.getPrototypeOf(value);
+  if(prototype!==Object.prototype&&prototype!==null)return undefined;
+  const keys=Reflect.ownKeys(value);
+  if(keys.length>MAX_NATIVE_ERROR_FIELDS||keys.some(key=>typeof key!=='string'))return undefined;
+  const result=Object.create(null) as NativeDataRecord;
+  for(const key of keys as string[]){
+   const descriptor=Object.getOwnPropertyDescriptor(value,key);
+   if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))return undefined;
+   result[key]=descriptor.value;
+  }
+  return result;
+ }catch{return undefined;}
+}
+function nativeDiagnosticCode(value:unknown,fallback:string):string{
+ const code=typeof value==='string'?value:typeof value==='number'&&Number.isSafeInteger(value)?String(value):'';
+ return code.length>0&&code.length<=64&&/^[\x21-\x7e]+$/.test(code)?code:fallback;
+}
+function nativeCorrelation(params:NativeDataRecord|undefined,root:NativeDataRecord|undefined,
+ turn:NativeDataRecord|undefined,threadId:string|undefined,turnId:string|undefined){
+ const threadValue=params&&Object.prototype.hasOwnProperty.call(params,'threadId')?params.threadId:root?.threadId;
+ const turnValue=params&&Object.prototype.hasOwnProperty.call(params,'turnId')?params.turnId:
+  (turn&&Object.prototype.hasOwnProperty.call(turn,'id')?turn.id:root?.turnId);
+ const threadIdDeclared=threadValue!==undefined&&threadValue!==null;
+ const turnIdDeclared=turnValue!==undefined&&turnValue!==null;
+ return{threadIdDeclared,threadIdMatched:threadIdDeclared&&typeof threadValue==='string'&&threadId!==undefined&&threadValue===threadId,
+  turnIdDeclared,turnIdMatched:turnIdDeclared&&typeof turnValue==='string'&&turnId!==undefined&&turnValue===turnId};
+}
 export class NativeViewerProofGuard{
  private threadId:string|undefined;
  private turnId:string|undefined;
  private firstFailure:string|undefined;
+ private firstFailureDiagnostic:Readonly<NativeViewerFailureDiagnostic>|undefined;
  private matchedCompletion=false;
  private matchedText:string|undefined;
  get failureCode():string|undefined{return this.firstFailure;}
+ get failureDiagnostic():Readonly<NativeViewerFailureDiagnostic>|undefined{
+  return this.firstFailureDiagnostic?Object.freeze({...this.firstFailureDiagnostic}):undefined;
+ }
  fail(code:string):void{this.firstFailure??=typeof code==='string'&&code.length>0&&code.length<=128?code:'INVALID_FAILURE_CODE';}
+ private failFromNotification(failureCode:string,origin:NativeViewerFailureDiagnostic['origin'],
+  errorValue:unknown,params:NativeDataRecord|undefined,root:NativeDataRecord|undefined,turn?:NativeDataRecord):void{
+  if(this.firstFailure!==undefined)return;
+  this.firstFailure=failureCode;
+  const error=nativeDataRecord(errorValue);
+  const code=error?nativeDiagnosticCode(error.code,failureCode):failureCode;
+  const message=error?.message;
+  const correlation=nativeCorrelation(params,root,turn,this.threadId,this.turnId);
+  const diagnostic:NativeViewerFailureDiagnostic={origin,code,retryable:error?.retryable===true,...correlation};
+  if(typeof message==='string'&&message.length<=MAX_NATIVE_ERROR_MESSAGE_LENGTH){
+   diagnostic.messageSha256=hash(message);diagnostic.messageLength=message.length;
+  }
+  this.firstFailureDiagnostic=Object.freeze(diagnostic);
+ }
  bindThread(threadId:string):void{
   if(typeof threadId!=='string'||!threadId||threadId.length>512||(this.threadId!==undefined&&this.threadId!==threadId)){
    this.fail('INVALID_THREAD_BINDING');reject(this.firstFailure!);
@@ -53,20 +108,38 @@ export class NativeViewerProofGuard{
   this.turnId=turnId;
  }
  onNativeNotification(value:unknown):void{
-  if(this.firstFailure||!object(value))return;
-  if(value.error!==undefined&&value.error!==null){this.fail('NATIVE_RPC_ERROR');return;}
-  if(value.method==='error'){this.fail('NATIVE_ERROR');return;}
-  const params=value.params;
-  if(!this.threadId||!this.turnId||!object(params)||params.threadId!==this.threadId)return;
-  if(value.method==='item/completed'){
-   if(params.turnId!==this.turnId||!object(params.item)||params.item.type!=='agentMessage')return;
-   if(params.item.phase==='commentary')return;
-   if(typeof params.item.text!=='string'||!params.item.text.trim()||params.item.text.length>16384){this.fail('INVALID_NATIVE_AGENT_TEXT');return;}
-   this.matchedText=params.item.text;
+  if(this.firstFailure)return;
+  const notification=nativeDataRecord(value);
+  if(!notification){this.failFromNotification('INVALID_NATIVE_NOTIFICATION','notification',undefined,undefined,undefined);return;}
+  const rawParams=notification.params,params=rawParams===undefined?undefined:nativeDataRecord(rawParams);
+  if(notification.error!==undefined&&notification.error!==null){
+   this.failFromNotification('NATIVE_RPC_ERROR','rpc',notification.error,params,notification);return;
   }
-  if(value.method==='turn/completed'){
-   if(!object(params.turn)||params.turn.id!==this.turnId||(params.turnId!==undefined&&params.turnId!==this.turnId))return;
-   if(params.turn.status!=='completed'||params.turn.error!=null){this.fail('NATIVE_TURN_FAILED');return;}
+  if(notification.method==='error'){
+   const nativeError=params&&Object.prototype.hasOwnProperty.call(params,'error')?params.error:rawParams;
+   this.failFromNotification('NATIVE_ERROR','notification',nativeError,params,notification);return;
+  }
+  if(!['item/completed','turn/completed'].includes(String(notification.method)))return;
+  if(!params){this.failFromNotification('INVALID_NATIVE_NOTIFICATION','notification',undefined,undefined,notification);return;}
+  if(!this.threadId||!this.turnId||params.threadId!==this.threadId)return;
+  if(notification.method==='item/completed'){
+   if(params.turnId!==this.turnId)return;
+   const item=nativeDataRecord(params.item);
+   if(!item){this.failFromNotification('INVALID_NATIVE_NOTIFICATION','notification',undefined,params,notification);return;}
+   if(item.type!=='agentMessage')return;
+   if(item.phase==='commentary')return;
+   if(typeof item.text!=='string'||!item.text.trim()||item.text.length>16384){
+    this.failFromNotification('INVALID_NATIVE_AGENT_TEXT','notification',item.error,params,notification);return;
+   }
+   this.matchedText=item.text;
+  }
+  if(notification.method==='turn/completed'){
+   const turn=nativeDataRecord(params.turn);
+   if(!turn){this.failFromNotification('INVALID_NATIVE_NOTIFICATION','notification',undefined,params,notification);return;}
+   if(turn.id!==this.turnId||(params.turnId!==undefined&&params.turnId!==this.turnId))return;
+   if(turn.status!=='completed'||turn.error!=null){
+    this.failFromNotification('NATIVE_TURN_FAILED','turn',turn.error??turn,params,notification,turn);return;
+   }
    this.matchedCompletion=true;
   }
  }

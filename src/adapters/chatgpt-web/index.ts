@@ -24,6 +24,8 @@ import { ChatGptWebAdapterError, ChatGptSteeringObserverSuperseded, chatGptSafet
 import { ChatGptBrowserWorker,chatGptSuspensionClock } from "./browser-worker";
 import {createArchiveReadProof} from './archive-read-proof';
 import {validateContextArchive} from './context-archive';
+import {BlockedOperationLedger} from './blocked-operation-ledger';
+import {readBlockedOperationReview} from './blocked-operation-review';
 import {waitForArchiveReadBounded} from './archive-read-budget';
 import { extractChatGptCompactionSourceRevision, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGptAbortedTurnIds } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
@@ -425,11 +427,13 @@ export function createChatGptWebAdapter(
   dependencies: {
     broker?: TurnBrokerOwner;
     zeroRiskManualControl?: ChatGptZeroRiskManualControl;
+    blockedOperationLedger?:BlockedOperationLedger;
   } = {},
 ): ProviderAdapter {
   const worker = ChatGptBrowserWorker.forProvider(provider);
   const broker = dependencies.broker ?? TurnBroker.forSocket(brokerSocketPath(provider));
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
+  const blockedOperationLedger=dependencies.blockedOperationLedger??new BlockedOperationLedger();
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
   const timeoutMs = provider.chatgptWeb?.turnTimeoutMs;
   const experimentalSkillAttachments = provider.chatgptWeb?.experimentalSkillAttachments;
@@ -530,12 +534,15 @@ export function createChatGptWebAdapter(
         await releaseLauncherRetainedConversation(retainedLauncherDescriptor, conversationKey);
       }
       : undefined;
+    const reviewOptions=()=>environment?{blockedOperationReview:readBlockedOperationReview(blockedOperationLedger,environment)}:{};
     const compileOptionsFor = (input: CodexParsedRequest) => {
-      if (manualRequest) return {};
+      const review=reviewOptions();
+      if (manualRequest) return {manualControl:true as const,...review};
       const experimentalMultipartParts = experimentalBiggerContext
-        ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments)
+        ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments,review)
         : undefined;
       return {
+        ...review,
         captureLunaCheckpoint,
         experimentalSkillAttachments,
         contextArchive: input === checkpointInput.parsed && !manualRequest && !captureLunaCheckpoint,
@@ -650,14 +657,14 @@ export function createChatGptWebAdapter(
             checkpointInput.parsed,
             turnCapabilities,
             activeToken,
-            { manualControl: true },
+            compileOptionsFor(checkpointInput.parsed),
           );
           const resumeCompiled = resumeInput
             ? compileChatGptWebPrompt(
               resumeInput,
               turnCapabilities,
               activeToken,
-              { manualControl: true },
+              compileOptionsFor(resumeInput),
             )
             : undefined;
           for (const candidate of [compiled, resumeCompiled]) {
@@ -907,7 +914,7 @@ export function createChatGptWebAdapter(
         observeCapabilityRetirement(activeToken, externalProgress);
         const delta: CodexParsedRequest = reservation?.parsed??{ ...parsed, context: { ...parsed.context,
           systemPrompt: [], messages: [{ role: 'user', content: createSameTabRecoveryDelta(), timestamp: Date.now() }] } };
-        return { ...compileChatGptWebPrompt(delta, turnCapabilities, activeToken, {contextArchive:false,retainedHistoryProven:true}),
+        return { ...compileChatGptWebPrompt(delta, turnCapabilities, activeToken, {contextArchive:false,retainedHistoryProven:true,...reviewOptions()}),
           ...(reservation?{steeringDeltaId:reservation.deltaId}:{}), release: () => {} };
       } catch (error) {
         if (activeToken === previous) rotatingCapabilities.delete(previous);

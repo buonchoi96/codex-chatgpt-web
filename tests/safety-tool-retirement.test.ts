@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { defaultBrokerEndpoint } from "../src/config";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { createChatGptWebAdapter } from "../src/adapters/chatgpt-web/index";
@@ -127,9 +127,11 @@ async function within<T>(promise: Promise<T>, timeoutMs: number, label: string):
   }
 }
 
-test("a code-only safety result is returned once, retires broker and browser authority, and rejects later effects", async () => {
+test.each(["ready", "busy", "invalid"] as const)("a code-only safety result retires authority and reports ledger state %s without replay", async ledgerState => {
   const ledgerDir = mkdtempSync(join(tmpdir(), "cgw-safety-ledger-"));
   const ledger = new BlockedOperationLedger(join(ledgerDir, "blocked.json"));
+  if (ledgerState === "busy") mkdirSync(`${ledger.filePath}.lock`);
+  if (ledgerState === "invalid") writeFileSync(ledger.filePath, '[{"blocker_id":"fixture","resolution":"invented_done"}]');
   const socketPath = defaultBrokerEndpoint(join(process.platform === "win32" ? tmpdir() : "/tmp", `cgw-sr-${process.pid}-${Date.now()}`), process.platform);
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -250,7 +252,8 @@ test("a code-only safety result is returned once, retires broker and browser aut
     await within(firstRound, 5_000, "adapter turn settlement");
     await within(backupResultReady.promise, 5_000, "rejected follow-up MCP call");
 
-    expect(originalResult).toMatchObject({
+    const received = originalResult as BrokerToolResult;
+    expect({ ...received, content: received.content?.slice(0, 2) }).toMatchObject({
       isError: true,
       content: [
         { type: "text", text: "Native operation may have started; completion is uncertain." },
@@ -271,12 +274,24 @@ test("a code-only safety result is returned once, retires broker and browser aut
     expect(JSON.stringify(backupResult)).toMatch(/already finished|invalid, expired, or revoked/);
     expect(toolCallIds).toHaveLength(1);
     expect(sendCount).toBe(1);
-    expect(ledger.unresolved()).toHaveLength(1);
-    expect(new BlockedOperationLedger(ledger.filePath).unresolved()[0]).toMatchObject({
-      exact_tool_name: "mcp__computer_use_swift__desktop_observe",
-      classification: "SAFETY_STATUS_UNDETERMINED", resolution: "PENDING_SAFETY_REVIEW",
-      dispatch_state: "unknown", attempts: 1,
-    });
+    if (ledgerState === "ready") {
+      expect(received.content).toHaveLength(2);
+      expect(ledger.unresolved()).toHaveLength(1);
+      expect(new BlockedOperationLedger(ledger.filePath).unresolved()[0]).toMatchObject({
+        exact_tool_name: "mcp__computer_use_swift__desktop_observe",
+        classification: "SAFETY_STATUS_UNDETERMINED", resolution: "PENDING_SAFETY_REVIEW",
+        dispatch_state: "unknown", attempts: 1,
+      });
+    } else {
+      expect(received.content).toHaveLength(3);
+      expect(JSON.parse((received.content[2] as { text: string }).text)).toMatchObject({
+        code: "safety_blocker_persistence_failed", classification: "SAFETY_STATUS_UNDETERMINED",
+        resolution: "PENDING_RECEIPT_RECONCILIATION", retryable: false, execution_state: "unknown",
+      });
+      expect(JSON.stringify(received.content[2])).not.toContain(ledgerDir);
+      if (ledgerState === "invalid") expect(() => ledger.unresolved()).toThrow("invalid");
+      else expect(ledger.unresolved()).toHaveLength(0);
+    }
     await expect(broker.nextToolBatch(token)).rejects.toThrow(/invalid or expired/);
   } finally {
     if (token) broker.revoke(token, new Error("safety retirement fixture cleanup"));

@@ -129,6 +129,7 @@ function loadExistingConfig(): AppConfig | undefined {
 }
 
 function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
+  if (tunnelWorkerRuntimeChanged(before, after)) return true;
   return JSON.stringify({
     mode: before.mode,
     subagentProtocol: before.subagentProtocol,
@@ -198,11 +199,15 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
 
 export function tunnelWorkerRuntimeChanged(before: AppConfig | undefined, after: AppConfig): boolean {
   if (!before || before.mode !== "full" || after.mode !== "full") return false;
+  const beforeObserver = before.browserInteractionMode === "automatic" ? before.nativeScreenObserver : undefined;
+  const afterObserver = after.browserInteractionMode === "automatic" ? after.nativeScreenObserver : undefined;
   return before.releaseVersion !== after.releaseVersion
     || JSON.stringify(before.runtimeCommand) !== JSON.stringify(after.runtimeCommand)
     || before.brokerSocketPath !== after.brokerSocketPath
     || before.browserInteractionMode !== after.browserInteractionMode
-    || JSON.stringify(before.tunnel) !== JSON.stringify(after.tunnel);
+    || JSON.stringify(before.tunnel) !== JSON.stringify(after.tunnel)
+    || beforeObserver?.readerPipe !== afterObserver?.readerPipe
+    || beforeObserver?.grantWireName !== afterObserver?.grantWireName;
 }
 
 /**

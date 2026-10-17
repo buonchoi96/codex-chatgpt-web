@@ -120,6 +120,9 @@ export function selectChatGptWebTransport(
   }
 
   if (input.retainedHistoryProven) {
+    if (!canonicalFits) {
+      return decision(input, "BLOCK", `retained delta requires ${input.canonicalTokens} tokens, exceeding the measured account budget of ${input.accountCanonicalTokenLimit}; archive or multipart cannot increase model recall`);
+    }
     if (inlineFits && !priorInlineFailure) {
       return decision(input, "RETAINED_DELTA", "retained history is proven and this delta fits the current message limits");
     }
