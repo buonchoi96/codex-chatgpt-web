@@ -36,11 +36,11 @@ test('a successful canonical preflight retires tab after compiling, and returns 
   expect(seen).toEqual(['prepare','retire','prepared-released']);
 });
 
-test('failed draft cleanup cannot destroy the retained tab',async()=>{
-  let retired=false;
+test('refused tab retirement releases the prepared draft without starting Web Send',async()=>{
+  let released=false;
   await expect(preflightCanonicalBeforeRetainedRetirement(
-    async()=>({release:()=>{throw new Error('draft release failed');}}),
-    async()=>{retired=true;},
-  )).rejects.toThrow('draft release failed');
-  expect(retired).toBe(false);
+    async()=>({release:()=>{released=true;}}),
+    async()=>{throw new Error('launcher refused retirement');},
+  )).rejects.toThrow('launcher refused retirement');
+  expect(released).toBe(true);
 });
