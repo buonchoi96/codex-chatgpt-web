@@ -166,7 +166,7 @@ export function removeExactOrphanedCodexInterruptHook(
   // Reconstruct its exact output, including the state key and trusted command hash.
   for (let before = markerAt; before >= Math.max(0, markerAt - 4); before -= 1) {
     const padding = text.slice(before, markerAt);
-    if (!/^(?:\\r\\n|\\n|\\r)*$/.test(padding)) continue;
+    if (!/^(?:\r\n|\n|\r)*$/.test(padding)) continue;
     const baseline = text.slice(0, before);
     try {
       if (installCodexInterruptHookCommand(baseline, configPath, command).text === text) {
