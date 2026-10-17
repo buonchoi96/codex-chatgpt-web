@@ -2460,7 +2460,7 @@ export function insertPlainTextIntoComposer(element: HTMLElement, value: string)
  */
 export async function preflightCanonicalBeforeRetainedRetirement<T extends { release: () => void }>(
   prepare: () => Promise<T>,
-  retire: () => Promise<void>,
+  retire: () => Promise<unknown>,
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
