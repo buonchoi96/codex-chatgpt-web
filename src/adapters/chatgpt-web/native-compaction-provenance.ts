@@ -272,7 +272,16 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
       // The current request may still contain the retained item. Conflicting
       // content under its exact native identity cannot be repaired from history.
       const conflicts=input.map(record).filter(item=>item?.id===source.itemId);
-      if(conflicts.some(item=>!isDeepStrictEqual(item!.content,source.content)||owner(item!)!==source.turnId))return reject('source_identity_conflict');
+      if(conflicts.some(item=>!isDeepStrictEqual(item!.content,source.content)
+        || (owner(item!)!==source.turnId
+          && !(parsed._compactionRequest && owner(item!)===undefined
+            && item!.type==='message' && item!.role==='user'
+            // The raw request lacks owner metadata. Accept only when the
+            // native rollout independently proves this exact message is its
+            // latest typed human instruction with the installed source owner.
+            && verifyLatestNativeCompactionSource(fd,size,{
+              id:source.itemId!,turnId:source.turnId!,content:source.content,
+            })))))return reject('source_identity_conflict');
       installationDigest=installationHash(installed);
       return {source:structuredClone(source),summaryIndex,provenance:{kind:'native_compacted' as const,
         checkpoint_sha256:key!,source_id:structuredId?source.itemId:retainedId as string,source_revision:selected.retained.revision as string}};
