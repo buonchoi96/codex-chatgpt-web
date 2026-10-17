@@ -527,6 +527,16 @@ export function createChatGptWebAdapter(
       ? retainedConversationProofs.check(conversationKey, checkpointInput.parsed)
       : undefined;
     const resumeInput = retainedProof?.parsed;
+    if (conversationKey && retainedProof && retainedProof.reason !== "verified") {
+      // Bounded provenance telemetry, never request bodies or private task data.
+      // Distinguishes goal-turn history churn from expiry, model rebind or a
+      // process restart when a full canonical bootstrap subsequently exceeds
+      // the measured browser input budget.
+      console.info(`[chatgpt-web] retained_delta_unavailable ${JSON.stringify({
+        reason: retainedProof.reason,
+        contextMessages: checkpointInput.parsed.context.messages.length,
+      })}`);
+    }
     const retainConversation = conversationKey !== undefined;
     const releaseRetainedConversation = conversationKey && retainedLauncherDescriptor
       ? async () => {
