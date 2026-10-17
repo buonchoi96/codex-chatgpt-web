@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { chromium } from "playwright-core";
 import { chatGptResponseStructureLogEntries, chatGptResponseStructures } from "../src/adapters/chatgpt-web/browser-response-structure";
-import { ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptCompletionTracker, ChatGptSubmissionRejectionObserver, ChatGptTurnDomHealthTracker } from "../src/adapters/chatgpt-web/browser-worker";
+import { ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptCompletionTracker, ChatGptSubmissionRejectionObserver, ChatGptTurnDomHealthTracker, ChatGptBrowserStreamHealth } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
 
 test("the largest response diagnostics survive the launcher's safe-log string limit intact", () => {
@@ -72,6 +72,38 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("response diagnostics retain 
     expect(bounded[0]!.truncated).toBeTrue();
     expect(bounded[0]!.nodes.length).toBeLessThanOrEqual(200);
   } finally { await browser.close(); }
+});
+
+test("an orphaned SSE no longer suppresses completed-turn DOM health indefinitely", () => {
+  const gate = new ChatGptBrowserStreamHealth(60_000);
+  const observed = { streamOpen: true, stopVisible: false, activeToolCalls: false,
+    currentText: "GOAL remains ACTIVE.", activityText: "Stable tool summary" };
+  expect(gate.observe(observed, 0)).toBe(true);
+  expect(gate.observe(observed, 59_999)).toBe(true);
+  expect(gate.observe(observed, 60_000)).toBe(false);
+  expect(gate.observe(observed, 5_000_000)).toBe(false);
+  expect(gate.observe({ ...observed, currentText: "GOAL remains ACTIVE. Final." }, 5_000_001)).toBe(true);
+  expect(gate.observe(observed, 5_060_002)).toBe(true);
+  expect(gate.observe(observed, 5_120_002)).toBe(false);
+  expect(gate.observe({ ...observed, activeToolCalls: true }, 5_120_003)).toBe(true);
+  expect(gate.observe(observed, 5_120_004)).toBe(true);
+  expect(gate.observe({ ...observed, stopVisible: true }, 5_190_004)).toBe(true);
+  expect(gate.observe(observed, 5_190_005)).toBe(true);
+  expect(gate.observe({ ...observed, streamOpen: false }, 5_190_006)).toBe(false);
+});
+
+test("orphaned HTTP response cannot suppress a missing completion action for 80 minutes", () => {
+  const stream = new ChatGptBrowserStreamHealth(30_000);
+  const health = new ChatGptTurnDomHealthTracker(60_000, 10_000, 60_000);
+  const state = { responsePresent:true, running:false, currentText:"Last visible final answer",
+    completionActionVisible:false, activityText:"no more tool activity" };
+  const streamActive = (now: number) => stream.observe({
+    streamOpen: true, stopVisible: false, activeToolCalls: false,
+    currentText: state.currentText, activityText:state.activityText,
+  }, now);
+  expect(health.update({ ...state, responseStreamActive: streamActive(0) }, 0)).toBeUndefined();
+  expect(health.update({ ...state, responseStreamActive: streamActive(30_000) }, 30_000)).toBeUndefined();
+  expect(health.update({ ...state, responseStreamActive: streamActive(90_000) }, 90_000)).toContain("did not expose");
 });
 
 test.each(["requestfinished", "requestfailed"])("owned SSE keeps a quiet response alive until %s, without declaring completion", async terminal => {

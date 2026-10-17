@@ -1729,6 +1729,43 @@ export class ChatGptCompletionTracker {
   }
 }
 
+/**
+ * A long-lived HTTP/SSE response is not indefinite proof that the model is still
+ * generating. An accepted stream can outlive the visible Stop control after a
+ * final answer; keeping it as a permanent health veto leaves Codex waiting forever.
+ *
+ * Require a recent visible change, a Stop control or an outstanding native tool to
+ * keep the SSE liveness grace alive. Expiry NEVER declares a final answer: it only
+ * permits the existing DOM completion and error guards to make their own verdict.
+ */
+export class ChatGptBrowserStreamHealth {
+  private withoutStopSince?: number;
+  private lastVisibleSignature?: string;
+
+  constructor(private readonly graceMs = 60_000) {}
+
+  observe(state: {
+    streamOpen: boolean;
+    stopVisible: boolean;
+    activeToolCalls: boolean;
+    currentText: string;
+    activityText: string;
+  }, now = Date.now()): boolean {
+    if (!state.streamOpen || state.stopVisible || state.activeToolCalls) {
+      this.withoutStopSince = undefined;
+      this.lastVisibleSignature = undefined;
+      return state.streamOpen;
+    }
+    const signature = JSON.stringify([state.currentText, state.activityText]);
+    if (signature !== this.lastVisibleSignature) {
+      this.lastVisibleSignature = signature;
+      this.withoutStopSince = now;
+    }
+    this.withoutStopSince ??= now;
+    return now - this.withoutStopSince < this.graceMs;
+  }
+}
+
 export class ChatGptTurnDomHealthTracker {
   private sawResponse = false;
   private missingResponseSince?: number;
@@ -4299,6 +4336,7 @@ export class ChatGptBrowserWorker {
     const domHealthTracker = new ChatGptTurnDomHealthTracker(
       CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
     );
+    const streamHealth = new ChatGptBrowserStreamHealth();
     const responseDomCache: ChatGptResponseDomCache = {};
     let responseTurn = initialResponseTurn;
     for (;;) {
@@ -4352,7 +4390,15 @@ export class ChatGptBrowserWorker {
         continue;
       }
       const running = await chatGptStopButton(page).isVisible().catch(() => false);
-      const responseStreamActive = generation?.active() ?? false;
+      const responseStreamActive = streamHealth.observe({
+        streamOpen: generation?.active() ?? false,
+        stopVisible: running,
+        activeToolCalls: externalToolCallsInFlight,
+        currentText: snapshot.visibleText,
+        activityText: JSON.stringify(snapshot.traceBlocks
+          .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+          .map(block => [block.kind, block.text])),
+      });
       if (running || responseStreamActive) generation?.progress();
       const domError = domHealthTracker.update({
         responsePresent: snapshot.responsePresent,
@@ -5992,6 +6038,7 @@ export class ChatGptBrowserWorker {
       ));
       await diagnostics.capture(page, "file-attachment-complete");
       const completionTracker = new ChatGptCompletionTracker();
+      const streamHealth = new ChatGptBrowserStreamHealth();
       const recordFinalUsage = await usageSubmission();
       const finalSubmissionEvidence = await this.runStage(
         turn.traceId,
@@ -6156,8 +6203,16 @@ export class ChatGptBrowserWorker {
           const first = await this.submissionDomState(page, {});
           const snapshot = await this.responseDomSnapshot(responseTurn.locator, {});
           const stop = chatGptStopButton(page);
-          const generationActive = await stop.isVisible().catch(() => false)
-            || submissionRejection.hasActiveResponse();
+          const visibleStop = await stop.isVisible().catch(() => false);
+          const generationActive = visibleStop || streamHealth.observe({
+            streamOpen: submissionRejection.hasActiveResponse(),
+            stopVisible: visibleStop,
+            activeToolCalls: (turn.externalProgress?.snapshot().activeToolCalls ?? 0) > 0,
+            currentText: snapshot.visibleText,
+            activityText: JSON.stringify(snapshot.traceBlocks
+              .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+              .map(block => [block.kind, block.text])),
+          });
           const composerReady = await this.activeComposer(page, 1_000, originalAbortSignal)
             .then(async composer => await composer.isVisible().catch(() => false))
             .catch(() => false);
@@ -6533,7 +6588,15 @@ export class ChatGptBrowserWorker {
         }
         const stop = chatGptStopButton(page);
         const running = watchedErrorVisible || await stop.isVisible().catch(() => false);
-        const responseStreamActive = generation.active();
+        const responseStreamActive = streamHealth.observe({
+          streamOpen: generation.active(),
+          stopVisible: running,
+          activeToolCalls: externalToolCallsInFlight,
+          currentText: snapshot.visibleText,
+          activityText: JSON.stringify(snapshot.traceBlocks
+            .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+            .map(block => [block.kind, block.text])),
+        });
         if (running || responseStreamActive) generation.progress();
         if (running) sawRunning = true;
         if (snapshot.responsePresent) {
