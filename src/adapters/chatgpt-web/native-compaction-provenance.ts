@@ -85,11 +85,22 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
     if(['compaction','compaction_summary','context_compaction'].includes(String(item.type)))return reject('request_checkpoint_missing');
   }
   if(!requestCheckpoint||!key)return reject('request_checkpoint_missing');
+  // Standalone /compact may run under its own transient native turn while the
+  // latest persisted turn_context still belongs to the source instruction turn.
+  // Only a native-owned source item in this exact request can name that alternate
+  // turn, and the installed checkpoint must still match byte-for-byte below.
+  const nativeSource = parsed._compactionRequest
+    ? input.map(item => userRevision(item, identity.turnId)).filter(
+      (value): value is ChatGptTurnUserRevision => value !== undefined).at(-1)
+    : undefined;
+  const compactionSourceTurnId = nativeSource?.turnId && nativeSource.turnId !== identity.turnId
+    ? nativeSource.turnId : undefined;
   let installationDigest:string|undefined;
   const installationHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'undefined').digest('hex');
   try{
     return inspectCurrentCodexRollout({codexHome:options.codexHome??getCodexHome(),
-      ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),lineage,turnId:identity.turnId},({fd,size,turn})=>{
+      ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),lineage,turnId:identity.turnId,
+      ...(compactionSourceTurnId?{compactionSourceTurnId}:{})},({fd,size,turn})=>{
       // An omitted request preference is not a claimed model setting. The current
       // native turn must still supply actual effort evidence; never infer a default.
       if(typeof body?.model!=='string'||turn.model!==body.model||!boundedString(turn.effort)||!NATIVE_EFFORTS.has(turn.effort)||

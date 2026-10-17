@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {recoverCompactionInstruction} from '../src/adapters/chatgpt-web/compaction-continuation';
 import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compaction';
 import {parseRequest} from '../src/responses/parser';
-import {extractChatGptTurnIdentity} from '../src/adapters/chatgpt-web/environment';
+import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
@@ -312,4 +312,110 @@ test.each([
     codexHome:f.home, onDiagnostic:code=>diagnostics.push(code),
   })).toThrow('Replay provenance is unverified');
   expect(diagnostics).toContain(expected);
+});
+
+function goalContinuationFixture() {
+  const f = fixture();
+  const goal = {
+    type: 'message', role: 'user', id: 'msg_native_goal_resume',
+    content: [{type:'input_text',text:'<codex_internal_context source="goal">Continue the active goal</codex_internal_context>'}],
+    internal_chat_message_metadata_passthrough: {turn_id:f.turn},
+  };
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  body.input=[structuredClone(f.source),structuredClone(f.summary),structuredClone(goal)];
+  const previous=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...previous,request_kind:'turn'});
+  f.records.splice(1,1,
+    {type:'response_item',payload:structuredClone(f.source)},
+    {type:'event_msg',payload:{type:'task_started',turn_id:f.turn}},
+    {type:'response_item',payload:structuredClone(goal)},
+  );
+  f.write();
+  return {...f,goal};
+}
+
+test('goal resume authenticates an older user instruction only across the exact native task boundary',()=>{
+  const f=goalContinuationFixture();
+  const prior=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try {
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+  } finally {
+    if(prior===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=prior;
+  }
+});
+
+test.each(['missing-native-goal','changed-goal-content','changed-source-content','newer-instruction','foreign-native-turn'] as const)(
+  'goal resume refuses missing or conflicting native evidence: %s',change=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  if(change==='missing-native-goal')f.records.splice(3,1);
+  if(change==='changed-goal-content'){
+    (body.input.at(-1)!.content as Array<{text:string}>)[0]!.text=
+      '<codex_internal_context source="goal">Different goal</codex_internal_context>';
+  }
+  if(change==='changed-source-content'){
+    (body.input[0]!.content as Array<{text:string}>)[0]!.text='Wrong historical task';
+  }
+  if(change==='newer-instruction'){
+    f.records.splice(2,0,{type:'response_item',payload:{
+      ...structuredClone(f.source),id:'msg_newer_task',
+      content:[{type:'input_text',text:'A different later instruction'}],
+    }});
+  }
+  if(change==='foreign-native-turn'){
+    (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  }
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try {
+    expect(()=>extractChatGptTurnUserRevision(f.parsed)).toThrow();
+  } finally {
+    if(prior===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=prior;
+  }
+});
+
+test('fresh current-turn human input bypasses an unrelated stale checkpoint without borrowing its instruction',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  const fresh={type:'message',role:'user',id:'msg_real_new',
+    content:[{type:'input_text',text:'Start a new unrelated task'}],
+    internal_chat_message_metadata_passthrough:{turn_id:f.turn}};
+  body.input.push(fresh);
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try {
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(fresh.content);
+  } finally {
+    if(prior===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=prior;
+  }
+});
+
+test('standalone compact can authenticate the installed checkpoint against its last native source turn',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  // Codex has not yet emitted a turn_context for its standalone compact turn.
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=f.oldTurn;
+  f.write();
+  const recovered=resolveNativeCompactionSource(
+    f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home});
+  expect(recovered?.source.itemId).toBe(f.source.id);
+});
+
+test('an ordinary replay cannot claim a foreign latest native turn as a compaction source',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:unknown[]};
+  body.input.push(structuredClone(f.source));
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=f.oldTurn;
+  f.write();
+  expect(()=>resolveNativeCompactionSource(f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home}))
+    .toThrow('latest_turn_mismatch');
 });

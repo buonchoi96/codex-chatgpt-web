@@ -5,6 +5,7 @@ import { isNativeAgentsMdContext } from "../../responses/native-context";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
 import { ChatGptWebAdapterError } from "./adapter-error";
 import { isAcceptedCompactionContinuation, recoverCompactionInstruction } from "./compaction-continuation";
+import { isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
 
 export type ChatGptSandboxPolicy =
   | { type: "dangerFullAccess" }
@@ -290,7 +291,8 @@ export function extractChatGptTurnUserRevision(parsed: CodexParsedRequest): unkn
   // checkpoint; an arbitrary older prompt is still not a new instruction or a valid handoff.
   if (revision.turnId !== undefined && revision.turnId !== turnId
     && (priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
-      || !isAcceptedCompactionContinuation(parsed, identity, revision))) {
+      || !(isAcceptedCompactionContinuation(parsed, identity, revision)
+        || isAuthenticatedNativeGoalContinuation(parsed, identity, revision)))) {
     throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
       {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
   }
@@ -301,17 +303,20 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   const body = record(parsed._rawBody);
   const input = Array.isArray(body?.input) ? body.input : [];
   const metadata = clientTurnMetadata(parsed);
-  const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed)) : undefined;
-  for (let index = input.length - 1; index >= 0; index -= 1) {
-    const revision = userRevision(input[index], expectedTurnId, metadata);
-    if (revision) {
-      // v1 retains the older human message but drops a synthetic delegation. Recover the
-      // actual task only for an exact producer-authenticated retained representation before
-      // our checkpoint. New steering and rewritten history keep their normal validation.
-      return recovered?.sourceWasDelegation && index < recovered.summaryIndex
-        && isAcceptedCompactionContinuation(parsed, extractChatGptTurnIdentity(parsed), revision)
-        ? recovered.source : revision;
-    }
+  const identity = extractChatGptTurnIdentity(parsed);
+  const latestIndex = input.findLastIndex(value => userRevision(value, expectedTurnId, metadata) !== undefined);
+  const latest = latestIndex >= 0 ? userRevision(input[latestIndex], expectedTurnId, metadata) : undefined;
+  // Fresh human input (or a native-rollout-authenticated /goal continuation) supersedes a
+  // stale checkpoint. Never attempt unrelated native provenance before handling this source.
+  if (latest && (latest.turnId === expectedTurnId
+    || (latest.turnId && expectedTurnId && !priorChatGptAbortedTurnIds(parsed).includes(latest.turnId)
+      && isAuthenticatedNativeGoalContinuation(parsed, identity, latest)))) return latest;
+  const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, identity) : undefined;
+  if (latest) {
+    // A completed compact may have dropped a delegated synthetic instruction.
+    return recovered?.sourceWasDelegation && latestIndex < recovered.summaryIndex
+      && isAcceptedCompactionContinuation(parsed, identity, latest)
+      ? recovered.source : latest;
   }
   return recovered?.source;
 }
@@ -344,8 +349,15 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
   const body = record(parsed._rawBody);
   const turnId = extractChatGptTurnIdentity(parsed).turnId;
   const metadata = clientTurnMetadata(parsed);
-  const recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
   const input = Array.isArray(body?.input) ? body.input : [];
+  const nativeRevision = input.map(value => userRevision(value, turnId, metadata)).filter(
+    (value): value is ChatGptTurnUserRevision => value !== undefined).at(-1);
+  // A new instruction or independently authenticated goal resumes without forcing
+  // validation of an unrelated/stale historical compact record.
+  const hasActiveSource = nativeRevision && (nativeRevision.turnId === turnId
+    || (nativeRevision.turnId && !priorChatGptAbortedTurnIds(parsed).includes(nativeRevision.turnId)
+      && isAuthenticatedNativeGoalContinuation(parsed, extractChatGptTurnIdentity(parsed), nativeRevision)));
+  const recovered = hasActiveSource ? undefined : recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
   const prefix = recovered?.sourceWasDelegation ? input.slice(0, recovered.summaryIndex) : [];
   const retained = prefix.map(value => userRevision(value, turnId, metadata)).filter(value => value !== undefined).at(-1);
   const recoverDelegation = recovered?.sourceWasDelegation && (!retained

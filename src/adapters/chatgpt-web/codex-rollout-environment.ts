@@ -248,6 +248,68 @@ export function latestNativeCompactionRecord(fd:number,size:number):Record<strin
   return latestRolloutRecord(fd,size,'compacted',32*1024*1024);
 }
 
+/**
+ * Verify /goal resume against the exact native rollout, not XML or the browser's cache.
+ * Both the last historical human instruction and the new goal-control fragment must be
+ * recorded with their native ids and turn owners on opposite sides of task_started.
+ * A newer human message supersedes the historical instruction.
+ */
+export function verifyNativeGoalContinuationItems(
+  fd: number, size: number, currentTurnId: string,
+  historical: { id: string; turnId: string; content: unknown },
+  goal: { id: string; content: unknown },
+): boolean {
+  if (size <= 0 || size > 256 * 1024 * 1024
+    || historical.turnId === currentTurnId
+    || !historical.id || !goal.id || historical.id === goal.id) return false;
+  let position = 0;
+  let carry = Buffer.alloc(0);
+  let sawHistorical = false;
+  let sawBoundary = false;
+  let sawGoal = false;
+  let newerInstruction = false;
+  while (position < size) {
+    const count = Math.min(ROLLOUT_READ_CHUNK_BYTES, size - position);
+    const chunk = Buffer.alloc(count);
+    if (readSync(fd, chunk, 0, count, position) !== count) return false;
+    position += count;
+    const data = Buffer.concat([carry, chunk]);
+    let start = 0;
+    for (let end = data.indexOf(0x0a); end >= 0; end = data.indexOf(0x0a, start)) {
+      const line = data.subarray(start, end);
+      start = end + 1;
+      if (!line.length) continue;
+      if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
+      const item = parseJsonLine(line);
+      const payload = record(item.payload);
+      if (item.type === "event_msg" && payload?.type === "task_started" && payload.turn_id === currentTurnId) {
+        if (!sawHistorical || newerInstruction || sawBoundary) return false;
+        sawBoundary = true;
+      }
+      if (item.type !== "response_item" || payload?.type !== "message" || payload.role !== "user") continue;
+      const owner = record(payload.internal_chat_message_metadata_passthrough)?.turn_id;
+      if (!sawBoundary) {
+        if (payload.id === historical.id) {
+          if (owner !== historical.turnId || !isDeepStrictEqual(payload.content, historical.content)) return false;
+          sawHistorical = true;
+          newerInstruction = false;
+        } else if (sawHistorical) {
+          const kinds = record(payload.internal_chat_message_metadata_passthrough)?.content_item_kinds;
+          if (Array.isArray(kinds) && kinds.some(kind => kind === "user.text" || kind === "user.image")) {
+            newerInstruction = true;
+          }
+        }
+      } else if (payload.id === goal.id) {
+        if (owner !== currentTurnId || !isDeepStrictEqual(payload.content, goal.content)) return false;
+        sawGoal = true;
+      }
+    }
+    carry = Buffer.from(data.subarray(start));
+    if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
+  }
+  return carry.length === 0 && sawHistorical && sawBoundary && sawGoal && !newerInstruction;
+}
+
 function verifyHistoricalEnvironmentMessages(
   fd: number,
   size: number,
