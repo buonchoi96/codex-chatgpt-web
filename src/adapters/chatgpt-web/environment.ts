@@ -5,7 +5,7 @@ import { isNativeAgentsMdContext } from "../../responses/native-context";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
 import { ChatGptWebAdapterError } from "./adapter-error";
 import { isAcceptedCompactionContinuation, recoverCompactionInstruction } from "./compaction-continuation";
-import { isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
+import { isAuthenticatedNativeCompactionSource, isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
 
 export type ChatGptSandboxPolicy =
   | { type: "dangerFullAccess" }
@@ -318,7 +318,10 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   if (latest && (latest.turnId === expectedTurnId
     || (latest.turnId === undefined && latestIndex > checkpointIndex)
     || (latest.turnId && expectedTurnId && !priorChatGptAbortedTurnIds(parsed).includes(latest.turnId)
-      && isAuthenticatedNativeGoalContinuation(parsed, identity, latest)))) return latest;
+      && (isAuthenticatedNativeGoalContinuation(parsed, identity, latest)
+        || isAuthenticatedNativeCompactionSource(parsed, identity, latest))))) return latest;
+  // A fresh compact with a native-authenticated human source is independent of the
+  // previous checkpoint. Do not let stale checkpoint recovery mask this newer source.
   const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, identity) : undefined;
   if (latest) {
     // A completed compact may have dropped a delegated synthetic instruction.
@@ -413,17 +416,25 @@ export function extractChatGptCompactionSourceRevision(
 ): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
   const identity = extractChatGptTurnIdentity(parsed);
-  const revision = latestChatGptTurnUserRevision(parsed, identity.turnId, options.recoverCheckpoint !== false);
   const trusted = parsed._trustedCompactionSource;
-  // The fallback is set only by the bridge after matching a previously accepted native
-  // browser submission. Browser text and caller-provided JSON never create this authority.
-  const restored = !revision && trusted
+  // Only the bridge can attach a source from an actual accepted native browser
+  // submission under the same thread, turn, model and effort.
+  const trustedMatches = trusted !== undefined
     && identity.threadId === trusted.threadId
     && identity.turnId === trusted.turnId
     && parsed.modelId === trusted.modelId
     && parsed.options.reasoning === trusted.reasoning
-    && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId)
-    ? trusted.revision : undefined;
+    && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId);
+  let revision: ChatGptTurnUserRevision | undefined;
+  try {
+    revision = latestChatGptTurnUserRevision(parsed, identity.turnId, options.recoverCheckpoint !== false);
+  } catch (error) {
+    // A stale installed checkpoint must not disable a stronger, independently
+    // authenticated accepted source from THIS native turn.
+    if (!trustedMatches || !(error instanceof ChatGptWebAdapterError)
+      || error.code !== "REPLAY_PROVENANCE_UNVERIFIED") throw error;
+  }
+  const restored = !revision && trustedMatches ? trusted!.revision : undefined;
   const source = revision ?? restored;
   if (!source || (!options.allowAbortedRetainedComparison && source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
     // A tool-only round or /goal runtime fragment is not an authenticated native instruction.

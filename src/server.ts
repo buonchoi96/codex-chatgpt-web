@@ -750,8 +750,11 @@ export async function responseRequest(
       if (!(error instanceof ChatGptWebAdapterError)) throw error;
       const identity = extractChatGptTurnIdentity(parsed);
       const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+      // Emit a bounded category without exposing native message contents or paths.
+      const provenanceReason = /\\(reason=(latest_turn_mismatch|model_effort_mismatch|rollout_changed|native_rollout_unavailable)\\)/.exec(error.message)?.[1];
       console.warn(`[chatgpt-web] compaction_preflight ${JSON.stringify({
         code: error.code,
+        ...(provenanceReason ? {reason:provenanceReason} : {}),
         native_thread_id: identity.threadId ? "present" : "missing",
         native_turn_id: identity.turnId ? "present" : "missing",
         raw_input_items: Array.isArray(input) ? input.length : 0,

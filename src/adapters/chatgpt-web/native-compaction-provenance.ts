@@ -6,7 +6,7 @@ import type {CodexParsedRequest} from '../../types';
 import {ChatGptWebAdapterError} from './adapter-error';
 import {extractChatGptRootThreadMetadata,extractChatGptThreadSpawnLineage,userRevision,
   type ChatGptTurnIdentity,type ChatGptTurnUserRevision} from './environment';
-import {inspectCurrentCodexRollout,latestNativeCompactionRecord,verifyNativeGoalContinuationItems} from './codex-rollout-environment';
+import {inspectCurrentCodexRollout,latestNativeCompactionRecord,verifyLatestNativeCompactionSource,verifyNativeGoalContinuationItems} from './codex-rollout-environment';
 
 function record(value:unknown):Record<string,unknown>|undefined{
   return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
@@ -112,6 +112,57 @@ export function isAuthenticatedNativeGoalContinuation(
       return verifyNativeGoalContinuationItems(fd,size,identity.turnId!,{
         id:historical.itemId!,turnId:historical.turnId!,content:historical.content,
       },{id:last.id as string,content:last.content});
+    }) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A new /compact may have an explicit older-turn human source but no matching
+ * completed checkpoint yet. Recovering the PREVIOUS checkpoint before checking
+ * this source can fail when Codex has advanced its persisted turn_context.
+ * Verify the request's exact human item against the newest native human input
+ * in the owning rollout instead; never use a bridge/browser copy as authority.
+ */
+export function isAuthenticatedNativeCompactionSource(
+  parsed: CodexParsedRequest, identity: ChatGptTurnIdentity,
+  source: ChatGptTurnUserRevision,
+  options: NativeCompactionRecoveryOptions = {},
+): boolean {
+  if (!parsed._compactionRequest || !identity.threadId || !identity.turnId
+    || !boundedString(source.itemId) || !boundedString(source.turnId)
+    || source.turnId === identity.turnId) return false;
+  const body = record(parsed._rawBody);
+  const client = record(body?.client_metadata);
+  let metadata: Record<string, unknown> | undefined;
+  const encoded = client?.['x-codex-turn-metadata'];
+  try { metadata = typeof encoded === 'string' ? record(JSON.parse(encoded)) : record(encoded); }
+  catch { return false; }
+  if (metadata?.request_kind !== 'compaction' || metadata.turn_id !== identity.turnId
+    || metadata.thread_id !== identity.threadId) return false;
+  const input = body?.input;
+  if (!Array.isArray(input) || !input.some(value => {
+    const item = record(value);
+    return item?.id === source.itemId && owner(item) === source.turnId
+      && isDeepStrictEqual(item?.content, source.content)
+      && item?.type === 'message' && item.role === 'user';
+  })) return false;
+  const lineage = extractChatGptThreadSpawnLineage(parsed) ?? extractChatGptRootThreadMetadata(parsed);
+  if (!lineage || lineage.threadId !== identity.threadId) return false;
+  const witness = { id: source.itemId!, turnId: source.turnId!, content: source.content };
+  try {
+    return inspectCurrentCodexRollout({
+      codexHome: options.codexHome ?? getCodexHome(),
+      ...(options.sqliteHome ? {sqliteHome: options.sqliteHome} : {}),
+      lineage, turnId: identity.turnId,
+      compactionSourceTurnId: source.turnId,
+      compactionSource: witness,
+    }, ({fd,size,turn}) => {
+      if (typeof body?.model !== 'string' || turn.model !== body.model
+        || !boundedString(turn.effort) || !NATIVE_EFFORTS.has(turn.effort)
+        || (parsed.options.reasoning !== undefined && turn.effort !== parsed.options.reasoning)) return false;
+      return verifyLatestNativeCompactionSource(fd, size, witness);
     }) === true;
   } catch {
     return false;

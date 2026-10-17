@@ -573,3 +573,83 @@ test('a later untyped native user item cannot silently reinstate the earlier com
     codexHome:f.home,
   })).toThrow('latest_turn_mismatch');
 });
+
+/** Regression: compact source is fresh native input, whereas the installed old
+ * checkpoint may belong to an earlier completed handoff. */
+function recompactAfterStaleCheckpoint() {
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'compaction'});
+  body.input.push(structuredClone(f.source));
+  f.parsed._compactionRequest=true;
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  // A prior completed compaction was installed, but is not the checkpoint
+  // that will be produced by this latest explicit compact.
+  (f.ack.payload.replacement_history[1] as Record<string,unknown>).encrypted_content=encodeCompactionSummary('Older installed summary, not the request summary.');
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  return f;
+}
+test('compact reads a newly authenticated historical-turn source before trying an obsolete checkpoint',()=>{
+  const f=recompactAfterStaleCheckpoint();
+  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(extractChatGptCompactionSourceRevision(f.parsed)).toEqual({
+      content:f.source.content,turnId:f.oldTurn,itemId:f.source.id,
+    });
+  }finally{
+    if(previous===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=previous;
+  }
+});
+test.each(['counterfeit-source','newer-human','wrong-request-kind','wrong-model'] as const)(
+  'compact cannot reuse obsolete checkpoint to authenticate an invalid new source: %s',change=>{
+  const f=recompactAfterStaleCheckpoint();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  if(change==='counterfeit-source'){
+    body.input.at(-1)!.content=[{type:'input_text',text:'A different instruction with the same id'}];
+  }
+  if(change==='newer-human'){
+    const newer=structuredClone(f.source);
+    newer.id='msg_later_native_human';
+    newer.content=[{type:'input_text',text:'A later instruction superseding the source'}];
+    f.records.splice(f.records.length-1,0,{type:'response_item',payload:newer});
+  }
+  if(change==='wrong-request-kind'){
+    const meta=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+    body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...meta,request_kind:'turn'});
+  }
+  if(change==='wrong-model'){
+    (f.records.at(-1)!.payload as Record<string,unknown>).model='chatgpt-web/gpt-6-pro';
+  }
+  f.write();
+  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow('Replay provenance is unverified');
+  }finally{
+    if(previous===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=previous;
+  }
+});
+test('an accepted source on the exact same native turn can restore a source when stale checkpoint lookup fails',()=>{
+  const f=fixture();
+  f.parsed._compactionRequest=true;
+  const nativeSource={content:[{type:'input_text',text:'Accepted native response source'}],turnId:f.turn,itemId:'msg_native_accepted'};
+  f.parsed._trustedCompactionSource={
+    threadId:f.thread,turnId:f.turn,modelId:f.parsed.modelId,reasoning:f.parsed.options.reasoning,
+    revision:nativeSource,
+  };
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(extractChatGptCompactionSourceRevision(f.parsed)).toEqual(nativeSource);
+    // An accepted browser witness is not interchangeable with another native turn.
+    f.parsed._trustedCompactionSource={...f.parsed._trustedCompactionSource,turnId:randomUUID()};
+    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow('Replay provenance is unverified');
+  }finally{
+    if(previous===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=previous;
+  }
+});

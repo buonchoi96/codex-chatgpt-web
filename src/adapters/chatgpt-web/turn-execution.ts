@@ -974,19 +974,27 @@ export function bindAcceptedCompactionSource(
   sessions: ChatGptTurnSessions = chatGptTurnSessions,
 ): boolean {
   if (!parsed._compactionRequest) return false;
+  let failedProvenance: ChatGptWebAdapterError | undefined;
   try {
     extractChatGptCompactionSourceRevision(parsed);
     return true;
   } catch (error) {
     if (!(error instanceof ChatGptWebAdapterError)
-      || error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING") throw error;
+      || (error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING"
+        && error.code !== "REPLAY_PROVENANCE_UNVERIFIED")) throw error;
+    if (error.code === "REPLAY_PROVENANCE_UNVERIFIED") failedProvenance = error;
   }
   const identity = extractChatGptTurnIdentity(parsed);
   if (!identity.threadId || !identity.turnId) return false;
   const accepted = sessions.acceptedSourceForNativeTurn(
     identity.threadId, identity.turnId, parsed.modelId, parsed.options.reasoning,
   );
-  if (!accepted) return false;
+  // Missing-source is a normal recoverable preflight; rejected native replay is
+  // recoverable only when this independent accepted-send witness exists.
+  if (!accepted) {
+    if (failedProvenance) throw failedProvenance;
+    return false;
+  }
   parsed._trustedCompactionSource = {
     threadId: identity.threadId, turnId: identity.turnId,
     modelId: parsed.modelId, reasoning: parsed.options.reasoning,
