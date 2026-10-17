@@ -3546,6 +3546,34 @@ export class ChatGptBrowserWorker {
       // submitted text for browser-only messages. A
       // surviving old group or any competing new turn remains foreign.
       const user = newUsers[0]!;
+      // During ChatGPT's group remount, the accepted user bubble may return
+      // before the paired assistant role. An absent role is not evidence of a
+      // foreign Send. Prove ownership from the original submitted message,
+      // check that no other group appeared, then leave the response pending.
+      // This never promotes a different user turn or submits anything again.
+      const awaitingPairedAssistant = !identity && newUsers.length === 1
+        && binding.identity.startsWith("group:assistant:")
+        && user.startsWith("group:user:")
+        && !state.turnIdentities.includes(binding.identity)
+        && state.turnIdentities.every(turn => acceptedTurns.has(turn) || turn === user);
+      if (awaitingPairedAssistant) {
+        const userGroup = page.locator(`[data-turn-key=${JSON.stringify(user.slice("group:user:".length))}]`);
+        const sameAcceptedUser = baseline.acceptedUserIdentity
+          ? baseline.acceptedUserIdentity === user
+          : baseline.turnToken && baseline.submittedText
+            ? await this.userMessageMatchesSubmission(userGroup, baseline.submittedText, signal, baseline.turnToken)
+            : await this.submittedUserMatches(userGroup, baseline, signal);
+        if (sameAcceptedUser) {
+          const verified = await this.submissionDomState(page, baseline.domCache, signal);
+          if (verified.userIdentities.includes(user)
+            && verified.responseIdentities.every(turn => acceptedTurns.has(turn))
+            && verified.turnIdentities.every(turn => acceptedTurns.has(turn) || turn === user)) {
+            baseline.acceptedUserIdentity = user;
+            console.info('[chatgpt-web] submission_binding_pending_assistant {"verifiedUser":true}');
+            return binding;
+          }
+        }
+      }
       const replacement = identity && newUsers.length === 1
         && binding.identity.startsWith("group:assistant:")
         && user.startsWith("group:user:")
