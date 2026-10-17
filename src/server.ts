@@ -1300,7 +1300,7 @@ export function startServer(
         // owner signal is the only cancellation boundary for a fresh fallback not in the session
         // registry.
         const compactionCancellation = cancelAllStructuredCompactions(reason);
-        const cancelledBrowserTurns = chatGptTurnSessions.clear() + (turnBroker?.revokeExternalOwners() ?? 0);
+        const cancelledBrowserTurns = chatGptTurnSessions.cancelAllForLauncher(reason) + (turnBroker?.revokeExternalOwners() ?? 0);
         const [cancelledHttpTurns, cancelledCompactionRuns] = await Promise.all([
           httpTurns.cancelAll(reason),
           compactionCancellation,

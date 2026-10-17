@@ -544,6 +544,31 @@ export class ChatGptTurnSessions {
   private readonly physicalRetirements=new WeakMap<ChatGptTurnSession,Promise<void>>();
   private readonly steeringAdmissions = new Map<string, Promise<void>>();
   private readonly steeringReservations = new Set<string>();
+  // A launcher cancel-all must retire the native execution, not just discard
+  // its in-memory browser handle. Codex /goal can replay that same HTTP turn
+  // after Stop; reopening it could duplicate browser sends and tool actions.
+  // Keys contain no raw instruction data and are bounded independently.
+  private readonly launcherCancelledKeys = new Map<string, { error: Error; at: number }>();
+  private readonly launcherCancellationTtlMs = 24 * 60 * 60_000;
+  private readonly launcherCancellationMaxKeys = 512;
+
+  private launcherCancelledError(key: string): Error | undefined {
+    const record = this.launcherCancelledKeys.get(key);
+    if (!record) return undefined;
+    if (Date.now() - record.at > this.launcherCancellationTtlMs) {
+      this.launcherCancelledKeys.delete(key);
+      return undefined;
+    }
+    return record.error;
+  }
+
+  private rememberLauncherCancellation(key: string, reason: Error): void {
+    this.launcherCancelledKeys.delete(key);
+    this.launcherCancelledKeys.set(key, { error: reason, at: Date.now() });
+    while (this.launcherCancelledKeys.size > this.launcherCancellationMaxKeys) {
+      this.launcherCancelledKeys.delete(this.launcherCancelledKeys.keys().next().value!);
+    }
+  }
 
   constructor(
     private readonly ttlMs = 30 * 60_000,
@@ -560,6 +585,8 @@ export class ChatGptTurnSessions {
     instruction?: string,
   ): ChatGptTurnSession {
     this.prune();
+    const cancelled = this.launcherCancelledError(key);
+    if (cancelled) throw cancelled;
     const existing = this.entries.get(key);
     if (existing) {
       if (existing.supersededError) throw existing.supersededError;
@@ -593,6 +620,8 @@ export class ChatGptTurnSessions {
   ): Promise<ChatGptTurnSession> {
     for (;;) {
       if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+      const cancelled = this.launcherCancelledError(key);
+      if (cancelled) throw cancelled;
       const existing = this.entries.get(key);
       if (existing) {
         if (existing.supersededError) throw existing.supersededError;
@@ -836,6 +865,15 @@ export class ChatGptTurnSessions {
     this.entries.clear();
     this.conversationHeads.clear();
     return cancelled;
+  }
+
+  /** Explicit launcher Stop-all: fail subsequent replays of these exact
+   * executions instead of restarting an already cancelled /goal turn.
+   * Ordinary clear() still resets test/shutdown registries without recording
+   * an operator cancellation, and a new native turn key is unaffected. */
+  cancelAllForLauncher(reason: Error): number {
+    for (const key of this.entries.keys()) this.rememberLauncherCancellation(key, reason);
+    return this.clear();
   }
 
   async cancelTrace(traceId: string, reason = chatGptBrowserTabClosedError()): Promise<number> {
