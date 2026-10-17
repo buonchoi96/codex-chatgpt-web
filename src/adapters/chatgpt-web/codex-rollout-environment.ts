@@ -300,7 +300,8 @@ export function verifyNativeGoalContinuationItems(
           }
         }
       } else if (payload.id === goal.id) {
-        if (owner !== currentTurnId || !isDeepStrictEqual(payload.content, goal.content)) return false;
+        if ((owner !== undefined && owner !== currentTurnId)
+          || !isDeepStrictEqual(payload.content, goal.content)) return false;
         sawGoal = true;
       }
     }

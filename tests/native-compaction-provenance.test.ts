@@ -419,3 +419,20 @@ test('an ordinary replay cannot claim a foreign latest native turn as a compacti
   expect(()=>resolveNativeCompactionSource(f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home}))
     .toThrow('latest_turn_mismatch');
 });
+
+test('a native goal fragment without an item turn owner is authenticated by its exact task boundary',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  delete body.input.at(-1)!.internal_chat_message_metadata_passthrough;
+  const native=f.records.find(record=>record.type==='response_item'
+    && (record.payload as Record<string,unknown>)?.id==='msg_native_goal_resume')!;
+  delete (native.payload as Record<string,unknown>).internal_chat_message_metadata_passthrough;
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try {
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+  } finally {
+    if(prior===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=prior;
+  }
+});

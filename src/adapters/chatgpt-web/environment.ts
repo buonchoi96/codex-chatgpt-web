@@ -409,6 +409,8 @@ export function extractChatGptCompactionSourceRevision(
 export function isChatGptCompactionContinuation(parsed: CodexParsedRequest): boolean {
   const identity = extractChatGptTurnIdentity(parsed);
   const revision = latestChatGptTurnUserRevision(parsed, identity.turnId);
+  if (revision?.turnId && identity.turnId && revision.turnId !== identity.turnId
+    && isAuthenticatedNativeGoalContinuation(parsed, identity, revision)) return false;
   return revision?.turnId !== undefined && identity.turnId !== undefined
     && !priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
     // Pre-turn compaction can append the new instruction after the checkpoint. It still

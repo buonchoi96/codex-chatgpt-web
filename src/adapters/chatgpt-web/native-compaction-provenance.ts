@@ -92,7 +92,7 @@ export function isAuthenticatedNativeGoalContinuation(
   if(!Array.isArray(input))return false;
   const last=input.map(record).filter(Boolean).at(-1);
   if(last?.type!=='message' || last.role!=='user'
-    || !boundedString(last.id) || owner(last)!==identity.turnId) return false;
+    || !boundedString(last.id) || (owner(last)!==undefined && owner(last)!==identity.turnId)) return false;
   const parts=last.content;
   const text=typeof parts==='string'?parts:Array.isArray(parts)
     && parts.length===1 && record(parts[0])?.type==='input_text'
