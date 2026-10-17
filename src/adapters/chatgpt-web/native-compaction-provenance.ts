@@ -144,7 +144,7 @@ export function isAuthenticatedNativeCompactionSource(
   const input = body?.input;
   if (!Array.isArray(input) || !input.some(value => {
     const item = record(value);
-    return item?.id === source.itemId && owner(item) === source.turnId
+    return item !== undefined && item.id === source.itemId && owner(item) === source.turnId
       && isDeepStrictEqual(item?.content, source.content)
       && item?.type === 'message' && item.role === 'user';
   })) return false;
