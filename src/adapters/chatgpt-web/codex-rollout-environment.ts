@@ -804,7 +804,17 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
         // A standalone compact is not always assigned a persisted turn_context before
         // its request is routed. The exact newest native human source is independently
         // verifiable from the same rollout; arbitrary older messages are never enough.
-        if (!options.compactionSource || !verifyLatestNativeCompactionSource(fd, size, options.compactionSource)) {
+        const authenticatedLatestHuman = options.compactionSource !== undefined
+          && verifyLatestNativeCompactionSource(fd, size, options.compactionSource);
+        if (!authenticatedLatestHuman) {
+          // Diagnostically distinguish an absent source witness from an exact
+          // native mismatch, without logging paths, message IDs or user text.
+          console.warn("[chatgpt-web] native_rollout_source_mismatch " + JSON.stringify({
+            compactionSourceProvided: options.compactionSource !== undefined,
+            sourceOwnerProvided: options.compactionSource?.turnId !== undefined,
+            latestNativeHumanMatches: false,
+            indexedRollout: indexed.kind === "found",
+          }));
           if (indexed.kind === "found") {
             throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
           }

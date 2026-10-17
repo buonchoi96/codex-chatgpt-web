@@ -130,9 +130,14 @@ export function isAuthenticatedNativeCompactionSource(
   source: ChatGptTurnUserRevision,
   options: NativeCompactionRecoveryOptions = {},
 ): boolean {
+  // Native /compact can replay an ID-only user item: the request has no
+  // per-item turn_id, but the original typed native user item does. Authenticate
+  // the exact ID + full content against the newest native human instruction
+  // before accepting it. A claimed, conflicting turn_id still fails closed.
   if (!parsed._compactionRequest || !identity.threadId || !identity.turnId
-    || !boundedString(source.itemId) || !boundedString(source.turnId)
-    || source.turnId === identity.turnId) return false;
+    || !boundedString(source.itemId)
+    || (source.turnId !== undefined && (!boundedString(source.turnId)
+      || source.turnId === identity.turnId))) return false;
   const body = record(parsed._rawBody);
   const client = record(body?.client_metadata);
   let metadata: Record<string, unknown> | undefined;
@@ -150,13 +155,13 @@ export function isAuthenticatedNativeCompactionSource(
   })) return false;
   const lineage = extractChatGptThreadSpawnLineage(parsed) ?? extractChatGptRootThreadMetadata(parsed);
   if (!lineage || lineage.threadId !== identity.threadId) return false;
-  const witness = { id: source.itemId!, turnId: source.turnId!, content: source.content };
+  const witness = { id: source.itemId!, ...(source.turnId ? {turnId: source.turnId} : {}), content: source.content };
   try {
     return inspectCurrentCodexRollout({
       codexHome: options.codexHome ?? getCodexHome(),
       ...(options.sqliteHome ? {sqliteHome: options.sqliteHome} : {}),
       lineage, turnId: identity.turnId,
-      compactionSourceTurnId: source.turnId,
+      ...(source.turnId ? {compactionSourceTurnId: source.turnId} : {}),
       compactionSource: witness,
     }, ({fd,size,turn}) => {
       if (typeof body?.model !== 'string' || turn.model !== body.model

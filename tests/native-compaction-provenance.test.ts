@@ -579,6 +579,59 @@ test('standalone compact authenticates an ownerless latest native human precedin
   }
 });
 
+test('ownerless native compact authenticates directly even when the old installed checkpoint is obsolete',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const metadata=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...metadata,request_kind:'compaction'});
+  const ownerless=structuredClone(f.source) as Record<string,unknown>;
+  delete ownerless.internal_chat_message_metadata_passthrough;
+  body.input.unshift(ownerless);
+  f.parsed._compactionRequest=true;
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  // This is explicitly NOT the checkpoint supplied in this new /compact.
+  (f.ack.payload.replacement_history[1] as Record<string,unknown>).encrypted_content=
+    encodeCompactionSummary('A previous installation, not this compaction checkpoint.');
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const prev=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(isAuthenticatedNativeCompactionSource(
+      f.parsed,extractChatGptTurnIdentity(f.parsed),
+      {itemId:f.source.id,content:f.source.content},
+      {codexHome:f.home},
+    )).toBe(true);
+    expect(extractChatGptCompactionSourceRevision(f.parsed)).toEqual({
+      itemId:f.source.id,content:f.source.content,
+    });
+  }finally{
+    if(prev===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=prev;
+  }
+});
+
+test('ownerless compact does not accept an id match when the newest native content differs',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const metadata=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...metadata,request_kind:'compaction'});
+  const ownerless=structuredClone(f.source) as Record<string,unknown>;
+  delete ownerless.internal_chat_message_metadata_passthrough;
+  body.input.unshift(ownerless);
+  f.parsed._compactionRequest=true;
+  const altered=structuredClone(f.source);
+  altered.content=[{type:'input_text',text:'Not the real latest native human instruction.'}];
+  f.records.splice(1,0,{type:'response_item',payload:altered});
+  (f.ack.payload.replacement_history[1] as Record<string,unknown>).encrypted_content=
+    encodeCompactionSummary('An obsolete installed checkpoint.');
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  expect(isAuthenticatedNativeCompactionSource(
+    f.parsed,extractChatGptTurnIdentity(f.parsed),
+    {itemId:f.source.id,content:f.source.content},
+    {codexHome:f.home},
+  )).toBe(false);
+});
+
 test('ownerless human compact source is rejected when newer native human supersedes it',()=>{
   const f=fixture();
   const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
