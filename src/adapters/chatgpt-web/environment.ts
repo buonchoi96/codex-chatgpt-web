@@ -291,8 +291,8 @@ export function extractChatGptTurnUserRevision(parsed: CodexParsedRequest): unkn
   // checkpoint; an arbitrary older prompt is still not a new instruction or a valid handoff.
   if (revision.turnId !== undefined && revision.turnId !== turnId
     && (priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
-      || !(isAcceptedCompactionContinuation(parsed, identity, revision)
-        || isAuthenticatedNativeGoalContinuation(parsed, identity, revision)))) {
+      || !(isAuthenticatedNativeGoalContinuation(parsed, identity, revision)
+        || isAcceptedCompactionContinuation(parsed, identity, revision)))) {
     throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
       {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
   }
