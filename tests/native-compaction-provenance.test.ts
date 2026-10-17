@@ -9,7 +9,7 @@ import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compactio
 import {parseRequest} from '../src/responses/parser';
 import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord,diagnoseLatestNativeCompactionSource} from '../src/adapters/chatgpt-web/codex-rollout-environment';
-import {isAuthenticatedNativeCompactionSource,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
+import {isAuthenticatedNativeCompactionSource,isAuthenticatedNativeGoalContinuation,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
 const owned:string[]=[];
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==';
@@ -374,6 +374,55 @@ test.each(['missing-native-goal','changed-goal-content','changed-source-content'
   } finally {
     if(prior===undefined)delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME=prior;
+  }
+});
+
+test('goal resume remains authenticated in later tool rounds after its native goal control item',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  body.input.push({type:'message',role:'assistant',id:'msg_followup_assistant',
+    content:[{type:'output_text',text:'Working through the goal.'}]});
+  body.input.push({type:'function_call',call_id:'call_goal_followup',name:'exec_command',
+    arguments:'{}'});
+  body.input.push({type:'function_call_output',call_id:'call_goal_followup',output:'ok'});
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+  }finally{
+    if(prior===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=prior;
+  }
+});
+
+test('goal resume cannot borrow the older instruction when a later raw user item supersedes goal',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  body.input.push({type:'message',role:'assistant',id:'msg_followup_assistant',
+    content:[{type:'output_text',text:'Previous tool response.'}]});
+  body.input.push({type:'message',role:'user',id:'new_user_instruction',
+    content:[{type:'input_text',text:'A different task.'}],
+    internal_chat_message_metadata_passthrough:{turn_id:f.turn,content_item_kinds:['user.text']}});
+  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(isAuthenticatedNativeGoalContinuation(f.parsed,extractChatGptTurnIdentity(f.parsed),
+      {itemId:f.source.id,turnId:f.oldTurn,content:f.source.content})).toBe(false);
+  }finally{
+    if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;
+  }
+});
+
+test('goal continuation provenance rejects a later native human instruction after goal receipt',()=>{
+  const f=goalContinuationFixture();
+  const later={type:'message',role:'user',id:'native_human_after_goal',
+    content:[{type:'input_text',text:'New native task'}],
+    internal_chat_message_metadata_passthrough:{turn_id:f.turn,content_item_kinds:['user.text']}};
+  f.records.splice(f.records.length-1,0,{type:'response_item',payload:later});
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(isAuthenticatedNativeGoalContinuation(f.parsed,extractChatGptTurnIdentity(f.parsed),
+      {itemId:f.source.id,turnId:f.oldTurn,content:f.source.content})).toBe(false);
+  }finally{
+    if(prior===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=prior;
   }
 });
 

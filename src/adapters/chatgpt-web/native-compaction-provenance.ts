@@ -90,14 +90,36 @@ export function isAuthenticatedNativeGoalContinuation(
     || metadata.thread_id!==identity.threadId) return false;
   const input=body?.input;
   if(!Array.isArray(input))return false;
-  const last=input.map(record).filter(Boolean).at(-1);
-  if(last?.type!=='message' || last.role!=='user'
-    || !boundedString(last.id) || (owner(last)!==undefined && owner(last)!==identity.turnId)) return false;
-  const parts=last.content;
-  const text=typeof parts==='string'?parts:Array.isArray(parts)
-    && parts.length===1 && record(parts[0])?.type==='input_text'
-    ? record(parts[0])?.text : undefined;
-  if(typeof text!=='string' || !/^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(text.trim()))return false;
+  // A /goal ACTIVE instruction is the control-plane anchor for this native
+  // turn, not necessarily the final Responses item. Subsequent assistant/tool
+  // rounds append after the goal item. Require exactly one current-turn goal
+  // item with its own native ID; never accept a copied older-turn goal.
+  const goalItems=input.flatMap((value,index)=>{
+    const item=record(value);
+    if(item?.type!=='message'||item.role!=='user'||!boundedString(item.id)
+      || (owner(item)!==undefined&&owner(item)!==identity.turnId))return [];
+    const parts=item.content;
+    const content=typeof parts==='string'?parts:Array.isArray(parts)
+      && parts.length===1 && record(parts[0])?.type==='input_text'
+      ? record(parts[0])?.text : undefined;
+    return typeof content==='string'
+      && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(content.trim())
+      ? [{item,index}]:[];
+  });
+  if(goalItems.length!==1)return false;
+  const {item:goal,index:goalIndex}=goalItems[0]!;
+  // Any later native user message in the request is a competing instruction,
+  // unless its exact non-human nature is established independently. Do not
+  // silently promote an old human instruction past newer user input.
+  if(input.slice(goalIndex+1).some(value=>{
+    const item=record(value);
+    return item?.type==='message'&&item.role==='user';
+  }))return false;
+  console.info('[chatgpt-web] native_goal_continuation_candidate '+JSON.stringify({
+    implementation:'goal-anchor-with-trailing-tool-rounds-v1',
+    goalNotLast:goalIndex<input.length-1,
+    trailingItems:Math.min(input.length-goalIndex-1,100000),
+  }));
   const lineage=extractChatGptThreadSpawnLineage(parsed)??extractChatGptRootThreadMetadata(parsed);
   if(!lineage || lineage.threadId!==identity.threadId)return false;
   try {
@@ -111,7 +133,7 @@ export function isAuthenticatedNativeGoalContinuation(
         || (parsed.options.reasoning!==undefined && turn.effort!==parsed.options.reasoning))return false;
       return verifyNativeGoalContinuationItems(fd,size,identity.turnId!,{
         id:historical.itemId!,turnId:historical.turnId!,content:historical.content,
-      },{id:last.id as string,content:last.content});
+      },{id:goal.id as string,content:goal.content});
     }) === true;
   } catch {
     return false;

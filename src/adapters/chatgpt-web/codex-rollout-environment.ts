@@ -300,9 +300,15 @@ export function verifyNativeGoalContinuationItems(
           }
         }
       } else if (payload.id === goal.id) {
-        if ((owner !== undefined && owner !== currentTurnId)
+        if (sawGoal || (owner !== undefined && owner !== currentTurnId)
           || !isDeepStrictEqual(payload.content, goal.content)) return false;
         sawGoal = true;
+      } else if (sawGoal) {
+        // A later human instruction supersedes this goal boundary. Assistant
+        // outputs and tool results do not, and are deliberately ignored.
+        const kinds = record(payload.internal_chat_message_metadata_passthrough)?.content_item_kinds;
+        if (Array.isArray(kinds) && kinds.some(kind => kind === "user.text" || kind === "user.image"))
+          return false;
       }
     }
     carry = Buffer.from(data.subarray(start));
