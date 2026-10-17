@@ -7,8 +7,34 @@ import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "../src
 import { LauncherBrowserHelperClient } from "../src/adapters/chatgpt-web/launcher-helper-client";
 import type { BrowserTurn, ResolvedBrowserConfig } from "../src/adapters/chatgpt-web/browser-worker";
 import { LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
+import { LiveSteering } from "../src/adapters/chatgpt-web/live-steering";
+import { parseRequest } from "../src/responses/parser";
+import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
+import {buildContextArchive} from '../src/adapters/chatgpt-web/context-archive';
 
 const roots: string[] = [];
+test('a helper advertising legacy archive support cannot receive a one-Send archive capability',async()=>{
+  const client=new LauncherBrowserHelperClient({appName:'Codex Native2',browserHost:'launcher',
+    browserHostDescriptorPath:'/fixture/launcher.json',storageStatePath:'/fixture/state.json',
+    chromeExecutablePath:'/fixture/chrome',headed:true,autoApproveToolCalls:false,useSavedChats:false});
+  const internal=client as unknown as {child:unknown;ensureChild():Promise<void>;send(message:Record<string,unknown>):Promise<void>;
+    handleLine(child:unknown,line:string):void;helperFeatures:Set<string>};
+  const child={};internal.child=child;internal.ensureChild=async()=>{};
+  internal.helperFeatures=new Set(['context-archive']);
+  const sent:string[]=[];
+  internal.send=async message=>{
+    sent.push(String(message.type));
+    if(message.type==='run')queueMicrotask(()=>internal.handleLine(child,JSON.stringify({type:'event',id:message.id,event:'prepared_selected',reused:false})));
+    else if(message.type==='prepared_selected_ack')queueMicrotask(()=>internal.handleLine(child,JSON.stringify({type:'result',id:message.id,text:'Legacy helper received capability'})));
+    else if(message.type==='abort')queueMicrotask(()=>internal.handleLine(child,JSON.stringify({type:'error',id:message.id,message:'fixture aborted'})));
+  };
+  const archive=buildContextArchive('Historical fixture',[],[]);let releases=0;
+  await expect(client.run({traceId:'old-archive-helper',modelId:'chatgpt-web',reasoning:'high',
+    capabilities:{localToolsEnabled:true,solAvailable:true,extraHighAvailable:false,proAvailable:false},
+    prepare:async()=>({text:'Fresh fixture capability',images:[],contextArchive:{...archive,base64:Buffer.from(archive.bytes).toString('base64')},
+      release(){releases++;}}),onTextDelta(){}})).rejects.toMatchObject({code:'context_archive_helper_unsupported',retryable:false});
+  expect(sent).toEqual(['run','abort']);expect(releases).toBe(1);
+});
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -32,6 +58,21 @@ test("daemon streams browser lifecycle through the real helper process", async (
       }
       await turn.onSendActivated();
       turn.onSubmitted();
+      const recovery = await turn.prepareRecovery();
+      if (recovery.text !== "fresh inline capability delta" || recovery.images.length || recovery.contextArchive)
+        throw new Error("Recovery capability delta was lost or acquired historical uploads");
+      const deadline = performance.now() + 1000;
+      while (!turn.steering.snapshot().pending && performance.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 5));
+      if (!turn.steering.snapshot().pending) throw new Error("Steering progress was lost in IPC");
+      if (await turn.completionFence.begin() !== undefined) throw new Error("Pending steering finalized the old answer");
+      if (await turn.completionFence.begin(true) !== 0) throw new Error("Recovery fence purpose was lost in IPC");
+      const steering = await turn.prepareRecovery({steering:true});
+      if (steering.text !== "new instruction only" || !steering.steeringDeltaId || steering.contextArchive || steering.multipart)
+        throw new Error("Steering delta was lost or acquired historical uploads");
+      await turn.onSteeringSubmitted(steering.steeringDeltaId);
+      if (await turn.completionFence.begin() !== 0)
+        throw new Error("Helper resumed before the daemon committed the steering receipt");
       turn.onHeartbeat();
       turn.onGenerationProgress();
       turn.onReasoningSummary("Reading project");
@@ -93,6 +134,14 @@ test("daemon streams browser lifecycle through the real helper process", async (
   let heartbeats = 0;
   let generationProgress = 0;
   let released = false;
+  let recoveryPrepared = 0;
+  let recoveryReleased = 0;
+  let steeringReceipts = 0;
+  const initial = {model:"chatgpt-web/gpt-5.6-sol", instructions:"Stable policy",
+    client_metadata:{"x-codex-turn-metadata":JSON.stringify({thread_id:"thread_fixture",turn_id:"turn_fixture"})},
+    input:[{type:"message",role:"user",id:"original",content:[{type:"input_text",text:"original instruction"}],
+      internal_chat_message_metadata_passthrough:{turn_id:"turn_fixture"}}]};
+  const steering = new LiveSteering(parseRequest(initial), "fixture_conversation");
   const client = new LauncherBrowserHelperClient(config);
   try {
     const result = await client.run({
@@ -110,8 +159,32 @@ test("daemon streams browser lifecycle through the real helper process", async (
         release: () => { released = true; },
       }),
       onMultipartStageAcknowledged: stage => { acknowledgedStages.push(stage); },
+      prepareRecovery: async request => {
+        recoveryPrepared++;
+        if (request?.steering) {
+          const reserved = steering.prepare(submitted)!;
+          return {text:"new instruction only", images:[], steeringDeltaId:reserved.deltaId, release:()=>{recoveryReleased++;}};
+        }
+        return {text:"fresh inline capability delta",images:[],release:()=>{recoveryReleased++;}};
+      },
+      steering,
+      externalProgress: new ChatGptExternalTurnProgress(),
+      completionFence: {
+        begin: async forRecovery => !forRecovery && steering.hasQueued() ? undefined : 0,
+        commit: async () => !steering.hasQueued(),
+      },
+      onSteeringSubmitted: async deltaId => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        steering.acknowledge(deltaId); steeringReceipts++;
+      },
       onSendActivated: () => { sendActivated = true; },
-      onSubmitted: () => { submitted = true; },
+      onSubmitted: () => {
+        submitted = true;
+        steering.admit(parseRequest({...initial,input:[...initial.input,
+          {type:"message",role:"user",id:"steering",content:[{type:"input_text",text:"new instruction only"}],
+            internal_chat_message_metadata_passthrough:{turn_id:"turn_fixture"}}]}));
+        steering.activateDelivery();
+      },
       onHeartbeat: () => { heartbeats++; },
       onGenerationProgress: () => { generationProgress++; },
       onReasoningSummary: (text, continuation) => reasoning.push({ text, continuation: continuation === true }),
@@ -120,6 +193,10 @@ test("daemon streams browser lifecycle through the real helper process", async (
       onLunaCheckpoint: checkpoint => checkpoints.push(checkpoint),
     });
     expect(result).toBe("done");
+    expect(recoveryPrepared).toBe(2);
+    expect(recoveryReleased).toBe(2);
+    expect(steeringReceipts).toBe(1);
+    expect(steering.hasQueued()).toBeFalse();
     expect(reasoning).toEqual([
       { text: "Reading project", continuation: false },
       { text: " files", continuation: true },

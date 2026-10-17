@@ -30,6 +30,9 @@ test.each([
   let stage = "";
   let released = false;
   let activated = 0;
+  let submitted = 0;
+  let draft = '';
+  let connectorSelected = false;
   let freshChatPreparations = 0;
   let rejectionAbortedWait = false;
   const frame = {};
@@ -56,18 +59,25 @@ test.each([
     attachPrompt: async (_page: unknown, _text: string, localTools: boolean) => {
       expect(localTools).toBe(false);
       actions.push("attach:plain");
+      draft=_text;connectorSelected=false;
     },
     attachPromptWithCompactionRetry: async (_page: unknown, _text: string, localTools: boolean) => {
       expect(localTools).toBe(tools);
       actions.push(localTools ? "attach:tools" : "attach:plain");
+      draft=_text;connectorSelected=localTools;
     },
+    assertPromptAttached:async (_page:unknown,text:string)=>{expect(draft).toBe(text);},
+    activeComposer:async()=>({}),
+    connectorIsSelected:async()=>connectorSelected,
     attachFiles: async () => { actions.push("files"); },
     sendAttachedPrompt: async (...args: unknown[]) => {
       // Context ingestion cannot mistake tool activity for acknowledgement of a part.
       expect(args[4]).toBe(stage === "send" ? progress : undefined);
       const lifecycle = args[5] as { onSendActivated(): Promise<void>; onSubmitted?: () => void };
-      if (stage !== "send") expect(lifecycle.onSubmitted).toBeUndefined();
+      if (stage !== "send") expect(submitted).toBe(0);
       await lifecycle.onSendActivated();
+      lifecycle.onSubmitted?.();
+      if(stage!=='send')expect(submitted).toBe(0);
       if (cancellationCase || (sizeRejected && stage === "multipart_stage_2_send")) {
         // An observed size rejection must not replace the user's explicit tab-close verdict.
         const request = { method: () => "POST", url: () => "https://chatgpt.com/backend-api/f/conversation", frame: () => frame };
@@ -105,7 +115,6 @@ test.each([
   if (retained) {
     // Exercise the real attachment path: the previous Send cleared its mention,
     // even though this conversation still belongs to the same launcher task.
-    let connectorSelected = false;
     const composer = {
       fill: async () => { connectorSelected = false; },
       focus: async () => {}, press: async () => {},
@@ -117,8 +126,7 @@ test.each([
       attachPromptWithCompactionRetry: (ChatGptBrowserWorker.prototype as any).attachPromptWithCompactionRetry,
       activeComposer: async () => composer,
       selectConnector: async () => { connectorSelected = true; actions.push("attach:tools"); return composer; },
-      insertPromptText: async () => { expect(connectorSelected).toBeTrue(); },
-      assertPromptAttached: async () => {},
+      insertPromptText: async (_composer:unknown,text:string) => { expect(connectorSelected).toBeTrue();draft=text.trimStart(); },
       clearChatGptComposerState: async () => { connectorSelected = false; },
     });
   }
@@ -130,6 +138,7 @@ test.each([
       modelFamily: gpt6Pro ? "6" : "5.6",
       reasoning: effort,
       onSendActivated: () => { activated += 1; },
+      onSubmitted:()=>{submitted+=1;},
       capabilities,
       compaction: !tools,
       externalProgress: progress,
@@ -146,6 +155,7 @@ test.each([
       expect(sendBudgets).toHaveLength(2);
       expect(actions.filter(action => action === "ack")).toHaveLength(1);
       expect(released).toBeTrue();
+      expect(submitted).toBe(0);
       expect(page.listenerCount("request")).toBe(0);
       expect(page.listenerCount("response")).toBe(0);
       expect(page.listenerCount("requestfinished")).toBe(0);
@@ -170,6 +180,7 @@ test.each([
     expect(sendBudgets).toEqual(Array(multipart ? 6 : 1).fill(180_000));
     expect(released).toBe(true);
     expect(activated).toBe(1);
+    expect(submitted).toBe(1);
     expect(page.listenerCount("request")).toBe(0);
     expect(page.listenerCount("response")).toBe(0);
   } finally {

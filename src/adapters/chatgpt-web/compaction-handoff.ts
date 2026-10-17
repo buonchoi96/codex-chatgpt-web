@@ -129,6 +129,8 @@ function currentToolResults(
 }
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 5 * 60_000;
+// Historical grace retained for compatibility with callers/tests; it is not a proof of a stall.
+export const ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS = 15_000;
 
 function boundedCompactionTimeout(timeoutMs: number): number {
   return Math.min(timeoutMs, MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
@@ -167,6 +169,7 @@ export async function settleActiveCompactionSource(
   source: ChatGptTurnSession,
   broker: TurnBroker,
   signal?: AbortSignal,
+  _sourceSettleGraceMs = ACTIVE_COMPACTION_SOURCE_SETTLE_GRACE_MS,
 ): Promise<{ answer: string; compactionInstructionDelivered: boolean }> {
   return source.runExclusive(async () => {
     if (signal?.aborted) {
@@ -198,14 +201,25 @@ export async function settleActiveCompactionSource(
         source.runtime.trace.recordProgress();
         source.markResultDelivered(request.callId);
       }
-      const browserOutcome = await withCompactionAbort(source.browserOutcome, signal);
+
+      // A 15-second interval without a browser-terminal acknowledgement cannot establish that
+      // native tools/reasoning stopped. The caller tracks meaningful progress and enforces its
+      // separate bounded handoff deadline. Preserve the source until real settlement or an
+      // explicit operator/deadline abort; never open a competing fresh compact on a timer alone.
+      const browserOutcome = await withCompactionAbort(
+        source.browserOutcome,
+        signal,
+      );
       if (browserOutcome.type === "error") throw browserOutcome.error;
       const compactionInstructionDelivered = broker.compactionDeliveryCount(token) > 0;
       // The one structured checkpoint message reuses this exact retained tab. It must not race the
       // helper's /turn/end handshake for the response that consumed the canonical tool results.
       // `requestCompaction` leaves those results untouched and only intercepts a later tool call, so
       // a zero delivery count proves that this is an ordinary publishable terminal response.
-      await withCompactionAbort(source.physicalSettlement, signal);
+      await withCompactionAbort(
+        source.physicalSettlement,
+        signal,
+      );
       return {
         answer: browserOutcome.answer,
         compactionInstructionDelivered,

@@ -19,6 +19,7 @@ test("launcher verification delegates exact connector selection to the browser h
       if (message.type !== "verify") return;
       if (message.config.appName !== "Codex Native2") process.exit(2);
       if (message.config.browserHostDescriptorPath !== "/runtime/launcher-browser.json") process.exit(3);
+      if (message.config.expectedConnectorTunnelId !== "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") process.exit(4);
       send({ type: "result", id: message.id, text: message.config.appName });
     });
   `);
@@ -27,6 +28,7 @@ test("launcher verification delegates exact connector selection to the browser h
     helper: { executable: process.execPath, script },
     descriptorPath: "/runtime/launcher-browser.json",
     appName: "Codex Native2",
+    expectedConnectorTunnelId: "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     logger: { info() {} },
   });
 

@@ -8,22 +8,31 @@ import {
   type CompactionTransactionHandle,
 } from "./compaction-transaction";
 import type { ChatGptTurnEnvironment } from "./environment";
-import { chatGptToolTimeoutError } from "./adapter-error";
+import { chatGptSafetyStatusUnknownOrBlockedError, chatGptToolTimeoutError } from "./adapter-error";
 import { subagentModelObservation } from "./mcp-observation";
+import {assertArchiveReadProof,type ArchiveReadProof} from './archive-read-proof';
 
-interface BrokerRetirementFailure {
-  code: "codex_tool_timeout";
-  tool: string;
-  timeoutMs: number;
-}
+export type BrokerRetirementFailure =
+  | { code: "codex_tool_timeout"; tool: string; timeoutMs: number }
+  | { code: "safety_status_unknown_or_blocked"; tool: string };
 
 function assertRetirementFailure(value: unknown): asserts value is BrokerRetirementFailure {
-  const failure = value as Partial<BrokerRetirementFailure> | null;
-  if (!failure || failure.code !== "codex_tool_timeout"
-    || typeof failure.tool !== "string" || !/^[A-Za-z0-9_.-]{1,256}$/.test(failure.tool)
-    || !Number.isSafeInteger(failure.timeoutMs) || failure.timeoutMs! <= 0) {
+  const failure = value as Record<string, unknown> | null;
+  const safeTool = typeof failure?.tool === "string" && /^[A-Za-z0-9_.-]{1,256}$/.test(failure.tool);
+  const validTimeout = failure?.code === "codex_tool_timeout"
+    && Object.keys(failure).length === 3
+    && Number.isSafeInteger(failure.timeoutMs) && (failure.timeoutMs as number) > 0;
+  const validSafety = failure?.code === "safety_status_unknown_or_blocked"
+    && Object.keys(failure).length === 2;
+  if (!failure || !safeTool || (!validTimeout && !validSafety)) {
     throw new Error("Invalid Codex tool retirement failure");
   }
+}
+
+function retirementError(failure: BrokerRetirementFailure): Error {
+  return failure.code === "safety_status_unknown_or_blocked"
+    ? chatGptSafetyStatusUnknownOrBlockedError(failure.tool)
+    : chatGptToolTimeoutError(failure.tool, failure.timeoutMs);
 }
 
 interface PendingTurn extends ChatGptTurnEnvironment {
@@ -99,6 +108,7 @@ interface SafeTurnControl {
 
 interface TurnChannel {
   traceId: string;
+  commandOwnerId: string;
   externalOwner: boolean;
   environment: PendingTurn;
   bindingId?: string;
@@ -118,6 +128,8 @@ interface TurnChannel {
   /** Monotonic across activity start/end so a completed request cannot disappear across a fence. */
   activityRevision: number;
   completionCommitted: boolean;
+  steeringPending?:boolean;
+  archiveRead?:{proof:ArchiveReadProof;verified:boolean;waiters:Set<SafeWaiter<void>>};
   completionRevision?: number;
   retirementWaiters: Set<SafeWaiter<BrokerRetirementFailure | undefined>>;
   batchTimer?: ReturnType<typeof setTimeout>;
@@ -128,10 +140,16 @@ interface BrokerRequest {
   method:
     | "claim"
     | "resolve"
+    | "screen_observer_validate"
     | "release"
     | "invoke"
     | "owner_status"
     | "owner_register"
+    | "owner_rotate_recovery"
+    | "owner_pause_steering"
+    | "owner_archive_require"
+    | "owner_archive_wait"
+    | "archive_confirm"
     | "owner_register_safe"
     | "owner_update"
     | "owner_safe_sent"
@@ -168,6 +186,7 @@ interface BrokerRequest {
   finalAnswer?: string;
   contract?: "native" | "safe";
   failure?: BrokerRetirementFailure;
+  archiveProof?:ArchiveReadProof;
 }
 
 interface BrokerResponse {
@@ -273,6 +292,10 @@ function assertSurfaceNonce(value: unknown): asserts value is string {
 }
 
 export interface TurnBrokerOwner {
+  requireArchiveRead?(token:string,proof:ArchiveReadProof):void|Promise<void>;
+  waitForArchiveRead?(token:string,signal?:AbortSignal):Promise<void>;
+  rotateRecoveryCapability?(token: string): string | Promise<string>;
+  pauseForSteering?(token:string):boolean|void|Promise<boolean|void>;
   register(environment: ChatGptTurnEnvironment, ttlMs?: number, traceId?: string): Promise<string>;
   registerSafe(
     environment: ChatGptTurnEnvironment,
@@ -315,6 +338,8 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   private readonly channels = new Map<string, TurnChannel>();
+  /** Trusted owner operations can retain their logical handle. Public claims never consult this map. */
+  private readonly recoveryOwners = new Map<string, string>();
   private readonly pending = new Map<string, TurnChannel>();
   private readonly compactionTransactions = new CompactionTransactionStore();
   private readonly bindings = new Map<string, { token: string; channel: TurnChannel }>();
@@ -326,11 +351,41 @@ export class TurnBroker implements TurnBrokerOwner {
   private readonly retiredBindings = new Map<string, BrokerRetirementDiagnostics>();
   private readonly retiredTokens = new Map<string, string>();
   private acceptingExternalOwners = true;
+  private closed = false;
   private server?: Server;
+  private readonly sockets = new Set<Socket>();
   private startPromise?: Promise<void>;
   private socketIdentity?: { dev: number; ino: number };
 
   private constructor(readonly socketPath: string) {}
+
+  requireArchiveRead(token:string,proof:ArchiveReadProof):void {
+    assertArchiveReadProof(proof);
+    token=this.recoveryOwners.get(token)??token;this.prune();
+    const channel=this.channels.get(token);
+    if(!channel||channel.safe||channel.completionCommitted||channel.compactionRequested
+      ||channel.activities.size||channel.invocations.size)throw new Error('Archive read gate requires a fresh settled native capability');
+    if(channel.archiveRead)throw new Error('Archive read proof was already configured for this capability');
+    channel.archiveRead={proof:{...proof},verified:false,waiters:new Set()};channel.activityRevision++;
+  }
+  waitForArchiveRead(token:string,signal?:AbortSignal):Promise<void> {
+    token=this.recoveryOwners.get(token)??token;this.prune();
+    const gate=this.channels.get(token)?.archiveRead;
+    if(!gate)return Promise.reject(new Error('Archive read gate is unavailable or retired'));
+    if(gate.verified)return Promise.resolve();
+    return this.waitForSafeState(gate.waiters,signal,'Archive read proof wait aborted');
+  }
+  private confirmArchiveRead(token:string,value:unknown):{confirmed:true;duplicate:boolean} {
+    assertArchiveReadProof(value);
+    // Public read receipts never resolve a retired capability through private owner aliases.
+    const channel=this.channels.get(token),gate=channel?.archiveRead;
+    if(!channel||!gate||channel.safe||channel.completionCommitted)throw new Error('Archive read proof has no current native capability');
+    if(Object.entries(gate.proof).some(([key,expected])=>value[key as keyof ArchiveReadProof]!==expected))
+      throw new Error('Context archive read proof does not match the attached historical bytes');
+    const duplicate=gate.verified;
+    if(!duplicate){gate.verified=true;channel.activityRevision++;this.resolveSafeWaiters(gate.waiters,undefined);}
+    return {confirmed:true,duplicate};
+  }
 
   /**
    * A ChatGPT turn outlives the request that started it, and its Codex Native calls arrive from a
@@ -349,7 +404,9 @@ export class TurnBroker implements TurnBrokerOwner {
     externalOwner = false,
     handlePrefix = "turn",
   ): Promise<string> {
+    if (this.closed) throw new Error('turn broker is closed');
     await this.start();
+    if (this.closed) throw new Error('turn broker is closed');
     this.prune();
     if (externalOwner && !this.acceptingExternalOwners) {
       throw new Error("turn broker is draining and does not accept new external owners");
@@ -360,6 +417,7 @@ export class TurnBroker implements TurnBrokerOwner {
     const token = opaqueId(handlePrefix);
     const channel: TurnChannel = {
       traceId,
+      commandOwnerId: opaqueId('commandowner'),
       externalOwner,
       environment: {
         ...environment,
@@ -427,6 +485,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   updateEnvironment(token: string, environment: ChatGptTurnEnvironment): void {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
@@ -446,6 +505,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   async nextToolBatch(token: string, signal?: AbortSignal): Promise<BrokerToolRequest[]> {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     let channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
@@ -494,6 +554,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   completeTool(token: string, callId: string, result: BrokerToolResult): void {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
@@ -509,15 +570,18 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   beginCompletionFence(token: string): number | undefined {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
     if (channel.completionCommitted) return channel.completionRevision;
-    if (channel.activities.size > 0 || channel.invocations.size > 0) return undefined;
+    if (channel.activities.size > 0 || channel.invocations.size > 0
+      ||channel.archiveRead&&!channel.archiveRead.verified) return undefined;
     return channel.activityRevision;
   }
 
   commitCompletionFence(token: string, revision: number): boolean {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     if (!Number.isSafeInteger(revision) || revision < 0) {
       throw new Error("turn completion fence revision is invalid");
@@ -527,7 +591,8 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.completionCommitted) return channel.completionRevision === revision;
     if (channel.activityRevision !== revision
       || channel.activities.size > 0
-      || channel.invocations.size > 0) return false;
+      || channel.invocations.size > 0
+      ||channel.archiveRead&&!channel.archiveRead.verified) return false;
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
@@ -537,6 +602,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   waitForRetirement(token: string, signal?: AbortSignal): Promise<BrokerRetirementFailure | undefined> {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) return Promise.resolve(undefined);
@@ -544,6 +610,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   requestCompaction(token: string, queuedResult: BrokerToolResult, onProgress?: () => void): number {
+    token = this.recoveryOwners.get(token) ?? token;
     this.prune();
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
@@ -576,6 +643,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   compactionDeliveryCount(token: string): number {
+    token = this.recoveryOwners.get(token) ?? token;
     const channel = this.channels.get(token);
     if (!channel) throw new Error("Cannot read compaction delivery after the turn capability retired");
     return channel.compactionDeliveryCount;
@@ -681,6 +749,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   revoke(token: string, reason = new Error("Codex turn binding was revoked"), failure?: BrokerRetirementFailure): void {
+    token = this.recoveryOwners.get(token) ?? token;
     const channel = this.channels.get(token);
     if (!channel) return;
     const diagnostics = retirementDiagnostics(channel);
@@ -689,6 +758,7 @@ export class TurnBroker implements TurnBrokerOwner {
       ...(failure ? { failure } : {}),
     })}`);
     this.channels.delete(token);
+    for (const [owner, current] of this.recoveryOwners) if (current === token) this.recoveryOwners.delete(owner);
     this.pending.delete(token);
     if (channel.bindingId) {
       this.bindings.delete(channel.bindingId);
@@ -701,8 +771,46 @@ export class TurnBroker implements TurnBrokerOwner {
       this.rejectSafeWaiters(channel.safe.completionWaiters, reason);
     }
     this.retire(this.retiredTokens, token, channel.traceId);
+    if(channel.archiveRead)this.rejectSafeWaiters(channel.archiveRead.waiters,reason);
     this.resolveSafeWaiters(channel.retirementWaiters, failure);
     this.rejectChannel(channel, reason);
+  }
+
+  /** Stop proof belongs to the browser coordinator. This atomic ledger boundary independently
+   * refuses unsettled effects, retires old model authority, and preserves pending owner reads. */
+  rotateRecoveryCapability(token: string): string {
+    this.prune();
+    token = this.recoveryOwners.get(token) ?? token;
+    const channel = this.channels.get(token);
+    if (!channel || channel.safe || channel.completionCommitted || channel.compactionRequested)
+      throw new Error('Recovery capability is terminal, manual, retired, or undergoing compaction');
+    if (channel.activities.size || channel.invocations.size || channel.queuedCallIds.length || channel.deliveredCallIds.size)
+      throw new Error('Recovery requires every native invocation and MCP activity to be settled');
+    if(channel.archiveRead&&!channel.archiveRead.verified)throw new Error('Recovery cannot retire an unread historical archive');
+    if (this.recoveryOwners.size >= MAX_RETIRED_TURN_HANDLES) throw new Error('Recovery owner journal is full');
+    const next = opaqueId('turn');
+    this.channels.delete(token); this.pending.delete(token);
+    if (channel.bindingId) {
+      this.bindings.delete(channel.bindingId);
+      this.retire(this.retiredBindings, channel.bindingId, retirementDiagnostics(channel));
+      delete channel.bindingId;
+    }
+    this.retire(this.retiredTokens, token, channel.traceId);
+    this.resolveSafeWaiters(channel.retirementWaiters, undefined);
+    for (const [owner, current] of this.recoveryOwners) if (current === token) this.recoveryOwners.set(owner, next);
+    this.recoveryOwners.set(token, next);
+    channel.activityRevision += 1;
+    channel.steeringPending = false;
+    this.channels.set(next, channel); this.pending.set(next, channel);
+    console.info(`[chatgpt-web] broker recovery capability rotated trace=${channel.traceId}`);
+    return next;
+  }
+  pauseForSteering(token:string):boolean {
+    this.prune(); token=this.recoveryOwners.get(token)??token;
+    const channel=this.channels.get(token);
+    if(!channel||channel.safe||channel.completionCommitted||channel.compactionRequested)return false;
+    channel.steeringPending=true;channel.activityRevision++;
+    return true;
   }
 
   externalOwnerActiveCount(): number {
@@ -727,7 +835,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   setExternalOwnersAccepted(accepted: boolean): void {
-    this.acceptingExternalOwners = accepted;
+    this.acceptingExternalOwners = !this.closed && accepted;
   }
 
   private retire<T>(history: Map<string, T>, handle: string, value: T): void {
@@ -802,6 +910,10 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
+    this.acceptingExternalOwners = false;
+    // A bind in progress still belongs to this broker and must finish before cleanup.
+    await this.startPromise?.catch(() => {});
     this.compactionTransactions.close();
     for (const token of [...this.channels.keys()]) this.revoke(token);
     const server = this.server;
@@ -809,10 +921,14 @@ export class TurnBroker implements TurnBrokerOwner {
     this.startPromise = undefined;
     if (brokers.get(this.socketPath) === this) brokers.delete(this.socketPath);
     if (server?.listening) {
-      await new Promise<void>((resolveClose, rejectClose) => server.close(error => {
+      const closed = new Promise<void>((resolveClose, rejectClose) => server.close(error => {
         if (!error || (error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") resolveClose();
         else rejectClose(error);
       }));
+      // A canceled connect can leave an accepted Windows pipe with no request or EOF.
+      // Retire capabilities first, stop accepting peers, then release this broker's sockets.
+      for (const socket of this.sockets) socket.destroy();
+      await closed;
     }
     const identity = this.socketIdentity;
     this.socketIdentity = undefined;
@@ -825,6 +941,7 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   private start(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('turn broker is closed'));
     if (this.startPromise) return this.startPromise;
     const attempt = new Promise<void>((resolveStart, rejectStart) => {
       const windowsPipe = isWindowsPipeEndpoint(this.socketPath);
@@ -931,12 +1048,17 @@ export class TurnBroker implements TurnBrokerOwner {
   }
 
   private handleSocket(socket: Socket): void {
+    if (this.closed || !this.server) { socket.destroy(); return; }
+    this.sockets.add(socket);
     let buffered = "";
     let handled = false;
     const disconnected = new AbortController();
     socket.setEncoding("utf8");
     socket.on("error", () => {});
-    socket.once("close", () => disconnected.abort());
+    socket.once("close", () => {
+      this.sockets.delete(socket);
+      disconnected.abort();
+    });
     socket.on("data", chunk => {
       if (handled) return;
       buffered += chunk;
@@ -978,13 +1100,27 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (['owner_pause_steering','owner_archive_require','owner_archive_wait','archive_confirm'].includes(request.method)) return;
+    if (!["claim", "resolve", "screen_observer_validate", "release", "invoke", "owner_status", "owner_register", "owner_rotate_recovery", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
 
   private async dispatch(request: BrokerRequest, socketSignal?: AbortSignal): Promise<unknown> {
     this.prune();
+    if(request.method==='owner_archive_require'){
+      if(!request.token)throw new Error('Archive owner token is required');
+      assertArchiveReadProof(request.archiveProof);this.requireArchiveRead(request.token,request.archiveProof);
+      return {required:true};
+    }
+    if(request.method==='owner_archive_wait'){
+      if(!request.token)throw new Error('Archive owner token is required');
+      await this.waitForArchiveRead(request.token,socketSignal);return {confirmed:true};
+    }
+    if(request.method==='archive_confirm'){
+      if(!request.token)throw new Error('Archive turn token is required');
+      return this.confirmArchiveRead(request.token,request.arguments);
+    }
     if (request.method === "safe_start") {
       if (!request.token) throw new Error("Zero Risk request_id is required");
       return this.startSafeTurn(request.token);
@@ -1014,7 +1150,8 @@ export class TurnBroker implements TurnBrokerOwner {
       return { submitted: true };
     }
     if (request.method === "owner_status") {
-      return { protocolVersion: 5, acceptingExternalOwners: this.acceptingExternalOwners };
+      return { protocolVersion: 5, acceptingExternalOwners: this.acceptingExternalOwners,
+        features:['context-archive-read-proof-v1'] };
     }
     if (request.method === "owner_register") {
       const environment = ownerEnvironment(request.environment);
@@ -1022,6 +1159,14 @@ export class TurnBroker implements TurnBrokerOwner {
         throw new Error("turn owner trace id is invalid");
       }
       return this.register(environment, request.ttlMs, request.traceId, true).then(token => ({ token }));
+    }
+    if (request.method === 'owner_rotate_recovery') {
+      if (!request.token) throw new Error('turn owner token is required');
+      return { token: this.rotateRecoveryCapability(request.token) };
+    }
+    if(request.method==='owner_pause_steering'){
+      if(!request.token)throw new Error('turn owner token is required');
+      return {paused:this.pauseForSteering(request.token)};
     }
     if (request.method === "owner_register_safe") {
       const environment = ownerEnvironment(request.environment);
@@ -1140,6 +1285,7 @@ export class TurnBroker implements TurnBrokerOwner {
       if (typeof request.activityId !== "string" || !/^activity_[A-Za-z0-9_-]{16,128}$/.test(request.activityId)) {
         throw new Error("turn activity id is invalid");
       }
+      if(activeChannel.steeringPending)throw new Error('A newer canonical instruction is queued; wait for its fresh capability');
       const activityId = request.activityId;
       if (activeChannel.completedActivities.has(activityId)) {
         throw new Error("turn activity was already completed before this claim settled");
@@ -1153,13 +1299,15 @@ export class TurnBroker implements TurnBrokerOwner {
         if (!existing || existing.token !== token || existing.channel !== activeChannel) {
           throw new Error("turn token binding state is inconsistent");
         }
-        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment };
+        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment,
+          commandOwnerId:activeChannel.commandOwnerId,commandAdmission:activeChannel.compactionRequested?'control_only':'active' };
       }
       this.pending.delete(token);
       const bindingId = opaqueId("binding");
       activeChannel.bindingId = bindingId;
       this.bindings.set(bindingId, { token, channel: activeChannel });
-      return { bindingId, activityId, environment: activeChannel.environment };
+      return { bindingId, activityId, environment: activeChannel.environment,
+        commandOwnerId:activeChannel.commandOwnerId,commandAdmission:activeChannel.compactionRequested?'control_only':'active' };
     }
 
     const bindingId = request.bindingId;
@@ -1205,7 +1353,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (request.method === "release") {
       if (request.failure !== undefined) {
         assertRetirementFailure(request.failure);
-        this.revoke(binding.token, chatGptToolTimeoutError(request.failure.tool, request.failure.timeoutMs), request.failure);
+        this.revoke(binding.token, retirementError(request.failure), request.failure);
       } else {
         this.revoke(binding.token);
       }
@@ -1215,6 +1363,15 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     if (request.method === "resolve") return { environment: binding.channel.environment };
     this.assertSafeHarnessRunning(binding.channel);
+    if(binding.channel.archiveRead&&!binding.channel.archiveRead.verified)
+      throw new Error('ARCHIVE_READ_REQUIRED: Confirm the attached context before invoking task tools');
+    if(binding.channel.steeringPending)throw new Error('A newer canonical instruction is queued; old capability cannot start another tool');
+    if(request.method==='screen_observer_validate') {
+      if(binding.channel.compactionRequested)throw new Error('Screen observation is unavailable during compaction');
+      if(typeof request.activityId!=='string'||!binding.channel.activities.has(request.activityId))
+        throw new Error('Screen observation activity is no longer active');
+      return {bindingId,commandOwnerId:binding.channel.commandOwnerId};
+    }
     if (binding.channel.compactionRequested) {
       const result = binding.channel.compactionResult;
       if (!result) throw new Error("Codex context compaction control result is unavailable");
@@ -1431,6 +1588,29 @@ export async function callTurnBroker<T>(
  */
 export class RemoteTurnBroker implements TurnBrokerOwner {
   constructor(readonly socketPath: string) {}
+  async requireArchiveRead(token:string,proof:ArchiveReadProof):Promise<void>{
+    const status=await callTurnBroker<{features?:unknown}>(this.socketPath,{method:'owner_status'});
+    if(!Array.isArray(status.features)||!status.features.includes('context-archive-read-proof-v1'))
+      throw new Error('The running DEV broker does not support context-archive-read-proof-v1');
+    const response=await callTurnBroker<{required?:unknown}>(this.socketPath,{method:'owner_archive_require',token,archiveProof:proof});
+    if(response.required!==true)throw new Error('DEV owner did not acknowledge the archive read gate');
+  }
+  async waitForArchiveRead(token:string,signal?:AbortSignal):Promise<void>{
+    const response=await callTurnBroker<{confirmed?:unknown}>(this.socketPath,{method:'owner_archive_wait',token},null,signal);
+    if(response.confirmed!==true)throw new Error('DEV owner did not confirm archive ingestion');
+  }
+  async pauseForSteering(token:string):Promise<boolean>{
+    const response=await callTurnBroker<{paused?:boolean}>(this.socketPath,{method:'owner_pause_steering',token});
+    if(typeof response.paused!=='boolean')throw new Error('DEV owner did not acknowledge the steering gate');
+    return response.paused;
+  }
+
+  async rotateRecoveryCapability(token: string): Promise<string> {
+    const response = await callTurnBroker<{ token?: unknown }>(this.socketPath, { method: 'owner_rotate_recovery', token });
+    if (typeof response.token !== 'string' || !/^turn_[A-Za-z0-9_-]{32}$/.test(response.token))
+      throw new Error('DEV owner received an invalid recovery capability');
+    return response.token;
+  }
 
   async assertCompatible(): Promise<void> {
     let status: { protocolVersion?: unknown; acceptingExternalOwners?: unknown };

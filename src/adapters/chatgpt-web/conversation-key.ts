@@ -31,11 +31,19 @@ export function chatGptConversationKey(
   namespace: string,
 ): string | undefined {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.threadId) return undefined;
+  // Codex supplies both identifiers. Other compatible controllers may provide only a
+  // stable prompt_cache_key; keep it in a separate hash field so it cannot collide with
+  // a Codex thread id, while preserving existing Codex conversation keys byte-for-byte.
+  const conversationIdentity = identity.threadId
+    ? { threadId: identity.threadId }
+    : identity.promptCacheKey
+      ? { promptCacheKey: identity.promptCacheKey }
+      : undefined;
+  if (!conversationIdentity) return undefined;
   const raw = parsed._rawBody as { input?: unknown[] } | undefined;
   return createHash("sha256").update(JSON.stringify({
     namespace,
-    threadId: identity.threadId,
+    ...conversationIdentity,
     modelId: parsed.modelId,
     reasoning: parsed.options.reasoning,
     ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),

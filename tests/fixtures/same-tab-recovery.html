@@ -1,0 +1,30 @@
+<main data-surface-id="owned-fixture" data-revision="1">
+  <div data-testid="regenerate-thread-error-button">Retry</div>
+  <section data-testid="assistant-turn"><div class="markdown">The first paragraph was committed.</div></section>
+  <button type="button" data-testid="stop-button">Stop</button>
+  <form id="composer-form"><div id="prompt-textarea" contenteditable="true"></div><button type="submit" disabled>Send</button></form>
+</main>
+<script>
+  const root = document.querySelector("main");
+  const form = document.querySelector("form");
+  const composer = document.querySelector("[contenteditable]");
+  const send = form.querySelector("button[type=submit]");
+  window.fixture = { sends: 0, stops: 0 };
+  composer.addEventListener("input", () => { send.disabled = !composer.textContent.trim(); });
+  document.querySelector('[data-testid="stop-button"]').addEventListener("click", event => {
+    window.fixture.stops += 1;
+    event.currentTarget.remove();
+  });
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    window.fixture.sends += 1;
+    root.dataset.revision = String(Number(root.dataset.revision) + 1);
+    document.querySelector('[data-testid="assistant-turn"] .markdown').textContent = "Recovered answer is complete.";
+    const complete = document.createElement("button");
+    complete.dataset.testid = "completion-action";
+    complete.textContent = "Good response";
+    root.append(complete);
+    composer.textContent = "";
+    send.disabled = true;
+  });
+</script>

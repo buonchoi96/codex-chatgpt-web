@@ -89,7 +89,14 @@ function verifySignedMacArchive() {
   try {
     runChecked("ditto", ["-x", "-k", path.join(staging, archives[0]), verificationRoot]);
     const appBundle = path.join(verificationRoot, `${launcherManifest.build.productName}.app`);
-    runChecked("codesign", ["--verify", "--deep", "--strict", appBundle]);
+    // electron-builder intentionally skips macOS signing for pull requests unless explicitly
+    // authorized. An unsigned PR artifact cannot pass codesign --verify; still inspect its
+    // packaged runtime, while requiring full signature verification for main/tag releases.
+    if (env.GITHUB_EVENT_NAME === "pull_request" && env.CSC_FOR_PULL_REQUEST !== "true") {
+      console.info("Mac PR build: signing intentionally skipped by electron-builder; verifying packaged runtime.");
+    } else {
+      runChecked("codesign", ["--verify", "--deep", "--strict", appBundle]);
+    }
     validateRuntimeBundle(path.join(appBundle, "Contents", "Resources", "runtime"), {
       version: launcherManifest.version,
       platform: "darwin",

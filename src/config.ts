@@ -632,6 +632,7 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
     noReasoningModels: [],
     chatgptWeb: {
       appName: manual ? config.manualAppName : config.automaticAppName,
+      ...(config.mode === "full" && config.tunnel ? { expectedConnectorTunnelId: config.tunnel.tunnelId } : {}),
       browserInteractionMode: config.browserInteractionMode,
       browserHost: config.browserHost,
       browserHostDescriptorPath: config.browserHostDescriptorPath,

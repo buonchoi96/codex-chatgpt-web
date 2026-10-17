@@ -62,8 +62,11 @@ test("inline Web context emits a distinct agent_message envelope", () => {
 });
 
 test("multipart Web context emits the same agent_message envelope", () => {
+  const oversized = request();
+  oversized.context.systemPrompt = [...oversized.context.systemPrompt ?? [],
+    ...Array.from({ length: 6 }, (_, index) => `whole-system-record-${index}: ${"x".repeat(90_000)}`)];
   const compiled = compileChatGptWebPrompt(
-    request(),
+    oversized,
     capabilities,
     turnToken,
     { experimentalMultipartParts: 2 },
@@ -74,6 +77,9 @@ test("multipart Web context emits the same agent_message envelope", () => {
   const messages = records
     .filter(record => record.kind === "message")
     .map(record => record.message as Record<string, unknown>);
+  expect(compiled.transportDecision!.measurements.composerChars).toBeGreaterThan(compiled.transportDecision!.measurements.composerCharLimit!);
+  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual(oversized.context.systemPrompt);
+  expect(messages).toEqual(inlineMessages(compileChatGptWebPrompt(oversized, capabilities, turnToken, { measurementOnly: true }).text));
   expect(messages[0]).toEqual({
     role: "agent_message",
     author: "parent",
