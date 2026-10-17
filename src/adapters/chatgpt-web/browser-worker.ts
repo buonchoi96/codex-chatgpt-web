@@ -1475,6 +1475,8 @@ interface ChatGptSubmissionBaseline {
   submittedRenderedDraft?: ChatGptVerifiedDraft;
   userContentExpansionAttempted?: boolean;
   turnToken?: string;
+  /** Non-authorizing per-Send proof for browser-only native /compact. */
+  compactionBindingProof?: string;
   acceptedUserIdentity?: string;
   acknowledgedStages?: readonly ChatGptAcknowledgedMultipartStage[];
 }
@@ -3247,9 +3249,15 @@ export class ChatGptBrowserWorker {
     submittedText?: string,
     acknowledgedStages: readonly ChatGptAcknowledgedMultipartStage[] = [],
     turnToken?: string,
+    compactionBindingProof?: string,
   ): Promise<ChatGptSubmissionBaseline> {
     if (turnToken !== undefined && (!/^turn_[A-Za-z0-9_-]{32}$/.test(turnToken) || !submittedText?.includes(turnToken))) {
       throw new Error("ChatGPT submission identity does not match its prepared prompt");
+    }
+    if (compactionBindingProof !== undefined && (turnToken !== undefined
+      || !/^cwgcompact_[a-f0-9]{32}$/.test(compactionBindingProof)
+      || !submittedText?.includes(`<codex_web_compaction_receipt>${compactionBindingProof}</codex_web_compaction_receipt>`))) {
+      throw new Error("ChatGPT compaction receipt does not match its prepared prompt");
     }
     const userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
     const responseTurns = page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR);
@@ -3262,6 +3270,7 @@ export class ChatGptBrowserWorker {
       domCache,
       submittedText,
       turnToken,
+      compactionBindingProof,
       acknowledgedStages: [...acknowledgedStages],
     };
     // A stage can persist under its new key before the next baseline is captured.
@@ -3628,14 +3637,23 @@ export class ChatGptBrowserWorker {
     const sameConnectors=Boolean(draft)&&JSON.stringify(projection.connectorPaths)===JSON.stringify(draft!.connectorPaths);
     const canonicalMatch=actual!==undefined&&this.promptTextEquivalent(normalize(baseline.submittedText),normalize(actual));
     const draftMatch=Boolean(actual!==undefined&&draft&&this.promptTextEquivalent(normalize(draft.text),normalize(actual)));
+    // Read-only /compact cannot rely on the broker's privileged turn token.
+    // A unique receipt inserted before Send survives ChatGPT Markdown remounts,
+    // unlike bytewise equality of 100k+ rendered characters.
+    const compactionReceipts=actual?.match(/cwgcompact_[a-f0-9]{32}/g)??[];
+    const receiptMatches=Boolean(baseline.compactionBindingProof
+      && compactionReceipts.length===1
+      && compactionReceipts[0]===baseline.compactionBindingProof);
     const matches=projection.valid&&!(draft&&projection.connectorPaths.length&&!sameConnectors)
-      &&(canonicalMatch||sameConnectors&&draftMatch);
+      &&(baseline.compactionBindingProof ? receiptMatches : canonicalMatch||sameConnectors&&draftMatch);
     const proof={matches,bubbleCount:projection.bubbleCount,contentCount:projection.contentCount,
       actualChars:actual?.length,canonicalChars:baseline.submittedText.length,draftChars:draft?.text.length,
       canonicalPrefixChars:actual!==undefined?this.promptEquivalentPrefixLength(normalize(baseline.submittedText),normalize(actual)):undefined,
       draftPrefixChars:actual!==undefined&&draft?this.promptEquivalentPrefixLength(normalize(draft.text),normalize(actual)):undefined,
       actualConnectorCount:projection.connectorPaths.length,expectedConnectorCount:draft?.connectorPaths.length,
-      sameConnectors,canonicalMatch,draftMatch};
+      sameConnectors,canonicalMatch,draftMatch,
+      compactionReceiptPresent:compactionReceipts.length===1,
+      compactionReceiptMatches:receiptMatches};
     console.info(`[chatgpt-web] submission_binding_text ${JSON.stringify(proof)}`);
     if(!matches&&projection.valid&&actual!==undefined&&actual.length<baseline.submittedText.length
       &&!baseline.userContentExpansionAttempted&&(!draft||!projection.connectorPaths.length||sameConnectors)){
@@ -5755,6 +5773,15 @@ export class ChatGptBrowserWorker {
       };
 
       let finalPrompt = prepared.text;
+      // This is a non-authorizing ownership receipt, NOT a broker capability token.
+      // Allocate it once per actual read-only /compact Send, before verifying
+      // the composer. It survives same-tab observation and renderer remounts.
+      const compactionBindingProof = turn.compaction === true && !prepared.turnToken
+        && !prepared.multipart && !prepared.contextArchive
+        ? `cwgcompact_${randomUUID().replaceAll("-", "")}` : undefined;
+      if (compactionBindingProof) {
+        finalPrompt += `\n<codex_web_compaction_receipt>${compactionBindingProof}</codex_web_compaction_receipt>`;
+      }
       const acknowledgedStages: ChatGptAcknowledgedMultipartStage[] = [];
       if (prepared.contextArchive) {
         if (reuseConversation) throw new Error('Verified retained deltas cannot re-upload a context archive');
@@ -5898,7 +5925,7 @@ export class ChatGptBrowserWorker {
         finalPrompt = multipartFinalPrompt;
       }
 
-      let submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, acknowledgedStages, prepared.turnToken);
+      let submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, acknowledgedStages, prepared.turnToken, compactionBindingProof);
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
       for (;;) {
@@ -5953,7 +5980,7 @@ export class ChatGptBrowserWorker {
                 trackUsage,
                 turn.modelFamily,
               );
-              submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, [], prepared.turnToken);
+              submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, [], prepared.turnToken, compactionBindingProof);
             },
           );
           await diagnostics.capture(page, "connector-catalog-refreshed");
