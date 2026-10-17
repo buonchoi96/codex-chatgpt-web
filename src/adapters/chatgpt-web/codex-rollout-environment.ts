@@ -319,9 +319,12 @@ export function verifyNativeGoalContinuationItems(
  */
 export function verifyLatestNativeCompactionSource(
   fd: number, size: number,
-  source: { id: string; turnId: string; content: unknown },
+  source: { id: string; turnId?: string; content: unknown },
 ): boolean {
-  if (size <= 0 || size > 256 * 1024 * 1024 || !source.id || !source.turnId) return false;
+  // Only a typed native latest human item can authorize an ID-only replay
+  // lacking item-level turn ownership after a stopped Codex turn.
+  if (size <= 0 || size > 256 * 1024 * 1024 || !source.id
+    || (source.turnId !== undefined && !source.turnId)) return false;
   let offset = 0;
   let pending = Buffer.alloc(0);
   let latest: { id: string; turnId: string; content: unknown } | undefined;
@@ -369,7 +372,8 @@ export function verifyLatestNativeCompactionSource(
     if (pending.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
   }
   return pending.length === 0 && latest !== undefined
-    && latest.id === source.id && latest.turnId === source.turnId
+    && latest.id === source.id
+    && (source.turnId === undefined || latest.turnId === source.turnId)
     && isDeepStrictEqual(latest.content, source.content);
 }
 
@@ -747,7 +751,7 @@ export interface CurrentCodexRolloutOptions {
   turnId: string;
   compactionSourceTurnId?: string;
   /** Only a native-verified latest human instruction can bridge a transient compact turn. */
-  compactionSource?: { id: string; turnId: string; content: unknown };
+  compactionSource?: { id: string; turnId?: string; content: unknown };
   tools?: readonly CodexTool[];
   historicalEnvironmentMessages?: ChatGptUnattributedEnvironmentMessage[];
   /** Internal root-only fallback when current Codex metadata omits optional
