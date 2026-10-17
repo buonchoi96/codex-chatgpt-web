@@ -304,6 +304,11 @@ export async function requestRetainedCompactionHandoff(
 ): Promise<string> {
   const conversationKey = source.conversationKey();
   if (!conversationKey) throw new Error("The completed ChatGPT source has no retained conversation identity");
+  const lifecycleStart = Date.now();
+  const lifecycle = (stage: string): void => {
+    // A trace and elapsed duration are safe operational metadata; never log summary or token.
+    console.info(`[chatgpt-web] compaction_lifecycle trace=${traceId} stage=${stage} elapsed_ms=${Date.now() - lifecycleStart}`);
+  };
   const operationTimeoutMs = boundedCompactionTimeout(timeoutMs);
   const deadline = new AbortController();
   const deadlineTimer = setTimeout(
@@ -363,14 +368,19 @@ export async function requestRetainedCompactionHandoff(
       ]),
       operationSignal,
     );
+    lifecycle("control_handoff_accepted");
     // The one-shot control submission is the terminal event for this purpose-built response.
     // ChatGPT may render no assistant text after a tool-only response, and therefore no Copy
     // action. End our owned turn explicitly and wait for the launcher/helper cleanup handshake.
     browserAbort.abort(new ChatGptCompactionHandoffAccepted());
+    lifecycle("browser_release_requested");
     await withCompactionAbort(
       browser.then(() => undefined, () => undefined),
       operationSignal,
     );
+    lifecycle("browser_settled");
+    // This marks the bridge handoff boundary, not native Codex checkpoint installation.
+    lifecycle("handoff_ready");
     return summary;
   } finally {
     browserAbort.abort();

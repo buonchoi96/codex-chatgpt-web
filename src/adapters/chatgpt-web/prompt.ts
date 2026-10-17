@@ -220,6 +220,24 @@ export function chatGptPromptJsonBytes(text: string): number {
   return Buffer.byteLength(JSON.stringify(text), "utf8");
 }
 
+/** A compact must satisfy both byte and token ceilings before any browser Send.
+ * Multipart is allowed to exceed the legacy single-message byte/composer budget,
+ * but never the account's canonical token budget. */
+export function exceedsChatGptCompactionPreflightBudget(
+  text: string,
+  measurements: Pick<ChatGptWebTransportDecision["measurements"],
+    "canonicalTokens" | "accountCanonicalTokenLimit" | "messageTokens"
+    | "messageTokenLimit" | "composerChars" | "composerCharLimit"> | undefined,
+  multipartEnabled: boolean,
+): boolean {
+  if (!measurements) return true; // A missing measurement is not a transport grant.
+  if (measurements.canonicalTokens > measurements.accountCanonicalTokenLimit) return true;
+  if (multipartEnabled) return false;
+  return chatGptPromptJsonBytes(text) > CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET
+    || measurements.messageTokens > measurements.messageTokenLimit
+    || (measurements.composerCharLimit !== null && measurements.composerChars > measurements.composerCharLimit);
+}
+
 const DROPPED_IMAGE_NOTE =
   `[older image not attached: ChatGPT accepts at most ${CHATGPT_MAX_INPUT_IMAGES} per message]`;
 
@@ -807,7 +825,9 @@ export function compileChatGptWebPrompt(
       }
     }
     if (transportDecision.choice === "BLOCK") {
-      if (options?.measurementOnly || (parsed._compactionRequest && !multipartEnabled)) {
+      // A compact request must first have a chance to shed disposable history
+      // against the exact failed preflight, including the multipart canonical budget.
+      if (options?.measurementOnly || parsed._compactionRequest) {
         return { text: inlineText, images, ...attachments, transportDecision };
       }
       throw new ChatGptWebAdapterError(
@@ -909,19 +929,15 @@ export function compileChatGptWebPrompt(
   let compiled = build(sourceMessages);
   if (!parsed._compactionRequest) return compiled;
 
-  // The 110k edge budget was measured for the old single-message compaction envelope. Bigger
-  // Context stages are governed by the same model-specific per-message token and composer limits
-  // as ordinary multipart turns in browser-worker. Applying the legacy byte cap here silently
-  // discarded context that the staged transport can carry; preserve it and let browser preflight
-  // fail explicitly if any atomic record is genuinely too large for one stage.
+  // Successful multipart stages have already passed canonical-token and per-stage preflight.
+  // Unlike the old inline envelope they do not share the 110k JSON byte limit.
   if (compiled.multipart) return compiled;
-
-  const exceedsCompactionBudget = (): boolean => (
-    chatGptPromptJsonBytes(compiled.text) > CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET
+  const exceedsCompactionBudget = (): boolean => exceedsChatGptCompactionPreflightBudget(
+    compiled.text, compiled.transportDecision?.measurements, multipartEnabled,
   );
 
-  // A cumulative checkpoint may be the only remaining account of earlier work. Preserve the
-  // newest one and the final compaction instruction; trim other history in its original order.
+  // Retain the newest cumulative checkpoint and the final compact instruction.
+  // Trim only other complete messages; never truncate either mandatory record.
   let checkpointIndex = sourceMessages.findLastIndex(message =>
     message.role === "user" && isReadableCompactionSummaryText(plainMessageText(message))
   );
@@ -930,13 +946,18 @@ export function compileChatGptWebPrompt(
     if (discardIndex === sourceMessages.length - 1) break;
     sourceMessages.splice(discardIndex, 1);
     if (checkpointIndex > discardIndex) checkpointIndex -= 1;
-    // Rebuild image references and count the omission notice inside the same byte budget.
+    // Recompute every token, attachment and transport measurement after trimming.
     compiled = build(sourceMessages, initialMessageCount - sourceMessages.length);
+    if (compiled.multipart) break;
   }
-  const encodedBytes = chatGptPromptJsonBytes(compiled.text);
-  if (exceedsCompactionBudget()) {
+  if (exceedsCompactionBudget() && !compiled.multipart) {
+    const m = compiled.transportDecision?.measurements;
+    const size = chatGptPromptJsonBytes(compiled.text).toLocaleString("en-US");
+    const tokenEvidence = m
+      ? ` canonical=${m.canonicalTokens}/${m.accountCanonicalTokenLimit}, message=${m.messageTokens}/${m.messageTokenLimit} tokens;`
+      : " token measurements unavailable;";
     throw new Error(
-      `ChatGPT Web compaction prompt still requires ${encodedBytes.toLocaleString("en-US")} JSON bytes after other history was trimmed; ${checkpointIndex >= 0 ? "the cumulative checkpoint and final compaction instruction exceed" : "the final compaction instruction alone exceeds"} the browser compaction budget`,
+      `ChatGPT Web compaction prompt still requires ${size} JSON bytes and${tokenEvidence} after other history was trimmed; ${checkpointIndex >= 0 ? "the cumulative checkpoint and final compaction instruction exceed" : "the final compaction instruction alone exceeds"} the verified browser compaction budget`,
     );
   }
   const trimmedCompactionMessages = initialMessageCount - sourceMessages.length;

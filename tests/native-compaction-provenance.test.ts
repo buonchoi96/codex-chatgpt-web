@@ -274,3 +274,42 @@ test('native retained user images remain structured content in the recovered ins
   (f.source.content as Array<Record<string,unknown>>).push({type:'input_image',image_url:png,detail:'low'});
   f.write();expect(recoverCompactionInstruction(f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home})?.source.content).toEqual(f.source.content);
 });
+
+test.each([
+  ['no-installed-checkpoint','checkpoint_not_installed'],
+  ['wrong-summary','checkpoint_identity_conflict'],
+  ['conflicting-source','source_identity_conflict'],
+] as const)('retry provenance reports bounded diagnostic %s without authenticating an invalid checkpoint', (change, expected) => {
+  const f = fixture();
+  if (change === 'no-installed-checkpoint') f.records.splice(1, 1);
+  if (change === 'wrong-summary') f.summary.encrypted_content = encodeCompactionSummary('Not the request checkpoint.');
+  if (change === 'conflicting-source') {
+    (f.parsed._rawBody as {input:unknown[]}).input.push({
+      ...f.source, content: [{type:'input_text', text:'Conflicting task'}],
+    });
+  }
+  f.write();
+  const diagnostics:string[] = [];
+  const recovered = resolveNativeCompactionSource(f.parsed, extractChatGptTurnIdentity(f.parsed), {
+    codexHome:f.home, onDiagnostic:code=>diagnostics.push(code),
+  });
+  expect(recovered).toBeUndefined();
+  expect(diagnostics).toContain(expected);
+});
+
+test.each([
+  ['foreign-turn','latest_turn_mismatch'],
+  ['foreign-model','model_effort_mismatch'],
+  ['foreign-effort','model_effort_mismatch'],
+] as const)('retry provenance categorizes a rejected native %s without bypassing the rollout witness', (change, expected) => {
+  const f = fixture();
+  const ctx = f.records[2]!.payload as Record<string,unknown>;
+  ctx[change === 'foreign-turn' ? 'turn_id' : change === 'foreign-model' ? 'model' : 'effort'] =
+    change === 'foreign-turn' ? randomUUID() : change === 'foreign-model' ? 'chatgpt-web/gpt-6-pro' : 'medium';
+  f.write();
+  const diagnostics:string[] = [];
+  expect(() => resolveNativeCompactionSource(f.parsed, extractChatGptTurnIdentity(f.parsed), {
+    codexHome:f.home, onDiagnostic:code=>diagnostics.push(code),
+  })).toThrow('Replay provenance is unverified');
+  expect(diagnostics).toContain(expected);
+});

@@ -46,7 +46,22 @@ function contentMatchesKinds(item:Record<string,unknown>,kinds:unknown[]):boolea
   }
   return kinds.every(kind=>typeof kind==='string'&&actual.has(kind))&&[...actual].every(kind=>kinds.includes(kind));
 }
-export interface NativeCompactionRecoveryOptions {codexHome?:string;sqliteHome?:string;}
+/** Diagnostics are bounded reason codes, never rollout paths or user message contents. */
+export type NativeCompactionDiagnostic =
+  | 'lineage_unverified'
+  | 'request_checkpoint_missing'
+  | 'checkpoint_not_installed'
+  | 'checkpoint_identity_conflict'
+  | 'source_identity_conflict'
+  | 'latest_turn_mismatch'
+  | 'model_effort_mismatch'
+  | 'rollout_changed'
+  | 'native_rollout_unavailable';
+export interface NativeCompactionRecoveryOptions {
+  codexHome?: string;
+  sqliteHome?: string;
+  onDiagnostic?: (reason: NativeCompactionDiagnostic) => void;
+}
 export interface NativeCompactionSource {
   source:ChatGptTurnUserRevision;
   summaryIndex:number;
@@ -57,18 +72,19 @@ export interface NativeCompactionSource {
  * Only the newest installed native checkpoint in the exact current rollout can. */
 export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity:ChatGptTurnIdentity,
   options:NativeCompactionRecoveryOptions={}):NativeCompactionSource|undefined{
+  const reject=(reason:NativeCompactionDiagnostic):undefined=>{options.onDiagnostic?.(reason);return undefined;};
   const lineage=extractChatGptThreadSpawnLineage(parsed)??extractChatGptRootThreadMetadata(parsed);
-  if(!lineage||lineage.threadId!==identity.threadId||!identity.turnId)return undefined;
+  if(!lineage||lineage.threadId!==identity.threadId||!identity.turnId)return reject('lineage_unverified');
   const body=record(parsed._rawBody),input=body?.input;
-  if(!Array.isArray(input))return undefined;
+  if(!Array.isArray(input))return reject('request_checkpoint_missing');
   let requestCheckpoint:Record<string,unknown>|undefined,summaryIndex=-1,key:string|undefined;
   for(let index=input.length-1;index>=0;index--){
     const item=record(input[index]);if(!item)continue;
     const candidate=checkpointKey(item);
     if(candidate){requestCheckpoint=item;summaryIndex=index;key=candidate;break;}
-    if(['compaction','compaction_summary','context_compaction'].includes(String(item.type)))return undefined;
+    if(['compaction','compaction_summary','context_compaction'].includes(String(item.type)))return reject('request_checkpoint_missing');
   }
-  if(!requestCheckpoint||!key)return undefined;
+  if(!requestCheckpoint||!key)return reject('request_checkpoint_missing');
   let installationDigest:string|undefined;
   const installationHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'undefined').digest('hex');
   try{
@@ -82,21 +98,21 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
       const installed=latestNativeCompactionRecord(fd,size);
       if(!installed||!boundedString(installed.compaction_response_id)||!Array.isArray(installed.replacement_history)||
         installed.replacement_history.length>10000||!Array.isArray(installed.replacement_history_metadata)||
-        installed.replacement_history_metadata.length!==installed.replacement_history.length)return undefined;
+        installed.replacement_history_metadata.length!==installed.replacement_history.length)return reject('checkpoint_not_installed');
       const history=installed.replacement_history.map(record),metadata=installed.replacement_history_metadata.map(record);
       const checkpointIndices=history.flatMap((item,index)=>item&&checkpointKey(item)!==undefined?[index]:[]);
-      if(checkpointIndices.length!==1)return undefined;
+      if(checkpointIndices.length!==1)return reject('checkpoint_identity_conflict');
       const nativeCheckpoint=history[checkpointIndices[0]!]!;
-      if(checkpointKey(nativeCheckpoint)!==key)return undefined;
+      if(checkpointKey(nativeCheckpoint)!==key)return reject('checkpoint_identity_conflict');
       const nativeOwner=owner(nativeCheckpoint);
       // Native compaction items have no message owner. Their server-generated
       // item id must instead match the exact installation in this rollout.
       if(nativeOwner===undefined){
-        if(!boundedString(nativeCheckpoint.id)||requestCheckpoint!.id!==nativeCheckpoint.id)return undefined;
-      }else if(!boundedString(nativeOwner))return undefined;
+        if(!boundedString(nativeCheckpoint.id)||requestCheckpoint!.id!==nativeCheckpoint.id)return reject('checkpoint_identity_conflict');
+      }else if(!boundedString(nativeOwner))return reject('checkpoint_identity_conflict');
       const requestOwner=owner(requestCheckpoint!);
-      if(requestOwner!==undefined&&requestOwner!==nativeOwner&&requestOwner!==identity.turnId)return undefined;
-      if(requestCheckpoint!.id!==undefined&&nativeCheckpoint.id!==undefined&&requestCheckpoint!.id!==nativeCheckpoint.id)return undefined;
+      if(requestOwner!==undefined&&requestOwner!==nativeOwner&&requestOwner!==identity.turnId)return reject('checkpoint_identity_conflict');
+      if(requestCheckpoint!.id!==undefined&&nativeCheckpoint.id!==undefined&&requestCheckpoint!.id!==nativeCheckpoint.id)return reject('checkpoint_identity_conflict');
       let selected:{item:Record<string,unknown>;meta:Record<string,unknown>;order:number;retained:Record<string,unknown>}|undefined;
       const seenOrders=new Set<number>();
       for(let index=0;index<history.length;index++){
@@ -131,7 +147,7 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
       // The current request may still contain the retained item. Conflicting
       // content under its exact native identity cannot be repaired from history.
       const conflicts=input.map(record).filter(item=>item?.id===source.itemId);
-      if(conflicts.some(item=>!isDeepStrictEqual(item!.content,source.content)||owner(item!)!==source.turnId))return undefined;
+      if(conflicts.some(item=>!isDeepStrictEqual(item!.content,source.content)||owner(item!)!==source.turnId))return reject('source_identity_conflict');
       installationDigest=installationHash(installed);
       return {source:structuredClone(source),summaryIndex,provenance:{kind:'native_compacted' as const,
         checkpoint_sha256:key!,source_id:structuredId?source.itemId:retainedId as string,source_revision:selected.retained.revision as string}};
@@ -140,7 +156,19 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
         throw new Error('Native checkpoint changed during provenance lookup');
     });
   }catch(cause){
-    throw new ChatGptWebAdapterError('Replay provenance is unverified in the current native rollout. Preserve the task and supply an authentic Codex instruction or a matching installed checkpoint.',
+    const detail=cause instanceof Error?cause.message:'';
+    // Categorize without ever exposing native rollout paths or source content.
+    const reason:NativeCompactionDiagnostic = detail.includes('current model/effort')
+      ? 'model_effort_mismatch'
+      : detail.includes('does not belong to the requested turn') || detail.includes('current turn')
+        ? 'latest_turn_mismatch'
+        : detail.includes('changed during provenance') || detail.includes('rollout was rewritten')
+          || detail.includes('rollout shrank') || detail.includes('rollout turn changed')
+          ? 'rollout_changed'
+          : 'native_rollout_unavailable';
+    options.onDiagnostic?.(reason);
+    throw new ChatGptWebAdapterError(
+      `Replay provenance is unverified in the current native rollout (reason=${reason}). Preserve the task and supply an authentic Codex instruction or a matching installed checkpoint.`,
       {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false,cause});
   }
 }
