@@ -1,24 +1,8 @@
 /** Routed catalog policy; browser request capacity and effective recall are independent. */
-export const WEB_CONTEXT_POLICY_VERSION = 2;
+export const WEB_CONTEXT_POLICY_VERSION = 3;
 export const WEB_CONTEXT_TARGET_TOKENS = 272_000;
-export const WEB_CONTEXT_COMPACT_RATIO = 0.95;
-/**
- * The 272k context display describes Codex's archival / checkpoint capacity,
- * NOT one ChatGPT Plus browser request. Live Plus/High measurements on 2026-10-17
- * capped canonical browser input at 71,808 tokens, including a separate 8,192
- * platform reserve. On a new /goal turn the retained same-tab proof may expire,
- * making the complete canonical input mandatory again. A 258,400-token Codex
- * auto-compact threshold can therefore strand the task without a valid Send.
- *
- * Keep Codex's native auto-compaction comfortably below the measured fallback
- * limit. This is an explicit safety headroom, not a claim of a 272k recall span.
- * We never bypass a transport budget or silently truncate a normal request.
- */
-export const WEB_CONTEXT_SAFE_BROWSER_COMPACT_TOKENS = 58_000;
-export const WEB_CONTEXT_COMPACT_TARGET_TOKENS = Math.min(
-  Math.floor(WEB_CONTEXT_TARGET_TOKENS * WEB_CONTEXT_COMPACT_RATIO),
-  WEB_CONTEXT_SAFE_BROWSER_COMPACT_TOKENS,
-);
+/** Native semantic compaction remains 95% of the 272K canonical window.\n * Browser transfer and native context windows are independent: retained-delta\n * and authenticated recovery handle transport, never an artificial lower onset. */\nexport const WEB_CONTEXT_COMPACT_RATIO = 0.95;
+export const WEB_CONTEXT_COMPACT_TARGET_TOKENS = Math.floor(WEB_CONTEXT_TARGET_TOKENS * WEB_CONTEXT_COMPACT_RATIO);
 
 export const WEB_CONTEXT_POLICY = Object.freeze({
   contextWindow: WEB_CONTEXT_TARGET_TOKENS,
@@ -29,8 +13,7 @@ export const WEB_CONTEXT_POLICY = Object.freeze({
 /** Measured with isolated Codex 0.162.1 app-server tokenUsage telemetry.
  * Codex clamps the compact threshold against 90% of the raw model window,
  * while modelContextWindow applies effective_context_window_percent.
- * floor(302223 * 90 / 100) = 272000; the low measured browser safety threshold
- * is below that clamp and remains authoritative for routed Web models.
+ * floor(302223 * 90 / 100) = 272000; the raw clamp leaves 258400 reachable.
  */
 export const WEB_CONTEXT_CATALOG_POLICY = Object.freeze({
   contextWindow: 302_223,

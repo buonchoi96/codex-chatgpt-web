@@ -36,7 +36,7 @@ test('changed policy, answer, pending boundary, model and expiration all fail cl
   const foreign=followup(source); foreign.modelId='other';
   expect(store.check('owned',foreign).reason).toBe('policy_changed');
   expect(store.check('foreign-key',followup(source)).reason).toBe('proof_missing');
-  now+=31*60000;
+  now+=25*60*60000;
   expect(store.check('owned',followup(source)).reason).toBe('proof_expired');
 });
 test('matching answer cannot authorize skipping inserted uncommitted evidence', () => {

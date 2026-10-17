@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { WEB_CONTEXT_TARGET_TOKENS, WEB_CONTEXT_COMPACT_TARGET_TOKENS, WEB_CONTEXT_SAFE_BROWSER_COMPACT_TOKENS, WEB_CONTEXT_CATALOG_POLICY, classifyWebContextUsage } from '../src/web-context-policy';
+import { WEB_CONTEXT_TARGET_TOKENS, WEB_CONTEXT_COMPACT_TARGET_TOKENS, WEB_CONTEXT_CATALOG_POLICY, classifyWebContextUsage } from '../src/web-context-policy';
 import { availableChatGptWebModelRoutes, chatGptWebRouteEfforts, resolveChatGptWebContextLimits, resolveChatGptWebMessageTokenBudget } from '../src/chatgpt-web-models';
 import { defaultConfig } from '../src/config';
 import { augmentNativeModelCatalog } from '../src/model-catalog';
@@ -7,12 +7,11 @@ import { assertChatGptWebMultipartInputWithinLimits } from '../src/adapters/chat
 
 test('unified context exact boundaries distinguish 90% clamp from requested onset', () => {
   expect(WEB_CONTEXT_TARGET_TOKENS).toBe(272000);
-  expect(WEB_CONTEXT_COMPACT_TARGET_TOKENS).toBe(58000);
-  expect(WEB_CONTEXT_SAFE_BROWSER_COMPACT_TOKENS).toBeLessThan(71808);
+  expect(WEB_CONTEXT_COMPACT_TARGET_TOKENS).toBe(258400);
   expect(Math.floor(WEB_CONTEXT_CATALOG_POLICY.contextWindow * WEB_CONTEXT_CATALOG_POLICY.effectiveContextWindowPercent / 100)).toBe(272000);
-  expect(Math.floor(WEB_CONTEXT_CATALOG_POLICY.contextWindow * .9)).toBeGreaterThanOrEqual(58000);
-  for (const tokens of [0,57999,58000,58001,71807,80893,258399,258400,271999,272000]) {
-    expect(classifyWebContextUsage(tokens)).toEqual({ compact: tokens >= 58000, atCapacity: tokens >= 272000 });
+  expect(Math.floor(WEB_CONTEXT_CATALOG_POLICY.contextWindow * .9)).toBeGreaterThanOrEqual(258400);
+  for (const tokens of [244799,244800,258399,258400,258401,271999,272000]) {
+    expect(classifyWebContextUsage(tokens)).toEqual({ compact: tokens >= 258400, atCapacity: tokens >= 272000 });
   }
 });
 
@@ -24,7 +23,7 @@ test('every eligible routed profile keeps one catalog policy regardless of Bigge
         const selected = route.supportedCodexEfforts ? effort : route.adapterEffort;
         if (selected === 'ultra') continue;
         expect(resolveChatGptWebContextLimits(route.backendModel, selected, config, route.interactionMode === 'automatic' ? route.modelFamily : undefined))
-          .toEqual({ contextWindow: 272000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 58000 });
+          .toEqual({ contextWindow: 272000, effectiveContextWindowPercent: 100, autoCompactTokenLimit: 258400 });
       }
     }
   }
