@@ -5568,10 +5568,19 @@ export class ChatGptBrowserWorker {
       turn.traceId,
       "prompt_preparation",
       browserStageTimeouts.promptPreparation,
-      stageSignal => withBrowserTurnAbort(
-        prepare(),
-        turn.abortSignal ? AbortSignal.any([turn.abortSignal, stageSignal]) : stageSignal,
-      ),
+      stageSignal => {
+        const signal = turn.abortSignal ? AbortSignal.any([turn.abortSignal, stageSignal]) : stageSignal;
+        // Timeout may win before the daemon compiles the draft. Release a late
+        // preparation result instead of stranding file/archive ownership.
+        const pending = prepare().then(draft => {
+          if (signal.aborted) {
+            draft.release();
+            throw new DOMException("ChatGPT prompt preparation aborted", "AbortError");
+          }
+          return draft;
+        });
+        return withBrowserTurnAbort(pending, signal);
+      },
     );
     const diagnostics = new ChatGptBrowserDiagnostics(
       turn.traceId,

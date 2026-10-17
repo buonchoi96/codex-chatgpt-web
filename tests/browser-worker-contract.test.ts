@@ -845,7 +845,11 @@ test.each(["low", "high"] as const)("GPT-6 Plus stages High but keeps the Instan
   const worker: any = ChatGptBrowserWorker.forProvider({
     adapter: "chatgpt-web", baseUrl: `browser://${root}`, chatgptWeb: { browserDiagnosticsPath: root },
   });
-  worker.runStage = async () => { browserStages++; throw new Error("Test reached browser acquisition"); };
+  worker.runStage = async (_trace: string, stage: string, _timeout: number, action: (signal: AbortSignal) => Promise<unknown>) => {
+    if (stage === "prompt_preparation") return action(new AbortController().signal);
+    browserStages++;
+    throw new Error("Test reached browser acquisition");
+  };
   try {
     await expect(worker.runBrowserTurn({
       traceId: "six_context", modelId: CHATGPT_WEB_MODEL_ID, modelFamily: "6", reasoning, capabilities,
@@ -854,6 +858,32 @@ test.each(["low", "high"] as const)("GPT-6 Plus stages High but keeps the Instan
     expect(browserStages).toBe(reasoning === "low" ? 0 : 1);
     expect(released).toBeTrue();
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a stalled pre-Send prompt handshake terminates before browser acquisition", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web", baseUrl: "test://pre-send-watchdog", chatgptWeb: {},
+  }) as any;
+  const runStage = worker.runStage.bind(worker);
+  let laterStageReached = false;
+  worker.runStage = (traceId: string, stage: string, timeoutMs: number,
+    action: (signal: AbortSignal) => Promise<unknown>, ...args: unknown[]) => {
+    if (stage !== "prompt_preparation") laterStageReached = true;
+    return runStage(traceId, stage, stage === "prompt_preparation" ? 20 : timeoutMs, action, ...args);
+  };
+  try {
+    await expect(worker.runBrowserTurn({
+      traceId: "stalled_pre_send", modelId: CHATGPT_WEB_MODEL_ID, reasoning: "high",
+      capabilities: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false },
+      prepare: async () => new Promise<never>(() => {}),
+      onTextDelta() {},
+    })).rejects.toThrow("ChatGPT browser stage timed out: prompt_preparation");
+    expect(laterStageReached).toBeFalse();
+    expect(browserStageTimeouts.promptPreparation).toBe(120_000);
+  } finally {
+    // Isolate the stub from future tests using the same worker key.
+    delete worker.runStage;
+  }
 });
 
 test("two-part saved chats re-prove unchanged effort after the first message creates the conversation URL", async () => {
