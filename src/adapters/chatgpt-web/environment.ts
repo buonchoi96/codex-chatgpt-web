@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isReadableCompactionSummaryText, OPAQUE_COMPACTION_NOTE } from "../../responses/compaction";
 import { isNativeAgentsMdContext } from "../../responses/native-context";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
+import { ChatGptWebAdapterError } from "./adapter-error";
 import { isAcceptedCompactionContinuation, recoverCompactionInstruction } from "./compaction-continuation";
 
 export type ChatGptSandboxPolicy =
@@ -182,6 +183,9 @@ function contextualUserMessage(value: Record<string, unknown>): boolean {
   return hasEnvironmentContextFragment(value)
     || isNativeAgentsMdContext(value)
     || isNativeOpenPageContext(value)
+    || /^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(text)
+    || /^<goal_context>[\s\S]*<\/goal_context>$/.test(text)
+    || /^<turn_aborted>[\s\S]*<\/turn_aborted>$/.test(text)
     || /^<subagent_notification>[\s\S]*<\/subagent_notification>$/.test(text)
     || isReadableCompactionSummaryText(text)
     || text === OPAQUE_COMPACTION_NOTE;
@@ -218,7 +222,13 @@ function isNativeInstruction(
   item: Record<string, unknown> | undefined,
   metadata?: Record<string, unknown>,
 ): item is Record<string, unknown> {
-  if (item?.type === "message" && item.role === "user") return !contextualUserMessage(item);
+  if (item?.type === "message" && item.role === "user") {
+    // A current-turn user may ask about literal <turn_aborted> markup. Only
+    // foreign/prior-turn notices are contextual; never lose an actual instruction.
+    if (isTurnAbortedNotice(item) && typeof metadata?.turn_id === "string"
+      && itemTurnId(item) === metadata.turn_id) return true;
+    return !contextualUserMessage(item);
+  }
   if (isDelegatedInstruction(item)) return true;
   if (item?.type !== "agent_message" || typeof item.id !== "string" || !item.id
     || metadata?.subagent_kind !== "thread_spawn"
@@ -338,9 +348,28 @@ export function extractChatGptCompactionSourceRevision(
   options: { recoverCheckpoint?: boolean } = {},
 ): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
-  const revision = latestChatGptTurnUserRevision(parsed, extractChatGptTurnIdentity(parsed).turnId, options.recoverCheckpoint !== false);
-  if (!revision) throw new Error("ChatGPT web compaction requires a source user message");
-  return revision;
+  const identity = extractChatGptTurnIdentity(parsed);
+  const revision = latestChatGptTurnUserRevision(parsed, identity.turnId, options.recoverCheckpoint !== false);
+  const trusted = parsed._trustedCompactionSource;
+  // The fallback is set only by the bridge after matching a previously accepted native
+  // browser submission. Browser text and caller-provided JSON never create this authority.
+  const restored = !revision && trusted
+    && identity.threadId === trusted.threadId
+    && identity.turnId === trusted.turnId
+    && parsed.modelId === trusted.modelId
+    && parsed.options.reasoning === trusted.reasoning
+    && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId)
+    ? trusted.revision : undefined;
+  const source = revision ?? restored;
+  if (!source || (source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
+    // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
+    // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.
+    throw new ChatGptWebAdapterError(
+      "ChatGPT web compaction requires a canonical source user message; preserve the active task and supply an authentic Codex instruction before retrying.",
+      { status: 409, errorType: "invalid_request_error", code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING", retryable: false },
+    );
+  }
+  return source;
 }
 
 /** A completed checkpoint identifies the current turn's rebuilt environment preamble. */

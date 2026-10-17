@@ -1,8 +1,8 @@
-import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
+import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
-import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
+import { chatGptTurnSessions, bindAcceptedCompactionSource } from "./adapters/chatgpt-web/turn-execution";
 import {
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
@@ -733,6 +733,23 @@ export async function responseRequest(
     );
   }
   if (compaction) {
+    try {
+      // Resolve source provenance before changing the compact input or retiring any live
+      // retained browser/tool owner. Native tool-only and /goal runtime fragments do not qualify.
+      bindAcceptedCompactionSource(parsed);
+      extractChatGptCompactionSourceRevision(parsed);
+    } catch (error) {
+      if (!(error instanceof ChatGptWebAdapterError)) throw error;
+      const identity = extractChatGptTurnIdentity(parsed);
+      const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+      console.warn(`[chatgpt-web] compaction_preflight ${JSON.stringify({
+        code: error.code,
+        native_thread_id: identity.threadId ? "present" : "missing",
+        native_turn_id: identity.turnId ? "present" : "missing",
+        raw_input_items: Array.isArray(input) ? input.length : 0,
+      })}`);
+      return formatErrorResponse(error.status, error.errorType, error.message, error.code);
+    }
     // History compaction is a dedicated summarization turn. It must never bind the active Codex
     // tool bridge or continue an in-flight MCP round; the returned summary becomes the next turn's
     // replacement history through the Responses compaction contract.
@@ -778,21 +795,144 @@ export async function responseRequest(
       headers: { "content-type": "application/json" },
     });
   }
-  const adapter = adapterFactory(provider);
   const queue = new AsyncEventQueue<AdapterEvent>();
   const abort = new AbortController();
   if (req.signal.aborted) abort.abort();
   else req.signal.addEventListener("abort", () => abort.abort(), { once: true });
-  const run = async () => {
+
+  const forwardAdapterEvent = (event: AdapterEvent): void => {
+    options.onAdapterEvent?.(event);
+    queue.push(event);
+  };
+
+  const autoCompactAfterPromptTooLong = async (
+    activeParsed: CodexParsedRequest,
+  ): Promise<CodexParsedRequest> => {
+    const source = activeParsed._rawBody;
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new ChatGptWebAdapterError(
+        "ChatGPT reported that the browser prompt is too long, but the canonical request body is unavailable for automatic compaction.",
+        {
+          status: 409,
+          errorType: "invalid_request_error",
+          code: "auto_compaction_source_unavailable",
+          retryable: false,
+        },
+      );
+    }
+    const compactBody = structuredClone(source) as Record<string, unknown>;
+    compactBody.stream = false;
+    delete compactBody.previous_response_id;
+    const headers = new Headers(req.headers);
+    headers.set("content-type", "application/json");
+    const keepAlive = setInterval(
+      () => forwardAdapterEvent({ type: "heartbeat" }),
+      CHATGPT_WEB_ADAPTER_HEARTBEAT_MS,
+    );
+    let compactResponse: Response;
     try {
-      await adapter.runTurn!(parsed, { headers: req.headers, abortSignal: abort.signal }, event => {
-        options.onAdapterEvent?.(event);
-        queue.push(event);
-      });
+      compactResponse = await compactRequest(
+        new Request("http://127.0.0.1/v1/responses/compact", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(compactBody),
+          signal: abort.signal,
+        }),
+        config,
+        adapterFactory,
+        { onTurnIdentity: options.onTurnIdentity },
+      );
+    } finally {
+      clearInterval(keepAlive);
+    }
+    if (!compactResponse.ok) {
+      const detail = (await compactResponse.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 1_000);
+      throw new ChatGptWebAdapterError(
+        `ChatGPT reported that the prompt is too long and automatic compaction failed${detail ? `: ${detail}` : ""}`,
+        {
+          status: compactResponse.status || 502,
+          errorType: "server_error",
+          code: "auto_compaction_failed",
+          retryable: false,
+        },
+      );
+    }
+    const compacted = await compactResponse.json().catch(() => undefined) as { output?: unknown[] } | undefined;
+    if (!compacted || !Array.isArray(compacted.output) || compacted.output.length === 0) {
+      throw new ChatGptWebAdapterError(
+        "Automatic compaction completed without replacement history.",
+        {
+          status: 502,
+          errorType: "server_error",
+          code: "auto_compaction_invalid_response",
+          retryable: false,
+        },
+      );
+    }
+    const retryBody: Record<string, unknown> = {
+      ...compactBody,
+      stream: activeParsed.stream,
+      input: compacted.output,
+    };
+    const retryParsed = parseRequest(retryBody);
+    const retryRoute = routeChatGptWebRequest(retryParsed, config);
+    if (retryRoute.slug !== route.slug) {
+      throw new Error("Automatic prompt-too-long compaction changed the routed Web model");
+    }
+    return retryParsed;
+  };
+
+  const run = async () => {
+    let activeParsed = parsed;
+    let promptTooLongAutoCompactUsed = false;
+    try {
+      for (;;) {
+        let promptTooLong: Extract<AdapterEvent, { type: "error" }> | undefined;
+        const activeAdapter = adapterFactory(provider);
+        await activeAdapter.runTurn!(
+          activeParsed,
+          { headers: req.headers, abortSignal: abort.signal },
+          event => {
+            if (!activeParsed._compactionRequest
+              && event.type === "error"
+              && (event.code === "browser_prompt_too_long"
+                || event.code === "message_length_exceeds_limit")) {
+              promptTooLong = event;
+              return;
+            }
+            forwardAdapterEvent(event);
+          },
+        );
+        if (!promptTooLong) break;
+        if (promptTooLongAutoCompactUsed) {
+          forwardAdapterEvent({
+            type: "error",
+            message: "ChatGPT still reports that the prompt is too long after one automatic compaction retry.",
+            status: 413,
+            errorType: "browser_transport_error",
+            code: "message_length_exceeds_limit",
+            retryable: false,
+          });
+          break;
+        }
+        promptTooLongAutoCompactUsed = true;
+        forwardAdapterEvent({ type: "heartbeat" });
+        activeParsed = await autoCompactAfterPromptTooLong(activeParsed);
+        parsed = activeParsed;
+        forwardAdapterEvent({ type: "heartbeat" });
+      }
     } catch (error) {
-      const event: AdapterEvent = { type: "error", message: error instanceof Error ? error.message : String(error) };
-      options.onAdapterEvent?.(event);
-      queue.push(event);
+      const event: AdapterEvent = error instanceof ChatGptWebAdapterError
+        ? {
+          type: "error",
+          message: error.message,
+          status: error.status,
+          errorType: error.errorType,
+          code: error.code,
+          retryable: error.retryable,
+        }
+        : { type: "error", message: error instanceof Error ? error.message : String(error) };
+      forwardAdapterEvent(event);
     } finally {
       queue.close();
     }

@@ -87,11 +87,21 @@ test("oversized predictions skip rather than opening a tab, staging, or silently
 test("excess image context skips predictions rather than omitting images", async () => {
   const result = await send({ ...base, input: [{ type: "message", role: "user", content: [
     { type: "input_text", text: prompt },
-    ...Array.from({ length: 11 }, (_, i) => ({ type: "input_image", image_url: `https://example.com/${i}.png` })),
+    ...Array.from({ length: 11 }, () => ({ type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==" })),
   ] }] });
   expect(result.response.status).toBe(400);
   expect(result.constructions).toBe(0);
   expect(result.text).toContain("more images");
+});
+
+test("remote image predictions stop before adapter creation because the uploader requires inline bytes", async () => {
+  const result = await send({ ...base, input: [{ type: "message", role: "user", content: [
+    { type: "input_text", text: prompt },
+    { type: "input_image", image_url: "https://example.com/image.png" },
+  ] }] });
+  expect(result.response.status).toBe(400);
+  expect(result.constructions).toBe(0);
+  expect(result.text).toContain("supported inline base64 data URLs");
 });
 
 test("prompt wording and inherited thread source do not reclassify real user turns", async () => {

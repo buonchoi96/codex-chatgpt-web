@@ -3114,12 +3114,12 @@ class BrowserHost {
     return { ok: true, ...evidence };
   }
 
-  async verifyConnector(appName) {
+  async verifyConnector(appName, expectedConnectorTunnelId) {
     requireAutomaticBrowserInspection(this, "ChatGPT connector verification");
-    return await this.withManualOperation("connector verification", () => this.runConnectorVerification(appName));
+    return await this.withManualOperation("connector verification", () => this.runConnectorVerification(appName, expectedConnectorTunnelId));
   }
 
-  async runConnectorVerification(appName) {
+  async runConnectorVerification(appName, expectedConnectorTunnelId) {
     requireAutomaticBrowserInspection(this, "ChatGPT connector verification");
     const connectorName = validateConnectorName(appName);
     this.setState({ status: "testing", message: "Checking ChatGPT connector" });
@@ -3129,6 +3129,7 @@ class BrowserHost {
         helper: this.helper,
         descriptorPath: this.descriptorPath,
         appName: connectorName,
+        ...(expectedConnectorTunnelId !== undefined ? { expectedConnectorTunnelId } : {}),
         logger: this.logger,
       });
       this.logger.info("connector.verified", { appName: connectorName });

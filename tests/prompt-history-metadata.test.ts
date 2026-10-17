@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
+import { compileChatGptWebPrompt, withoutRetiredTurnHandles } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import type { CodexParsedRequest } from "../src/types";
 
@@ -70,8 +70,10 @@ test("inline Web context preserves assistant phase and MCP namespace metadata", 
 });
 
 test("multipart Web context preserves the same history metadata", () => {
+  const oversized = parsed();
+  oversized.context.systemPrompt = Array.from({ length: 6 }, (_, index) => `whole-system-record-${index}: ${"x".repeat(90_000)}`);
   const compiled = compileChatGptWebPrompt(
-    parsed(),
+    oversized,
     capabilities,
     turnToken,
     { experimentalMultipartParts: 2 },
@@ -83,8 +85,21 @@ test("multipart Web context preserves the same history metadata", () => {
   const messages = records
     .filter(record => record.kind === "message")
     .map(record => record.message as Record<string, unknown>);
+  expect(compiled.transportDecision!.measurements.composerChars).toBeGreaterThan(compiled.transportDecision!.measurements.composerCharLimit!);
+  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual(oversized.context.systemPrompt);
+  expect(messages).toEqual((inlineEnvelope(compileChatGptWebPrompt(oversized, capabilities, turnToken, { measurementOnly: true }).text) as { messages: Array<Record<string, unknown>> }).messages);
   expect(messages[0]?.phase).toBe("commentary");
   expect((messages[0]?.content as Array<Record<string, unknown>>)[1]?.namespace).toBe("mcp__inventory");
   expect(messages[1]?.tool_namespace).toBe("mcp__inventory");
   expect(messages[2]?.phase).toBe("final_answer");
+});
+
+test("retired reader bearer is removed from nested serialized history while ordinary hashes remain", () => {
+  const readerLease = `reader_${"c".repeat(64)}`;
+  const plainHash = "d".repeat(64);
+  const nestedReceipt = JSON.stringify({ receipt: JSON.stringify({ detail: `lease=${readerLease}` }), sha256: plainHash });
+  const sanitized = withoutRetiredTurnHandles(JSON.stringify({ history: nestedReceipt }));
+  expect(sanitized).not.toContain(readerLease);
+  expect(sanitized).toContain("[retired reader handle]");
+  expect(sanitized).toContain(plainHash);
 });

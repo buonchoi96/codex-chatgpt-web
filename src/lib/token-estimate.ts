@@ -25,6 +25,10 @@ export function estimateTokens(text: string, modelId?: string): number {
   if (!text) return 0;
 
   const encoding = chatGptTokenizer();
+  // Repeated padding/base64 blocks otherwise tokenize identically hundreds of times in a
+  // large transport preflight. This per-call bounded cache preserves the exact chunk count
+  // and retains no prompt bytes after this accounting call finishes.
+  const chunks = new Map<string, number>();
   let count = 0;
   for (let start = 0; start < text.length;) {
     let end = Math.min(start + TOKENIZER_CHUNK_CHARS, text.length);
@@ -35,7 +39,14 @@ export function estimateTokens(text: string, modelId?: string): number {
         end -= 1;
       }
     }
-    count += encoding.encode_ordinary(text.slice(start, end)).length;
+    const chunk = text.slice(start, end);
+    let tokens = chunks.get(chunk);
+    if (tokens === undefined) {
+      tokens = encoding.encode_ordinary(chunk).length;
+      if (chunks.size >= 16) chunks.delete(chunks.keys().next().value!);
+      chunks.set(chunk, tokens);
+    }
+    count += tokens;
     start = end;
   }
   return count;

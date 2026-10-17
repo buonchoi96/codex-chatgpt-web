@@ -16,6 +16,14 @@ export interface CodexParsedRequest {
   _compactionRequest?: boolean;
   /** Native compact.rs expects assistant text; remote v2 (the default) expects a compaction item. */
   _compactionResponseFormat?: "message";
+  /** Authenticated real user revision from an accepted, exactly matching native Web turn. */
+  _trustedCompactionSource?: {
+    threadId: string;
+    turnId: string;
+    modelId: string;
+    reasoning: CodexRequestOptions["reasoning"];
+    revision: { content: unknown; turnId?: string; itemId?: string };
+  };
   /**
    * True when Codex MultiAgent V2 delegated an agent_message as provider-private encrypted_content.
    * ChatGPT Web has no OpenAI backend key for that blob; the Responses HTTP boundary rejects it
@@ -266,6 +274,8 @@ export interface CodexProviderConfig {
   chatgptWeb?: {
     /** ChatGPT custom connector attached to tool-capable temporary chats. */
     appName?: string;
+    /** Expected native tunnel identity; prevents a same-name plugin from reaching another runtime. */
+    expectedConnectorTunnelId?: string;
     /** Whether ChatGPT DOM interaction is automatic or explicitly driven by the user. */
     browserInteractionMode?: "automatic" | "manual";
     /** Explicit browser owner. Launcher mode attaches to the embedded Electron ChatGPT surface. */

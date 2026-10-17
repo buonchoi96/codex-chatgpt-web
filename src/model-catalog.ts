@@ -4,7 +4,7 @@ import {
   availableChatGptWebModelRoutes,
   chatGptWebRouteEfforts,
   CHATGPT_WEB_MODEL_PREFIX,
-  resolveChatGptWebContextLimits,
+  resolveChatGptWebCatalogContextLimits,
   type ChatGptWebModelRoute,
 } from "./chatgpt-web-models";
 
@@ -104,12 +104,12 @@ export function buildChatGptWebModel(
     throw new Error("ChatGPT Web model template must be a native Codex model");
   }
   const modelFamily = route.interactionMode === "automatic" ? route.modelFamily : undefined;
-  const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config, modelFamily);
+  const limits = resolveChatGptWebCatalogContextLimits(route.backendModel, route.adapterEffort, config, modelFamily);
   const efforts = chatGptWebRouteEfforts(route, config);
   for (const effort of efforts) {
     const adapterEffort = route.supportedCodexEfforts ? effort : route.adapterEffort;
     if (adapterEffort === "ultra") throw new Error("Ultra is not a browser effort");
-    const candidate = resolveChatGptWebContextLimits(route.backendModel, adapterEffort, config, modelFamily);
+    const candidate = resolveChatGptWebCatalogContextLimits(route.backendModel, adapterEffort, config, modelFamily);
     if (JSON.stringify(candidate) !== JSON.stringify(limits)) {
       throw new Error(`Cannot group different context budgets under ${route.slug}`);
     }

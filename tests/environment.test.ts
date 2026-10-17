@@ -183,6 +183,24 @@ describe("trusted current Codex environment envelope", () => {
     });
   });
 
+  test("a goal runtime fragment and tool-only compaction cannot fabricate a source user revision", () => {
+    const request = currentWire();
+    request._compactionRequest = true;
+    const body = request._rawBody as { input: Array<Record<string, unknown>> };
+    body.input = [
+      { type: "message", role: "user", id: "msg_goal_runtime",
+        content: [{ type: "input_text", text: '<codex_internal_context source="goal">Continue the active goal</codex_internal_context>' }] },
+      { type: "function_call_output", call_id: "call_one", output: "completed tool result" },
+    ];
+    let error: unknown;
+    try { extractChatGptCompactionSourceRevision(request); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING", retryable: false });
+    expect(chatGptTurnUserRevisionHistory(request)).toEqual([]);
+    // An actual native user item with a stable identity remains an eligible source.
+    body.input.splice(1, 0, { type: "message", role: "user", id: "msg_real_user",
+      content: [{ type: "input_text", text: "Inspect and fix compaction" }] });
+    expect(extractChatGptCompactionSourceRevision(request)).toMatchObject({ itemId: "msg_real_user" });
+  });
   test("native cross-task messages keep their instruction, environment and compaction source", () => {
     const request = currentWire({ threadId: "thread_delegation" });
     const body = request._rawBody as { input: Array<Record<string, unknown>> };
@@ -1529,6 +1547,31 @@ describe("trusted Codex task environment continuity", () => {
     );
     expect(() => new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request))
       .toThrow("Steering environment conflicts");
+  });
+
+  test('a current ID-only native read-only envelope gets network authority from its current rollout, not historical-message matching',()=>{
+    const {codexHome,request,rolloutPath}=resumedRootFixture();
+    const body=request._rawBody as {client_metadata:Record<string,string>;input:unknown[]};
+    body.client_metadata['x-codex-turn-metadata']=JSON.stringify({request_kind:'turn',thread_id:rolloutThreadId,
+      turn_id:rolloutTurnId,agent_name:'/root',sandbox:'none',sandbox_mode:'read-only',workspaces:{}});
+    body.input=[
+      {type:'message',role:'user',id:'msg_current_environment',content:[{type:'input_text',text:filesystemEnvironmentXml(readOnlyProfileXml)}]},
+      {type:'message',role:'user',id:'msg_current_instruction',content:[{type:'input_text',text:'Inspect the authorized fixture image once.'}]},
+    ];
+    const entries=[{path:{type:'special',value:{kind:'root'}},access:'read'}];
+    writeFileSync(rolloutPath,[{type:'session_meta',payload:{id:rolloutThreadId,source:'cli'}},
+      childTurnContext(rolloutTurnId,{workspace_roots:[root],sandbox_policy:{type:'read-only'},
+       permission_profile:{type:'managed',file_system:{type:'restricted',entries},network:'restricted'}}),
+      // The current environment is generated after turn_context; it is not a
+      // historical response_item from an older turn that must be found before it.
+    ].map(value=>JSON.stringify(value)).join('\n')+'\n');
+    const store=new ChatGptThreadEnvironmentStore(undefined,Date.now,codexHome);
+    expect(store.resolve(request)).toMatchObject({cwd:root,roots:[root],writableRoots:[],sandboxPolicy:{type:'readOnly',networkAccess:false}});
+    const modified=structuredClone(request);
+    (modified._rawBody as typeof body).input[0]={type:'message',role:'user',id:'msg_current_environment',
+      content:[{type:'input_text',text:filesystemEnvironmentXml(readOnlyProfileXml).replace(root,resolve(root,'..','ungranted'))}]};
+    expect(()=>store.resolve(modified)).toThrow();
+    rmSync(rolloutPath);expect(()=>store.resolve(request)).toThrow('missing network access');
   });
 
   // #790. Codex 0.162 emits the same envelope with network access on or off: the permission

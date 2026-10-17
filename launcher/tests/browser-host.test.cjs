@@ -2317,6 +2317,7 @@ test("a viewport-refresh heartbeat reapplies hidden emulation before CDP reconne
   assert.equal(tab.deviceEmulationDirty, false);
 });
 
+
 test("an expired browser surface cancels its runtime before releasing the tab", async () => {
   const closed = [];
   const warnings = [];

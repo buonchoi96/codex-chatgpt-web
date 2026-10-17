@@ -21,6 +21,9 @@ interface PendingTurn {
   localFailure?: Error;
   progressForwarding?: AbortController;
   acknowledgedMultipartStage?: number;
+  recoveryPreparation?: boolean;
+  steeringDeltaId?: string;
+  steeringReceipt?: { deltaId: string; settlement: Promise<void> };
 }
 
 type HelperMessage =
@@ -28,9 +31,11 @@ type HelperMessage =
   | { type: "event"; id: string; event: "heartbeat" | "generation_progress" | "send_activated" | "submitted" | "reasoning" | "commentary" | "text"; text?: string; continuation?: boolean }
   | { type: "event"; id: string; event: "tool_batch_observed"; revision: number }
   | { type: "event"; id: string; event: "multipart_stage_acknowledged"; stageIndex: number }
-  | { type: "event"; id: string; event: "completion_fence_begin"; requestId: number }
+  | { type: "event"; id: string; event: "completion_fence_begin"; requestId: number;forRecovery?:boolean }
   | { type: "event"; id: string; event: "completion_fence_commit"; requestId: number; revision: number }
   | { type: "event"; id: string; event: "prepared_selected"; reused: boolean }
+  | { type: "event"; id: string; event: "prepare_recovery";steering?:boolean }
+  | {type:'event';id:string;event:'steering_submitted';deltaId:string}
   | { type: "event"; id: string; event: "luna_checkpoint"; checkpoint: ChatGptLunaCheckpoint; answerHash: string }
   | { type: "result"; id: string; text: string }
   | {
@@ -63,6 +68,14 @@ function parseHelperMessage(line: string): HelperMessage {
   }
   if (message.type === "event") {
     const event = message.event;
+    if (event === 'prepare_recovery') {
+      if(message.steering!==undefined&&typeof message.steering!=='boolean')throw new Error('Invalid recovery reason');
+      return { type: 'event', id: message.id, event,steering:message.steering as boolean|undefined };
+    }
+    if(event==='steering_submitted'){
+      if(typeof message.deltaId!=='string'||!/^steering-[0-9a-f-]{36}$/.test(message.deltaId))throw new Error('Invalid steering receipt');
+      return {type:'event',id:message.id,event,deltaId:message.deltaId};
+    }
     if (event === "multipart_stage_acknowledged") {
       if (!Number.isSafeInteger(message.stageIndex) || (message.stageIndex as number) <= 0) {
         throw new Error("Launcher browser helper multipart stage index is invalid");
@@ -79,7 +92,8 @@ function parseHelperMessage(line: string): HelperMessage {
       if (!Number.isSafeInteger(message.requestId) || (message.requestId as number) <= 0) {
         throw new Error("Launcher browser helper completion fence request id is invalid");
       }
-      return { type: "event", id: message.id, event, requestId: message.requestId as number };
+      if(message.forRecovery!==undefined&&typeof message.forRecovery!=='boolean')throw new Error('Invalid fence purpose');
+      return { type: "event", id: message.id, event, requestId: message.requestId as number,forRecovery:message.forRecovery as boolean|undefined };
     }
     if (event === "completion_fence_commit") {
       if (!Number.isSafeInteger(message.requestId) || (message.requestId as number) <= 0
@@ -211,6 +225,11 @@ export class LauncherBrowserHelperClient {
   async run(turn: BrowserTurn): Promise<string> {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     await this.ensureChild();
+    if (turn.prepareRecovery && !this.helperFeatures.has('same-chat-recovery'))
+      throw new Error('Launcher helper lacks fresh same-chat recovery capabilities; rebuild the isolated DEV helper');
+    if(turn.steering&&!this.helperFeatures.has('live-steering'))throw new Error('Launcher helper lacks canonical live steering');
+    if (turn.steering && !this.helperFeatures.has("steering-receipt-ack"))
+      throw new Error("Launcher helper lacks committed steering receipts; rebuild the isolated DEV helper");
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if (turn.onMultipartStageAcknowledged && !this.helperFeatures.has("multipart-stage-ack")) {
       throw new Error(
@@ -273,6 +292,7 @@ export class LauncherBrowserHelperClient {
           id: turn.traceId,
           config: {
             appName: this.config.appName,
+            expectedConnectorTunnelId: this.config.expectedConnectorTunnelId,
             browserHostDescriptorPath: this.config.browserHostDescriptorPath!,
             browserDiagnosticsPath: this.config.browserDiagnosticsPath,
             turnTimeoutMs: this.config.turnTimeoutMs,
@@ -287,6 +307,8 @@ export class LauncherBrowserHelperClient {
             capabilities: turn.capabilities,
             ...(turn.nativeConnector ? { nativeConnector: true } : {}),
             ...(turn.prepareResume ? { resumeAvailable: true } : {}),
+            ...(turn.prepareRecovery ? { recoveryAvailable: true } : {}),
+            ...(turn.steering ? {steeringAvailable:true}:{}),
             ...(turn.retainConversation ? { retainConversation: true } : {}),
             ...(turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
             ...(turn.conversationKey ? { conversationKey: turn.conversationKey } : {}),
@@ -299,6 +321,7 @@ export class LauncherBrowserHelperClient {
           // turn it has not been told about and cannot accumulate state for unknown ids.
           .then(() => {
             if (!progressForwarding.signal.aborted) this.forwardProgress(turn, progressForwarding.signal);
+            if (!progressForwarding.signal.aborted) this.forwardSteering(turn, progressForwarding.signal);
           })
           .catch(error => this.finishWithError(turn.traceId, error instanceof Error ? error : new Error(String(error))));
       });
@@ -443,7 +466,7 @@ export class LauncherBrowserHelperClient {
           );
           return;
         }
-        void fence.begin().then(revision => {
+        void fence.begin(message.forRecovery).then(revision => {
           if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
           return this.send({
             type: "completion_fence_begin_ack",
@@ -521,6 +544,12 @@ export class LauncherBrowserHelperClient {
             return;
           }
           pending.prepared = prepared;
+          if (prepared.contextArchive && !this.helperFeatures.has('context-archive')) {
+            throw new Error('Launcher browser helper does not support verified context archives; rebuild the isolated DEV helper before testing');
+          }
+          if(prepared.contextArchive&&!this.helperFeatures.has('context-archive-single-send-v1'))
+            throw new ChatGptWebAdapterError('The browser helper uses the older archive staging protocol. Rebuild the isolated DEV helper before this archive can be sent.',
+              {status:409,errorType:'server_error',code:'context_archive_helper_unsupported',retryable:false});
           if (prepared.skillFiles?.length && !this.helperFeatures.has("skill-attachments")) {
             throw new Error("Launcher browser helper does not support skill attachments; update or restart the launcher");
           }
@@ -534,6 +563,8 @@ export class LauncherBrowserHelperClient {
                 images: prepared.images,
                 ...(prepared.turnToken ? { turnToken: prepared.turnToken } : {}),
                 ...(prepared.skillFiles ? { skillFiles: prepared.skillFiles } : {}),
+                ...(prepared.contextArchive ? {contextArchive:prepared.contextArchive} : {}),
+                ...(prepared.transportDecision?{transportDecision:prepared.transportDecision}:{}),
                 ...(prepared.multipart ? { multipart: prepared.multipart } : {}),
                 ...(prepared.trimmedCompactionMessages !== undefined
                   ? { trimmedCompactionMessages: prepared.trimmedCompactionMessages }
@@ -547,12 +578,48 @@ export class LauncherBrowserHelperClient {
           pending,
         ));
       }
+      else if (message.event === 'prepare_recovery') {
+        if (!pending.turn.prepareRecovery || pending.recoveryPreparation || pending.steeringDeltaId || pending.turn.abortSignal?.aborted
+          || message.steering && (!pending.turn.steering || !pending.turn.onSteeringSubmitted)) {
+          this.abortWithLocalFailure(message.id, new Error('Unexpected or concurrent recovery preparation'), pending); return;
+        }
+        pending.recoveryPreparation = true;
+        void pending.turn.prepareRecovery({steering:message.steering}).then(async prepared => {
+          try {
+            if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
+            if (prepared.contextArchive || prepared.multipart || !message.steering&&(prepared.images.length || prepared.skillFiles?.length))
+              throw new Error('Fresh recovery capability contains historical uploads');
+            if (message.steering) {
+              if (!prepared.steeringDeltaId || !/^steering-[0-9a-f-]{36}$/.test(prepared.steeringDeltaId))
+                throw new Error("Prepared steering has no reserved delta identity");
+              pending.steeringDeltaId = prepared.steeringDeltaId;
+            } else if (prepared.steeringDeltaId) throw new Error("Ordinary recovery cannot acknowledge a steering revision");
+            await this.send({ type: 'prepare_recovery_ack', id: message.id, prepared: {text:prepared.text, images:prepared.images,
+              ...(prepared.steeringDeltaId?{steeringDeltaId:prepared.steeringDeltaId}:{}),...(prepared.skillFiles?{skillFiles:prepared.skillFiles}:{})} });
+          } finally { prepared.release(); }
+        }).catch(error => this.abortWithLocalFailure(message.id, error instanceof Error ? error : new Error(String(error)), pending))
+          .finally(() => { pending.recoveryPreparation = false; });
+      }
       else if (message.event === "luna_checkpoint") {
         if (!pending.turn.captureLunaCheckpoint || !pending.turn.onLunaCheckpoint) {
           this.finishWithError(message.id, new Error("Launcher browser helper emitted an unexpected Luna checkpoint"));
           return;
         }
         pending.turn.onLunaCheckpoint({ checkpoint: message.checkpoint, answerHash: message.answerHash });
+      }
+      else if(message.event==='steering_submitted'){
+        if (!pending.turn.onSteeringSubmitted || pending.steeringDeltaId !== message.deltaId || pending.turn.abortSignal?.aborted) {
+          this.abortWithLocalFailure(message.id, new Error("Unexpected steering receipt"), pending); return;
+        }
+        const previous = pending.steeringReceipt;
+        const settlement = previous?.deltaId === message.deltaId ? previous.settlement
+          : Promise.resolve().then(() => pending.turn.onSteeringSubmitted!(message.deltaId));
+        pending.steeringReceipt = { deltaId: message.deltaId, settlement };
+        void settlement.then(async () => {
+          if (this.pending.get(message.id) !== pending || pending.localFailure || pending.turn.abortSignal?.aborted) return;
+          pending.steeringDeltaId = undefined;
+          await this.send({ type: "steering_submitted_ack", id: message.id, deltaId: message.deltaId });
+        }).catch(error => this.abortWithLocalFailure(message.id, error instanceof Error ? error : new Error(String(error)), pending));
       }
       else if (message.event === "reasoning" && message.text) {
         pending.turn.onReasoningSummary?.(message.text, message.continuation === true);
@@ -564,6 +631,7 @@ export class LauncherBrowserHelperClient {
     if (message.type === "result") {
       this.finish(message.id);
       if (pending.localFailure) pending.reject(pending.localFailure);
+      else if (pending.steeringDeltaId) pending.reject(new Error("Browser completed before steering receipt settlement"));
       else pending.resolve(message.text);
     } else if (message.type === "error") {
       const error = message.status !== undefined
@@ -630,6 +698,17 @@ export class LauncherBrowserHelperClient {
         + ` ${error instanceof Error ? error.message : String(error)}`,
       );
     });
+  }
+
+  private forwardSteering(turn:BrowserTurn,stop:AbortSignal):void {
+    if(!turn.steering?.waitForChange)return;
+    void(async()=>{
+      let revision=0;
+      while(!stop.aborted){
+        const snapshot=await turn.steering!.waitForChange!(revision,stop);revision=snapshot.revision;
+        if(!stop.aborted)await this.send({type:'steering_progress',id:turn.traceId,snapshot});
+      }
+    })().catch(error=>{if(!stop.aborted)console.warn(`[chatgpt-web] steering mirror failed: ${error instanceof Error?error.message:String(error)}`);});
   }
 
   private finish(id: string): void {

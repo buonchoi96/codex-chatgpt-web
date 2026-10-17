@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { estimateTokens } from "../src/lib/token-estimate";
 import { compileChatGptWebPrompt, formatChatGptWebMultipartCommit } from "../src/adapters/chatgpt-web/prompt";
+import { validateContextArchive } from "../src/adapters/chatgpt-web/context-archive";
 import { compiledChatGptWebMessages, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import { estimateChatGptWebUsage, resolveBiggerContextMultipartParts } from "../src/adapters/chatgpt-web/usage";
 import { CHATGPT_LUNA_CHECKPOINT_MARKER } from "../src/adapters/chatgpt-web/rolling-checkpoint";
@@ -19,15 +20,16 @@ function request(count: number, words: number, reasoning = "low"): CodexParsedRe
   });
 }
 
-test("Luna plans 1/2/6 messages against Free budgets and preserves every complete record", () => {
-  for (const effort of ["low", "medium"]) for (const [count, words, expected] of [[1, 1000, 1], [4, 7500, 2], [8, 6000, 6]]) {
+test("Luna adaptively uses inline, ZIP or multipart while preserving every complete record", () => {
+  for (const effort of ["low", "medium"]) for (const [count, words, expected] of [[1, 1000, "INLINE"], [4, 7500, "ZIP_SINGLE_MESSAGE"], [8, 6000, "ZIP_SINGLE_MESSAGE"]] as const) {
     const parsed = request(count!, words!, effort);
     const original = structuredClone(parsed);
     const parts = resolveBiggerContextMultipartParts(parsed, caps);
-    expect(parts ?? 1).toBe(expected);
-    const compiled = compileChatGptWebPrompt(parsed, caps, undefined, { experimentalMultipartParts: parts });
+    expect(parts ?? 1).toBe(expected === "INLINE" || expected === "ZIP_SINGLE_MESSAGE" ? 1 : expected);
+    const compiled = compileChatGptWebPrompt(parsed, caps, undefined, { contextArchive: true, experimentalMultipartParts: parts });
+    expect(compiled.transportDecision?.choice).toBe(expected);
     const messages = compiledChatGptWebMessages(compiled);
-    expect(messages).toHaveLength(expected!);
+    expect(messages).toHaveLength(1);
     for (const message of messages) expect(estimateTokens(message) + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS)
       .toBeLessThanOrEqual(CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET);
     if (parts) {
@@ -40,6 +42,14 @@ test("Luna plans 1/2/6 messages against Free budgets and preserves every complet
       expect(resolveChatGptWebMultipartStagingMode(model, caps,
         Math.max(...messages.slice(0, -1).map(text => estimateTokens(text))),
         Math.max(...messages.slice(0, -1).map(text => text.length))).displayLabel).toBe("Luna");
+    } else if (compiled.contextArchive) {
+      const files = validateContextArchive(Buffer.from(compiled.contextArchive.base64, "base64"), compiled.contextArchive.sha256);
+      const archived = Buffer.from(files["context.txt"]!).toString();
+      expect(archived).toContain("record 0:");
+      expect(archived).toContain(`record ${count! - 1}:`);
+    } else {
+      expect(compiled.text).toContain("record 0:");
+      expect(compiled.text).toContain(`record ${count! - 1}:`);
     }
     expect(estimateChatGptWebUsage(parsed, { answer: "done" }, caps, true).inputTokens)
       .toBe(estimateCompiledChatGptWebInputTokens(compiled, model));
