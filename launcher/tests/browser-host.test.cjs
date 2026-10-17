@@ -116,6 +116,34 @@ function recoveringRendererFixture() {
   };
 }
 
+test("redirect supersedes an in-flight home surface mark without poisoning the next document", async () => {
+  const fixture = recoveringRendererFixture();
+  const { host, contents, events } = fixture;
+  let rejectMark;
+  let markCalls = 0;
+  let probes = 0;
+  host.markOwnedSurface = () => {
+    markCalls += 1;
+    if (markCalls === 1) return new Promise((_resolve, reject) => { rejectMark = reject; });
+    return Promise.resolve();
+  };
+  host.probeAuthentication = async () => { probes += 1; };
+  host.applyViewportCss = async () => {};
+  contents.emit("did-start-navigation", {}, "https://chatgpt.com/start", false, true);
+  contents.emit("did-finish-load");
+  contents.emit("did-start-navigation", {}, "https://chatgpt.com/auth", false, true);
+  rejectMark(new Error("ChatGPT page changed during a page check"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.notEqual(host.state.status, "error");
+  assert.equal(probes, 0, "an old document must not probe authentication");
+  assert.ok(events.includes("browser.surface_mark_superseded"));
+  contents.emit("did-finish-load");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(markCalls, 2);
+  assert.equal(probes, 1, "the new loaded document owns its authentication probe");
+  assert.notEqual(host.state.status, "error");
+});
+
 test("a killed primary renderer retires its pending probe, recovers without clearing the session, and permits logout", async () => {
   const fixture = recoveringRendererFixture();
   const { host, contents, loads, events } = fixture;
