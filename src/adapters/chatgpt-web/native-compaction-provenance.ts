@@ -213,6 +213,16 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
   const compactionSource = nativeSource?.itemId
     ? { id: nativeSource.itemId, ...(nativeSource.turnId ? {turnId:nativeSource.turnId} : {}),
       content: nativeSource.content } : undefined;
+  if (parsed._compactionRequest) {
+    // Revision marker proves which implementation is running; no source IDs,
+    // text, local paths or other request content enter this diagnostic.
+    console.info('[chatgpt-web] native_compaction_candidate ' + JSON.stringify({
+      implementation: 'ownerless-native-source-v2',
+      checkpointPresent: requestCheckpoint !== undefined,
+      sourcePresent: compactionSource !== undefined,
+      sourceHasTurnId: nativeSource?.turnId !== undefined,
+    }));
+  }
   let installationDigest:string|undefined;
   const installationHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'undefined').digest('hex');
   try{
