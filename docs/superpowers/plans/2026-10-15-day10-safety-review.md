@@ -1,0 +1,39 @@
+# Day-10 unresolved operation review
+
+Previous turn made source changes and collected a passing isolated DEV initial/retained/compact/post-compact chain. Native installation ACK and the full175-requirement campaign remain incomplete. This slice addresses the missing next-turn ledger review, not automatic retry or operator approval.
+
+## Design and ownership
+
+Main owns this bounded slice. Maxwell/Pascal are completed/closed; no resume, extra child identity or role/model substitution. Preserve both dirty repositories, production processes/configuration, historical refusal records and the user PLAN. No `bun run verify` or retry of the two historical blocked operations.
+
+- Read the existing private runtime ledger after trusted environment recovery. Scope detailed entries to the exact stored `{cwd,roots}` digest; expose only aggregate counts for other scopes. Do not manufacture task/thread linkage from a binding digest.
+- Add a bounded read-only snapshot with20 default/50 maximum entries, a hash-bound cursor and an explicit unavailable/changed state. No record deletion, resolution, action dispatch, scope escalation or retry. Sanitize all free-form fields out of model output; preserve known requirement IDs and hashes, classifications, attempt/status/receipt data.
+- Add `codex_safety_review` and reserved native `codex.control.safety_review` through the same implementation. Claim and settle the current broker activity. Expired/retired bindings cannot read; no native command request is generated. Manual contract uses request_id; native uses turn_token.
+- Add a short current-review notice outside historical JSON/archives for cold/retained/manual/steering/recovery/compaction preparation. The snapshot is local bookkeeping, not instruction/source provenance, permission, verified execution, or evidence that a resolved item truly completed. Compaction preserves blockers without calling work/review tools.
+- Only a trusted scoped route is eligible for runtime review. No synthetic environment or root inference for read-only routes lacking native environment. Never tell the model an unadvertised review tool is available.
+
+## Validation
+
+TDD snapshots: restart persistence, per-scope privacy, pagination of all entries, changed snapshot rejection, malformed/unavailable ledger, malicious free-form data, resolved bookkeeping not execution proof, no mutation/retry. MCP: direct/reserved/safe contract, bounded strict schema, binding retirement and no tool dispatch/activity leak. Adapter/prompt: fresh process/new turn and retained/cold/compaction routes carry current notice; no forced extra Send, historical archive mutation or original-instruction relabeling. Run targeted regression/typecheck, preserve failed receipts, then record exact source hashes.
+
+Remaining full SAFE gates include other denial classifications, genuine human/native authorization receipts and a once-only permitted retry contract; this read-only path must never pretend to supply them. Historical receipts remain PENDING_RECEIPT_RECONCILIATION with unknown original wire/call/trace IDs, zero retries, no imported synthetic runtime records.
+
+## Collected source and live evidence, 2026-10-16
+
+Implemented bounded scoped snapshots, current notices and direct/reserved/manual MCP review. Default20/max50 pages bind the cursor to the sanitized snapshot hash. Another scope's details and free-form journal descriptions never enter the model output. Invalid/changed/unavailable reviews do not become clear/zero-count success. Review never executes, retries, resolves or grants permission. Existing current-turn source and raw canonical request remain unchanged. Notices stay outside historical context/ZIP/multipart records.
+
+Initial TDD failures and the manual fixture timeout remain separate FAIL logs. The corrected manual fixture supplied the existing simulated Send prerequisite, without a browser action. New MCP ABI metadata explicitly lists the read tool; compaction's token/summary guidance stays together before the separate review-alias description.
+
+- Fresh Bun-process disk restoration and two actual MCP stdio processes read23 fixture records across a restart; files unchanged, owned transport PIDs null after close. These are native local protocol fixtures, not a model-native compact installation ACK.
+- Before peer follow-up:193 tests/1017 assertions passed across16 files; runtime typecheck passed. Initial actual Web notice test failed only at its fixture's raw JSON parser: the accepted reply contained the correct randomized ID/false as Markdown-escaped literal JSON. Its FAIL receipt is retained. The fixture then decoded only observed `_`/`[]` Markdown literals; product submission/strict JSON validation were unchanged.
+- Actual Web notice v2 passed initial and retained-new-snapshot stages with independently generated requirement IDs absent from the user prompt. Both no-retry flags were false,0tool calls, exactly1Send per stage, no ZIP; driver/transport cleanup completed. `output/day10-safety-review-live-v2-20261016.json`; exec61937 collected exit0. This proves notice visibility/currentness, not invocation of the newly added MCP tool through a Web connector.
+
+## Same-owner Luna peer chain and correction
+
+The app follow-up API advertises explicit `model`/`thinking`; read_thread independently returned the exact existing child UUIDs before use. Main sent validation-only gated follow-ups with gpt-6-luna/high, inspected the newly appended native contexts before authorizing any work, and retained the same coding/supervisor roles. No new agent identity or global config change. Maxwell native contexts6/106 and Pascal6/113 all resolve Luna/high, including collaboration settings; both tasks naturally completed. Native bare resume_agent/send_input model preservation is still NOT FIXED. See `../day10-agent-followup-receipt.json`, which includes actual parent control-call lines and raw child tool receipts rather than only their summaries.
+
+Maxwell added3 MCP privacy/stale-snapshot/corruption regressions:8pass/68assertions. It reported one read-only search of turn-broker.ts outside the gate's listed read subset; no write outside its test/log paths. Main reviewed the new tests and exercised each case through both direct and reserved interfaces. Pascal independently reproduced14tests/118assertions and found the other-scope-only status inconsistency. Main reproduced2RED cases, then introduced `other_scope_pending`: current scope stays clear of falsely attributed prerequisites while the other-scope aggregate remains pending. It grants no access or completion authority.
+
+After that correction, main regression **201pass/0fail/1081assertions/16files/28.88s**, exec7334 collected exit0; `output/day10-safety-review-reviewed-regression-20261016.log`. Typecheck PASS, exec19466 collected exit0; `output/day10-safety-review-reviewed-typecheck-20261016.log`. The new other-scope-only actual Web probe v3 returned an empty current requirement list, the exact random other-scope count and false retry flag;0tools,1INLINE Send,noZIP, both cleanup completed. `output/day10-safety-review-live-v3-20261016.json`; exec37495 collected exit0. The v2 normal-scope live proof predates this correction; its branch was unchanged. V3 pins the corrected current source hashes.
+
+Full SAFE remains PARTIAL: original historical raw refusals unresolved/no retries; additional denial-class capture, genuine native/human review authorization and a once-only permitted retry need separate evidence. New MCP review invocation through an actual Web connector remains NOT TESTED. Production Launcher/MCP/route/config were not deployed or restarted; observed DEV PID5636 was external. Observer image mode stays disabled. Native ACK, all remaining175-item campaign gates, CPU AUTO/readiness/parallel/archive/model pixels remain in scope.

@@ -80,6 +80,7 @@ export function resolveBiggerContextMultipartParts(
   parsed: CodexParsedRequest,
   capabilities: ChatGptWebCapabilities,
   experimentalSkillAttachments = false,
+  currentReview:Pick<CompileChatGptWebPromptOptions,'blockedOperationReview'>={},
 ): ChatGptWebMultipartPartCount | undefined {
   if (isChatGptWebZeroRiskBackendModel(parsed.modelId)) {
     throw new Error("Bigger Context is unavailable for ChatGPT Zero Risk");
@@ -92,7 +93,7 @@ export function resolveBiggerContextMultipartParts(
     + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
   const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(
     parsed, capabilities, mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
-    { contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
+    { ...currentReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
   );
   const tryCompile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt | undefined => {
     try {

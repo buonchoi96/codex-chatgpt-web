@@ -7,6 +7,13 @@ import { dirname, join } from "node:path";
 import { callTurnBroker, TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint, isWindowsPipeEndpoint } from "../src/config";
 
+async function expectBrokerRejection(call: Promise<unknown>, message: string): Promise<void> {
+  // Await socket I/O before entering Bun's matcher; keep the actual rejection assertion.
+  const error = await call.then(() => undefined, cause => cause);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain(message);
+}
+
 test.skipIf(process.platform === "win32")("closing a rejected broker leaves the live socket reachable", async () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-owner-"));
   const endpoint = join(root, "broker.sock");
@@ -345,8 +352,8 @@ test("an unbounded broker call fails when the broker closes without answering", 
   const broker = unansweredBrokerEndpoint("cgw-broker-closed-", socket => socket.on("data", () => socket.end()));
   await broker.listen();
   try {
-    await expect(callTurnBroker(broker.socketPath, { method: "claim", token: "turn_closed" }, null))
-      .rejects.toThrow("closed the connection");
+    await expectBrokerRejection(callTurnBroker(broker.socketPath, { method: "claim", token: "turn_closed" }, null),
+      "closed the connection");
   } finally {
     await broker.close();
   }
@@ -376,7 +383,7 @@ test("bounded broker calls preserve server-owned closure before advancing the li
     await Bun.sleep(25);
     expect(settled).toBeFalse();
     peer.end();
-    await expect(call).resolves.toEqual({ ready: true });
+    expect(await call).toEqual({ ready: true });
   } finally {
     peer?.destroy();
     await broker.close();
@@ -397,7 +404,7 @@ test("broker frame settlement still rejects errors, wrong identities and incompl
     });
     await broker.listen();
     try {
-      await expect(callTurnBroker(broker.socketPath, { method: "owner_status" })).rejects.toThrow(expected);
+      await expectBrokerRejection(callTurnBroker(broker.socketPath, { method: "owner_status" }), expected);
     } finally { await broker.close(); }
   }
 });

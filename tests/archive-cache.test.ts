@@ -44,6 +44,75 @@ test('archive manifest preserves archival context/images/skills fields and exact
  expect(manifest.skills[0]).toEqual({filename:'技能.md',path:'skills/技能.md',mime_type:'text/plain; charset=utf-8'});
  expect(contextArchiveCacheStats()).toMatchObject({builds:2,hits:0});
 });
+
+test('archive preserves ordered image bytes and MIME metadata for four and twelve historical images',()=>{
+  clearContextArchiveCache();
+  const media=[
+    {type:'image/png',data:'AQIDBA=='},
+    {type:'image/jpeg',data:'BQYHCA=='},
+    {type:'image/webp',data:'CQoLDA=='},
+    {type:'image/gif',data:'DQ4PEA=='}
+  ];
+  for(const count of [4,12]){
+    const images=Array.from({length:count},(_,index)=>{
+      const item=media[index%media.length]!;
+      return{ref:`historical-${index+1}`,imageUrl:`data:${item.type};base64,${item.data}`,detail:index%2?'low':'original'};
+    });
+    const archive=buildContextArchive(`History with ${count} images`,images,[]);
+    const files=validateContextArchive(archive.bytes,archive.sha256);
+    const manifest=JSON.parse(new TextDecoder().decode(files['manifest.json']));
+    expect(manifest.images).toHaveLength(count);
+    expect(manifest.images.map((entry:{attachment_ref:string})=>entry.attachment_ref)).toEqual(images.map(item=>item.ref));
+    for(const [index,image] of images.entries()){
+      const entry=manifest.images[index]!;
+      const expectedType=media[index%media.length]!.type;
+      expect(entry).toMatchObject({attachment_ref:image.ref,mime_type:expectedType,detail:image.detail});
+      expect(entry.path).toMatch(/^images\//);
+      expect(files[entry.path]).toEqual(Buffer.from(image.imageUrl.split(',')[1]!, 'base64'));
+      expect(manifest.files.find((file:{path:string})=>file.path===entry.path)).toMatchObject({mediaType:expectedType});
+    }
+  }
+});
+
+test('archive keeps Unicode text and traversal-like Unicode image refs out of ZIP paths',()=>{
+  clearContextArchiveCache();
+  const context='Tiếng Việt — 中文 — עברית — 😀';
+  const ref='../图像/💡';
+  const archive=buildContextArchive(context,[{...image,ref}],[]);
+  const files=validateContextArchive(archive.bytes,archive.sha256);
+  const manifest=JSON.parse(new TextDecoder().decode(files['manifest.json']));
+  expect(new TextDecoder().decode(files['context.txt'])).toBe(context);
+  expect(manifest.images[0]).toMatchObject({attachment_ref:ref,mime_type:'image/png'});
+  expect(manifest.images[0].path).toMatch(/^images\/opaque_/);
+  expect(manifest.images[0].path).not.toContain('..');
+  expect(files[manifest.images[0].path]).toEqual(Buffer.from(image.imageUrl.split(',')[1]!, 'base64'));
+});
+
+test('archive cache identity preserves repeated refs, order and MIME without dropping occurrences',()=>{
+  clearContextArchiveCache();
+  const repeated=[
+    {...image,ref:'same-ref'},
+    {...image,ref:'same-ref',imageUrl:image.imageUrl.replace('image/png','image/jpeg'),detail:'low'}
+  ];
+  const first=buildContextArchive('Repeated historical reference',repeated,[]);
+  const cached=buildContextArchive('Repeated historical reference',repeated,[]);
+  const files=validateContextArchive(cached.bytes,cached.sha256);
+  const manifest=JSON.parse(new TextDecoder().decode(files['manifest.json']));
+  expect(cached.sha256).toBe(first.sha256);
+  expect(contextArchiveCacheStats()).toMatchObject({builds:1,hits:1});
+  expect(manifest.images.map((entry:{attachment_ref:string})=>entry.attachment_ref)).toEqual(['same-ref','same-ref']);
+  expect(manifest.images[0].path).not.toBe(manifest.images[1].path);
+  expect(manifest.images.map((entry:{mime_type:string})=>entry.mime_type)).toEqual(['image/png','image/jpeg']);
+  expect(files[manifest.images[0].path]).toEqual(files[manifest.images[1].path]);
+
+  const reversed=buildContextArchive('Repeated historical reference',[...repeated].reverse(),[]);
+  expect(reversed.sha256).not.toBe(first.sha256);
+  const reversedFiles=validateContextArchive(reversed.bytes,reversed.sha256);
+  const reversedManifest=JSON.parse(new TextDecoder().decode(reversedFiles['manifest.json']));
+  expect(reversedManifest.images.map((entry:{mime_type:string})=>entry.mime_type)).toEqual(['image/jpeg','image/png']);
+  expect(contextArchiveCacheStats()).toMatchObject({builds:2,hits:1});
+});
+
 test('archive rejects traversal, remote images, live capability handles and tampered contents',()=>{
   expect(()=>buildContextArchive('History',[],[{name:'../outside',text:'x'}])).toThrow();
   expect(()=>buildContextArchive('History',[{...image,imageUrl:'https://example.test/private'}],[])).toThrow();

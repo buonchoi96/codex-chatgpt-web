@@ -194,8 +194,9 @@ function firstRolloutRecord(fd: number, size: number): Record<string, unknown> {
   throw new Error("Codex rollout has no complete session metadata record");
 }
 
-function latestTurnContext(fd: number, size: number): Record<string, unknown> | undefined {
+function latestRolloutRecord(fd: number, size: number, type: string, maxScanBytes = Number.MAX_SAFE_INTEGER): Record<string, unknown> | undefined {
   let position = size;
+  let scanned = 0;
   let carry = Buffer.alloc(0);
   let firstSegmentAtEof = true;
   const fileEndsWithNewline = (() => {
@@ -205,7 +206,9 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
   })();
 
   while (position > 0) {
-    const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, position);
+    const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, position, maxScanBytes-scanned);
+    if(length<=0)return undefined;
+    scanned+=length;
     position -= length;
     const chunk = Buffer.alloc(length);
     const count = readSync(fd, chunk, 0, length, position);
@@ -223,7 +226,7 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
         throw new Error("Codex rollout JSONL record exceeds the bounded record size");
       }
       const item = parseJsonLine(line);
-      if (item.type === "turn_context") return record(item.payload);
+      if (item.type === type) return record(item.payload);
     }
     carry = Buffer.from(data.subarray(0, lineEnd));
     if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
@@ -232,7 +235,17 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
   }
   if (carry.length === 0) return undefined;
   const item = parseJsonLine(carry);
-  return item.type === "turn_context" ? record(item.payload) : undefined;
+  return item.type === type ? record(item.payload) : undefined;
+}
+
+function latestTurnContext(fd:number,size:number):Record<string,unknown>|undefined {
+  return latestRolloutRecord(fd,size,'turn_context');
+}
+
+/** Read the newest completed installation witness, never an older matching checkpoint.
+ * A bounded backwards lookup avoids scanning a long-running task on every replay. */
+export function latestNativeCompactionRecord(fd:number,size:number):Record<string,unknown>|undefined {
+  return latestRolloutRecord(fd,size,'compacted',32*1024*1024);
 }
 
 function verifyHistoricalEnvironmentMessages(
@@ -602,7 +615,7 @@ function validateMetadataConsistency(
   }
 }
 
-export function resolveCurrentCodexRolloutEnvironment(options: {
+export interface CurrentCodexRolloutOptions {
   codexHome: string;
   sqliteHome?: string;
   lineage: RolloutIdentity;
@@ -610,7 +623,13 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
   compactionSourceTurnId?: string;
   tools?: readonly CodexTool[];
   historicalEnvironmentMessages?: ChatGptUnattributedEnvironmentMessage[];
-}): ChatGptTurnEnvironment | undefined {
+}
+
+/** The inspector runs synchronously while the exact authenticated file is open.
+ * It must not retain the descriptor. No model-provided path is accepted. */
+export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions,
+  inspect:(snapshot:{fd:number;size:number;turn:Record<string,unknown>;environment:ChatGptTurnEnvironment})=>T,
+  validateAppend?:(snapshot:{fd:number;size:number})=>void):T|undefined {
   const { codexHome, lineage, turnId, tools, compactionSourceTurnId } = options;
   const nativeThreadId = CODEX_ID.test(lineage.threadId);
   const nativeTurnId = CODEX_ID.test(turnId);
@@ -629,12 +648,12 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     throw new Error("Codex has no canonical rollout for the requested subagent thread");
   }
 
-  const matching: ChatGptTurnEnvironment[] = [];
+  const matching: T[] = [];
   for (const candidate of candidates) {
     const rolloutPath = validateRolloutPath(codexHome, candidate, lineage.threadId);
     const fd = openSync(rolloutPath, "r");
     try {
-      const size = fstatSync(fd).size;
+      const before=fstatSync(fd),size=before.size;
       if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Codex rollout is empty");
       validateSessionMeta(firstRolloutRecord(fd, size), lineage);
       const latest = latestTurnContext(fd, size);
@@ -650,7 +669,14 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
       if (options.historicalEnvironmentMessages) {
         verifyHistoricalEnvironmentMessages(fd, size, turnId, options.historicalEnvironmentMessages);
       }
-      matching.push(environment);
+      const inspected=inspect({fd,size,turn:latest,environment});
+      const after=fstatSync(fd);
+      if(after.size<size)throw new Error('Codex rollout shrank during provenance lookup');
+      if(after.size===size&&after.mtimeMs!==before.mtimeMs)throw new Error('Codex rollout was rewritten during provenance lookup');
+      if(after.size>size&&JSON.stringify(latestTurnContext(fd,after.size))!==JSON.stringify(latest))
+        throw new Error('Codex rollout turn changed during provenance lookup');
+      if(after.size>size)validateAppend?.({fd,size:after.size});
+      matching.push(inspected);
     } finally {
       closeSync(fd);
     }
@@ -662,4 +688,8 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     throw new Error("Codex has multiple canonical rollouts for the requested current turn");
   }
   return matching[0]!;
+}
+
+export function resolveCurrentCodexRolloutEnvironment(options:CurrentCodexRolloutOptions):ChatGptTurnEnvironment|undefined {
+  return inspectCurrentCodexRollout(options,({environment})=>environment);
 }

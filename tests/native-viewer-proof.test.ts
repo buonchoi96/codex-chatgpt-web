@@ -37,6 +37,52 @@ test.each(['HTTP_ERROR','STREAM_ERROR','RPC_ERROR'])('first %s failure remains s
  const value=guard();value.fail(code);value.fail('LATER_ERROR');value.onNativeNotification(agent());value.onNativeNotification(completed());
  expect(value.failureCode).toBe(code);expect(()=>value.assertCompleted()).toThrow();
 });
+test('first native RPC failure exposes only bounded, hashed diagnostics and remains immutable',()=>{
+ const value=guard(),message='native endpoint refused the request';
+ value.onNativeNotification({id:7,error:{code:'E_NATIVE_7',retryable:true,message,data:{credential:'never expose'}}});
+ const diagnostic=value.failureDiagnostic;
+ expect(diagnostic).toEqual({origin:'rpc',code:'E_NATIVE_7',retryable:true,
+  messageSha256:createHash('sha256').update(message).digest('hex'),messageLength:message.length,
+  threadIdDeclared:false,threadIdMatched:false,turnIdDeclared:false,turnIdMatched:false});
+ expect(JSON.stringify(diagnostic)).not.toContain(message);
+ expect(JSON.stringify(diagnostic)).not.toContain('credential');
+ expect(()=>value.onNativeNotification(agent())).not.toThrow();
+ expect(()=>value.assertCompleted()).toThrow();
+ expect(value.failureDiagnostic).toEqual(diagnostic);
+ expect(Object.isFrozen(diagnostic)).toBe(true);
+ Reflect.set(diagnostic as any,'code','MUTATED');Reflect.set(diagnostic as any,'threadIdMatched',true);
+ expect(value.failureDiagnostic).toMatchObject({code:'E_NATIVE_7',threadIdMatched:false});
+});
+test('fatal native error notifications stay fatal when declared IDs are missing or foreign',()=>{
+ for(const notification of [
+  {method:'error',params:{code:'E_NOTIFY',message:'missing ids'}},
+  {method:'error',params:{code:'E_NOTIFY',message:'foreign ids',threadId:'other',turnId:'old'}},
+ ]){
+  const value=guard();value.onNativeNotification(notification);
+  expect(value.failureCode).toBe('NATIVE_ERROR');
+  expect(value.failureDiagnostic).toMatchObject({origin:'notification',code:'E_NOTIFY',retryable:false,
+   threadIdDeclared:notification.params.threadId!==undefined,threadIdMatched:false,
+   turnIdDeclared:notification.params.turnId!==undefined,turnIdMatched:false});
+  value.onNativeNotification(agent());value.onNativeNotification(completed());
+  expect(()=>value.assertCompleted()).toThrow('NATIVE_ERROR');
+ }
+});
+test('hostile and oversized native error metadata is bounded and never invokes getters',()=>{
+ let getterCalls=0;
+ const hostile=Object.create({code:'INHERITED_CODE'});
+ Object.defineProperty(hostile,'message',{enumerable:true,get(){getterCalls++;throw new Error('must not run');}});
+ Object.defineProperty(hostile,'retryable',{enumerable:true,value:true});
+ const value=guard();value.onNativeNotification({id:8,error:hostile});
+ expect(getterCalls).toBe(0);
+ expect(value.failureCode).toBe('NATIVE_RPC_ERROR');
+ expect(value.failureDiagnostic).toMatchObject({origin:'rpc',code:'NATIVE_RPC_ERROR',retryable:false});
+ const oversized=guard(),largeError:Record<string,unknown>={code:'E_LARGE',message:'oversized'};
+ for(let index=0;index<100;index++)largeError[`field${index}`]=index;
+ oversized.onNativeNotification({id:9,error:largeError});
+ expect(oversized.failureCode).toBe('NATIVE_RPC_ERROR');
+ expect(oversized.failureDiagnostic).toMatchObject({origin:'rpc',code:'NATIVE_RPC_ERROR',retryable:false});
+ expect(JSON.stringify(oversized.failureDiagnostic)).not.toContain('field');
+});
 test.each([
  {method:'error',params:{message:'native failure'}},
  {id:3,error:{code:-1,message:'RPC failed'}},

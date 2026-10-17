@@ -30,6 +30,29 @@ function selectorInput() {
   };
 }
 
+function retainedBudgetInput(canonicalTokens: number) {
+  return {
+    ...selectorInput(),
+    retainedHistoryProven: true,
+    canonicalTokens,
+    accountCanonicalTokenLimit: 80_000,
+    composerChars: 240_000,
+    composerCharLimit: 250_000,
+    messageTokens: canonicalTokens - 16_384,
+    messageTokenLimit: 70_000,
+  };
+}
+
+function expectRetainedBudgetFitsMessage(decision: ReturnType<typeof selectChatGptWebTransport>, canonicalTokens: number) {
+  const measured = decision.measurements;
+  expect(measured.canonicalTokens).toBe(canonicalTokens);
+  expect(measured.canonicalTokens).toBe(measured.messageTokens + measured.attachmentTokenReserve);
+  expect(measured.messageTokens).toBeLessThanOrEqual(measured.messageTokenLimit);
+  expect(measured.composerChars).toBeLessThanOrEqual(measured.composerCharLimit!);
+  expect(measured.attachmentCount).toBeLessThanOrEqual(measured.maxAttachmentCount);
+  expect(measured.attachmentBytes).toBeLessThanOrEqual(measured.maxAttachmentBytes);
+}
+
 test("selector returns immutable versioned decisions for inline and proven retained deltas", () => {
   const inline = selectChatGptWebTransport(selectorInput());
   expect(inline).toMatchObject({ version: 1, choice: "INLINE" });
@@ -39,6 +62,39 @@ test("selector returns immutable versioned decisions for inline and proven retai
 
   expect(selectChatGptWebTransport({ ...selectorInput(), retainedHistoryProven: true }))
     .toMatchObject({ version: 1, choice: "RETAINED_DELTA" });
+});
+
+test("retained delta at the measured account budget stays delta even when archive is available", () => {
+  const decision = selectChatGptWebTransport({
+    ...retainedBudgetInput(80_000),
+    archive: { eligible: true, mediaType: "application/zip", imageCount: 4, skillCount: 0, promptChars: 300, promptTokens: 60, bytes: 2_000, maxBytes: 50_000_000 },
+  });
+
+  expect(decision.choice).toBe("RETAINED_DELTA");
+  expect(decision.measurements.accountCanonicalTokenLimit).toBe(80_000);
+  expectRetainedBudgetFitsMessage(decision, 80_000);
+});
+
+test("retained delta over the account token budget blocks despite fitting message limits", () => {
+  const decision = selectChatGptWebTransport(retainedBudgetInput(80_001));
+
+  expect(decision.choice).toBe("BLOCK");
+  expect(decision.reason).toContain("exceeding the measured account budget");
+  expect(decision.measurements.accountCanonicalTokenLimit).toBe(80_000);
+  expectRetainedBudgetFitsMessage(decision, 80_001);
+});
+
+test("retained delta over the account budget cannot fall back to verified multipart or archive", () => {
+  const input = retainedBudgetInput(80_001);
+  const archive = { eligible: true, mediaType: "application/zip" as const, imageCount: 4, skillCount: 0, promptChars: 300, promptTokens: 60, bytes: 2_000, maxBytes: 50_000_000 };
+  const multipart = { verified: true, canonicalTokenLimit: 100_000 };
+
+  for (const alternatives of [{ archive }, { multipart }, { archive, multipart }]) {
+    const decision = selectChatGptWebTransport({ ...input, ...alternatives });
+    expect(decision.choice).toBe("BLOCK");
+    expect(decision.reason).toContain("exceeding the measured account budget");
+    expectRetainedBudgetFitsMessage(decision, 80_001);
+  }
 });
 
 test("required history compaction uses multipart even when its compact control prompt fits inline", () => {
@@ -72,6 +128,34 @@ test("selector chooses ZIP for attachment caps, multipart only when verified, an
     archive: { eligible: true, mediaType: "application/zip", imageCount: 0, skillCount: 0, promptChars: 200, promptTokens: 50, bytes: 1_000, maxBytes: 50_000_000 },
     multipart: { verified: true, canonicalTokenLimit: 270_000 },
   })).toMatchObject({ choice: "BLOCK" });
+});
+
+test("selector blocks twelve-image history when its complete ZIP exceeds the native upload byte cap", () => {
+  const decision = selectChatGptWebTransport({
+    ...selectorInput(),
+    attachmentCount: 12,
+    attachmentTypes: Array(12).fill("image/png"),
+    archive: { eligible: true, mediaType: "application/zip", imageCount: 12, skillCount: 0, promptChars: 300, promptTokens: 60, bytes: 50_000_001, maxBytes: 50_000_000 },
+  });
+
+  expect(decision).toMatchObject({ choice: "BLOCK", measurements: { attachmentCount: 12, archive: { imageCount: 12 } } });
+  expect(decision.measurements.archive!.bytes).toBeGreaterThan(decision.measurements.archive!.maxBytes);
+});
+
+test("selector blocks twelve-image ZIP when canonical history exceeds the account token budget", () => {
+  const decision = selectChatGptWebTransport({
+    ...selectorInput(),
+    canonicalTokens: 80_001,
+    attachmentCount: 12,
+    attachmentTypes: Array(12).fill("image/png"),
+    archive: { eligible: true, mediaType: "application/zip", imageCount: 12, skillCount: 0, promptChars: 300, promptTokens: 60, bytes: 2_000, maxBytes: 50_000_000 },
+  });
+
+  expect(decision).toMatchObject({
+    choice: "BLOCK",
+    measurements: { canonicalTokens: 80_001, accountCanonicalTokenLimit: 80_000, attachmentCount: 12, archive: { imageCount: 12 } },
+  });
+  expect(decision.reason).toContain("exceeding the measured account budget");
 });
 
 test("explicit inline rejection permits ZIP while a failed ZIP is never retried silently", () => {

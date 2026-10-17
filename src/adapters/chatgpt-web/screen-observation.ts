@@ -2,6 +2,7 @@ import * as z from 'zod/v4';
 import {randomUUID} from 'node:crypto';
 import {createConnection} from 'node:net';
 import type {BrokerToolResult} from './turn-broker';
+import {projectScreenTree} from './screen-tree';
 
 const regionSchema=z.object({x:z.number().int().min(0),y:z.number().int().min(0),width:z.number().int().positive(),height:z.number().int().positive()}).strict();
 const boundsSchema=z.object({x:z.number().finite().min(0),y:z.number().finite().min(0),width:z.number().finite().positive(),height:z.number().finite().positive()}).strict();
@@ -21,6 +22,7 @@ export class NativeScreenObservationError extends Error {
 }
 export const screenObserveArguments={reader_lease:z.string().regex(/^reader_[0-9a-f]{64}$/),
   timeout_ms:z.number().int().min(1).max(3000).default(1000),max_nodes:z.number().int().min(1).max(200).default(64),
+  tree_format:z.enum(['compact','json','both']).optional(),
   readiness:readinessRequestSchema.optional()};
 const counter=z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),identity=counter.min(1),timing=z.number().finite().min(0);
 const cvNode=z.object({source:z.literal('cv'),bounds:boundsSchema,name:z.literal(''),frame_id:identity,target_generation:identity,
@@ -83,7 +85,7 @@ export class ScreenObservationRegistry {
     if(!this.entries.has(binding)&&this.entries.size>=32)throw new Error('SCREEN_READER_CAPACITY');
     this.entries.set(binding,{grant,owner,expiresAt:this.now()+grant.expires_in_ms});
   }
-  async observe(binding:string,owner:string,args:{reader_lease:string;timeout_ms:number;max_nodes:number;readiness?:ReadinessRequest},
+  async observe(binding:string,owner:string,args:{reader_lease:string;timeout_ms:number;max_nodes:number;readiness?:ReadinessRequest;tree_format?:'compact'|'json'|'both'},
     validate:()=>Promise<void>,signal?:AbortSignal,onDispatched?:()=>void):Promise<Record<string,unknown>> {
     this.prune();
     const entry=this.entries.get(binding);
@@ -137,7 +139,12 @@ export class ScreenObservationRegistry {
           node.confidence!==null||node.confidence_status!=='unavailable')throw new Error('SCREEN_OBSERVATION_PROTOCOL: unverified OCR provenance/confidence');
       } else throw new Error('SCREEN_OBSERVATION_PROTOCOL: unsupported/unverified source');
     }
-    return response;
+    // Formatting consumes only the authenticated, strictly validated receipt;
+    // it adds no provider call, native-parent inference or input authority.
+    const projected=args.tree_format?{...response,tree:projectScreenTree(response,args.tree_format)}:response;
+    if(this.entries.get(binding)!==entry||entry.expiresAt<=this.now())throw new Error('SCREEN_READER_STALE');
+    if(signal?.aborted)throw signal.reason??new Error('Screen observation cancelled');
+    return projected;
   }
 }
 

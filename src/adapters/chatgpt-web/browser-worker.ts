@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { observeChatGptAttachmentUploads } from "./attachment-upload";
 import { assertChatGptConnectorRoute } from "./connector-routing";
+import { chatGptSubmittedInputProjection } from './submitted-input-projection';
 import { chatGptResponseStructureLogEntries, chatGptResponseStructures } from "./browser-response-structure";
 import { BrowserDiagnosticHistory } from "./browser-diagnostic-history";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
@@ -1458,12 +1459,20 @@ interface ChatGptAcknowledgedMultipartStage {
   identities: string[];
 }
 
+interface ChatGptVerifiedDraft {
+  text: string;
+  connectorPaths: string[];
+}
+
 interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
   initialTurnIdentities: readonly string[];
   domCache: ChatGptSubmissionDomCache;
   submittedText?: string;
+  /** Same verified pre-Send draft, including selected connector labels; never a user-text guess. */
+  submittedRenderedDraft?: ChatGptVerifiedDraft;
+  userContentExpansionAttempted?: boolean;
   acceptedUserIdentity?: string;
   acknowledgedStages?: readonly ChatGptAcknowledgedMultipartStage[];
 }
@@ -2382,6 +2391,18 @@ export function insertPlainTextIntoComposer(element: HTMLElement, value: string)
     || !element.contains(selection.anchorNode)
   ) {
     return false;
+  }
+  const lines = value.split(/\r\n?|\n/);
+  if (lines.length >= 1_000) {
+    // Native insertText splits very large multiline edits paragraph by paragraph
+    // and can stall the renderer. Insert the same plain text as one escaped edit.
+    // Only fixed paragraph/line-break nodes are generated; user markup stays text.
+    // The caller must still verify the complete canonical readback before Send.
+    const html = lines.map((line, index) => {
+      const escaped = line.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      return index === 0 ? escaped : `<div>${escaped || "<br>"}</div>`;
+    }).join("");
+    return document.execCommand("insertHTML", false, html);
   }
   return document.execCommand("insertText", false, value);
 }
@@ -3368,12 +3389,7 @@ export class ChatGptBrowserWorker {
         throw new Error('ChatGPT recovery has no unique submitted user message');
       const candidate=candidates[0]!;
       const locator=page.locator(`[data-turn-key=${JSON.stringify(candidate.slice(acceptedPrefix.length))}]`);
-      const matches=await withChatGptBrowserObservationTimeout(withBrowserTurnAbort(locator.evaluate((group,submitted)=>{
-        const bubbles=group.querySelectorAll('[data-user-message-bubble]');
-        const contents=bubbles.length===1?bubbles[0]!.querySelectorAll<HTMLElement>('[data-search-result-target]'):[];
-        const normalize=(text:string)=>text.replace(/\r\n?/g,'\n');
-        return contents.length===1&&normalize(contents[0]!.innerText)===normalize(submitted);
-      },baseline.submittedText),signal));
+      const matches=await this.submittedUserMatches(locator,baseline,signal);
       if(!matches)throw new Error('ChatGPT recovery user message does not match the acknowledged submission');
       acceptedUser=candidate;
     }
@@ -3499,7 +3515,11 @@ export class ChatGptBrowserWorker {
       binding.identity,
       state.responseIdentities,
     );
-    const newUsers = state.userIdentities.filter(identity => !acceptedTurns.has(identity));
+    // A structural fallback group can already reserve both role identities before
+    // any user bubble exists. It is not a user acknowledgement. Until one is proven,
+    // validate every post-baseline user, even if its key appeared in that shell.
+    const newUsers = state.userIdentities.filter(identity => baseline.acceptedUserIdentity
+      ? !acceptedTurns.has(identity) : !baseline.initialTurnIdentities.includes(identity));
     if (newUsers.length > 0) {
       // Activity can unmount the accepted user group while it renders a temporary
       // assistant group. Its return must match the ID that acknowledged Send. If no
@@ -3510,30 +3530,30 @@ export class ChatGptBrowserWorker {
         && binding.identity.startsWith("group:assistant:")
         && user.startsWith("group:user:")
         && identity === `group:assistant:${user.slice("group:user:".length)}`
-        && !state.turnIdentities.includes(binding.identity)
+        && (identity === binding.identity || !state.turnIdentities.includes(binding.identity))
         && state.turnIdentities.every(turn => acceptedTurns.has(turn) || turn === user || turn === identity);
       let matches = false;
       if (replacement) {
         const locator = page.locator(chatGptAssistantTurnSelector(identity!));
         matches = baseline.acceptedUserIdentity
           ? user === baseline.acceptedUserIdentity
-          : Boolean(baseline.submittedText) && await withChatGptBrowserObservationTimeout(withBrowserTurnAbort(locator.evaluate((group, submitted) => {
-          const bubbles = group.querySelectorAll<HTMLElement>("[data-user-message-bubble]");
-          const contents = bubbles.length === 1
-            ? bubbles[0]!.querySelectorAll<HTMLElement>("[data-search-result-target]")
-            : [];
-          const normalize = (text: string) => text.replace(/\r\n?/g, "\n");
-          // The bubble also contains Show more and accessibility spacing. Only its
-          // observed message-content target represents the submitted prompt.
-          return contents.length === 1 && normalize(contents[0]!.innerText) === normalize(submitted);
-        }, baseline.submittedText!), signal));
+          : await this.submittedUserMatches(locator,baseline,signal);
         // The accepted user identity (or exact submitted text) establishes ownership.
         // Activity can replace its temporary group while still generating; requiring
         // a completed answer here mistakes that same unfinished turn for a foreign one.
       }
-      if (!matches) throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+      if (!matches) {
+        console.warn(`[chatgpt-web] submission_binding_owner ${JSON.stringify({
+          replacementEligible:Boolean(replacement),newUserCount:newUsers.length,
+          sameAssistantIdentity:identity===binding.identity,
+          originalBoundPresent:state.turnIdentities.includes(binding.identity),
+          acceptedUserKnown:Boolean(baseline.acceptedUserIdentity),
+          verifiedDraftAvailable:Boolean(baseline.submittedRenderedDraft),
+        })}`);
+        throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+      }
     }
-    if (!identity || identity === binding.identity) return binding;
+    if (!identity) return binding;
     return {
       identity,
       locator: page.locator(chatGptAssistantTurnSelector(identity)),
@@ -3541,35 +3561,85 @@ export class ChatGptBrowserWorker {
     };
   }
 
-  private async attachedPromptText(page: Page, abortSignal?: AbortSignal): Promise<string> {
+  private async submittedUserMatches(locator:Locator,baseline:ChatGptSubmissionBaseline,signal?:AbortSignal):Promise<boolean> {
+    if(!baseline.submittedText)return false;
+    const read=()=>withChatGptBrowserObservationTimeout(withBrowserTurnAbort(
+      locator.evaluate(chatGptSubmittedInputProjection,{kind:'user' as const,captureDraft:true}),signal));
+    const projection=await read();
+    const normalize=(text:string)=>text.replace(/\r\n?/g,'\n');
+    const actual=projection.draftText,draft=baseline.submittedRenderedDraft;
+    const sameConnectors=Boolean(draft)&&JSON.stringify(projection.connectorPaths)===JSON.stringify(draft!.connectorPaths);
+    const canonicalMatch=actual!==undefined&&this.promptTextEquivalent(normalize(baseline.submittedText),normalize(actual));
+    const draftMatch=Boolean(actual!==undefined&&draft&&this.promptTextEquivalent(normalize(draft.text),normalize(actual)));
+    const matches=projection.valid&&!(draft&&projection.connectorPaths.length&&!sameConnectors)
+      &&(canonicalMatch||sameConnectors&&draftMatch);
+    const proof={matches,bubbleCount:projection.bubbleCount,contentCount:projection.contentCount,
+      actualChars:actual?.length,canonicalChars:baseline.submittedText.length,draftChars:draft?.text.length,
+      canonicalPrefixChars:actual!==undefined?this.promptEquivalentPrefixLength(normalize(baseline.submittedText),normalize(actual)):undefined,
+      draftPrefixChars:actual!==undefined&&draft?this.promptEquivalentPrefixLength(normalize(draft.text),normalize(actual)):undefined,
+      actualConnectorCount:projection.connectorPaths.length,expectedConnectorCount:draft?.connectorPaths.length,
+      sameConnectors,canonicalMatch,draftMatch};
+    console.info(`[chatgpt-web] submission_binding_text ${JSON.stringify(proof)}`);
+    if(!matches&&projection.valid&&actual!==undefined&&actual.length<baseline.submittedText.length
+      &&!baseline.userContentExpansionAttempted&&(!draft||!projection.connectorPaths.length||sameConnectors)){
+      // Long user messages can be truncated in the rendered DOM. Inspect only the
+      // current group's one native expander, outside message content and forms.
+      // This is a read-only disclosure gesture, never a Send or a prefix proof.
+      const expand=locator.locator('[data-user-message-bubble]').getByRole('button',{name:/^Show more$/i}).filter({visible:true});
+      if(await expand.count()===1&&await expand.evaluate(node=>
+        !node.closest('[data-search-result-target]')&&node.getAttribute('type')!=='submit'
+        &&(!node.closest('form')||node.getAttribute('type')==='button')&&node.getAttribute('aria-expanded')!=='true')){
+        throwIfPromptAttachmentAborted(signal);
+        baseline.userContentExpansionAttempted=true;
+        console.info('[chatgpt-web] submission_binding_expand {"attempt":1}');
+        await withBrowserTurnAbort(expand.press('Enter',{timeout:2_000,signal}),signal);
+        const deadline=Date.now()+1_500;
+        for(;;){
+          const expanded=await read();
+          if(!expanded.valid||(expanded.draftText?.length??0)>=baseline.submittedText.length||Date.now()>=deadline)break;
+          await withBrowserTurnAbort(new Promise(resolve=>setTimeout(resolve,50)),signal);
+        }
+        // Re-read and verify the entire expanded body. Changed tails, aliases or
+        // ambiguous controls still fail, and this baseline never expands twice.
+        return this.submittedUserMatches(locator,baseline,signal);
+      }
+    }
+    return matches;
+  }
+
+  private async attachedPromptText(page: Page, abortSignal?: AbortSignal,
+    captureRenderedDraft?:(draft:ChatGptVerifiedDraft)=>void): Promise<string> {
     const composer = await this.activeComposer(page, 30_000, abortSignal);
-    return composer.evaluate(element => {
-      const clone = element.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll(
-        // Read message content, not icon titles, embedded CSS or scripts. Literal
-        // markup stays as text, and arbitrary non-editable content is still checked.
-        'svg, style, script, [data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]',
-      )
-        .forEach(part => part.remove());
-      return [...clone.childNodes]
-        .map(child => child.textContent ?? "")
-        .join("\n")
-        .trimStart();
-    }, undefined, { timeout: 20_000, signal: abortSignal });
+    const projection=await composer.evaluate(chatGptSubmittedInputProjection,
+      {kind:'composer' as const,captureDraft:Boolean(captureRenderedDraft)},{timeout:20_000,signal:abortSignal});
+    if(projection.draftText!==undefined)captureRenderedDraft?.({text:projection.draftText,connectorPaths:projection.connectorPaths});
+    return projection.canonical;
   }
 
   private async assertPromptAttached(
     page: Page,
     prompt: string,
     abortSignal?: AbortSignal,
+    baseline?:ChatGptSubmissionBaseline,
   ): Promise<void> {
+    if(baseline)delete baseline.submittedRenderedDraft;
     const deadline = Date.now() + 10_000;
     let observed = "";
     while (Date.now() < deadline) {
       throwIfPromptAttachmentAborted(abortSignal);
-      observed = await this.attachedPromptText(page, abortSignal);
+      let rendered:ChatGptSubmissionBaseline['submittedRenderedDraft'];
+      observed = await this.attachedPromptText(page, abortSignal,baseline?draft=>{rendered=draft;}:undefined);
       throwIfPromptAttachmentAborted(abortSignal);
-      if (this.promptTextEquivalent(prompt, observed)) return;
+      if (this.promptTextEquivalent(prompt, observed)) {
+        if(baseline){
+          // Decode only the complete canonical suffix that this exact integrity
+          // check verified. Intentional NBSP in the original task remains exact;
+          // only editor-produced whitespace encoding is restored to that task.
+          baseline.submittedRenderedDraft=rendered&&rendered.text.endsWith(observed)
+            ?{...rendered,text:rendered.text.slice(0,rendered.text.length-observed.length)+prompt}:rendered;
+        }
+        return;
+      }
       await withBrowserTurnAbort(
         new Promise(resolveSleep => setTimeout(resolveSleep, 50)),
         abortSignal,
@@ -5643,6 +5713,7 @@ export class ChatGptBrowserWorker {
               undefined,
               { onSubmitted: () => {recordAcceptedSend('readonly_stage',false);recordStageUsage?.();}, onSendActivated: async () => {
                 await this.assertSelectedEffort(page, mode);
+                await this.assertPromptAttached(page,stage.text,turn.abortSignal,stageBaseline);
                 submissionRejection.begin(page);
               } },
               undefined,
@@ -5824,7 +5895,7 @@ export class ChatGptBrowserWorker {
                 throw new ChatGptWebAdapterError('The selected Native2 connector changed before Send; the draft was not submitted.',
                   {status:409,errorType:'connector_error',code:'connector_selection_lost',retryable:false});
             }
-            await this.assertPromptAttached(page,finalPrompt,turn.abortSignal);
+            await this.assertPromptAttached(page,finalPrompt,turn.abortSignal,submissionBaseline);
             submissionRejection.begin(page);
             await turn.onSendActivated?.();
           } },

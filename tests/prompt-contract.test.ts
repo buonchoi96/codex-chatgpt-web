@@ -94,6 +94,23 @@ test("inline and staged history escape Markdown delimiters without changing deco
   expect(decoded.messages[1].content).toContain("\\u0060");
 });
 
+test("context JSON keeps angle tags and literal Windows slashes out of the rich-text lexer without changing decoded source", () => {
+  const source = {
+    text: '<environment_context>\n<cwd>F:\\Source Projects\\fixture</cwd>\n</environment_context>',
+    code: String.raw`Keep \u003c, \u0060, \\server\share, \"quotes\", and <tag attr="x"> exactly.`,
+    unicode: '中文 😀 \ud800',
+    '<literal-key>': String.raw`C:\fixture\path`,
+  };
+  const encoded = withoutRetiredTurnHandles(JSON.stringify(source));
+  expect(JSON.parse(encoded)).toEqual(source);
+  expect(encoded).not.toContain('<');
+  expect(encoded).not.toContain('>');
+  expect(encoded).not.toContain('\\\\');
+  expect(encoded).not.toContain(String.fromCharCode(92, 34));
+  expect(encoded).toContain('\\u003c');
+  expect(encoded).toContain('\\u005c');
+});
+
 test("history handle cleanup works on decoded text and preserves native call identities", () => {
   const call = `call_${"A".repeat(32)}`;
   const context = {
@@ -807,6 +824,35 @@ test("serialized history cannot feed code-fence backtracking into ChatGPT's link
   const encoded = withoutRetiredTurnHandles(JSON.stringify(original));
   expect(encoded).not.toContain("`");
   expect(JSON.parse(encoded)).toEqual(original);
+});
+
+test("native skill globs cannot gain Markdown escapes in serialized history", () => {
+  // Real native Web trace463087445e91 first differed at references/*.md.
+  // Its two literal stars align with the two extra post-Send code units.
+  const original={content:'Read references/*.md and docs/**/*.md. Keep 2 * 3 and **bold** literally.',
+    '*key*':[String.raw`\u002a`,String.raw`\*`,'星号 * 日本語']};
+  const encoded=withoutRetiredTurnHandles(JSON.stringify(original));
+  expect(encoded).not.toContain('*');
+  expect(encoded).toContain('\\u002a');
+  expect(JSON.parse(encoded)).toEqual(original);
+});
+
+test("inline and multipart preserve original globs while avoiding literal asterisks", () => {
+  const parsed=request('high');
+  parsed.context.messages[1]!.content='Read references/*.md and keep **literal** plus \\u002a unchanged.';
+  const caps={localToolsEnabled:true,solAvailable:true,extraHighAvailable:true,proAvailable:true};
+  const inline=compileChatGptWebPrompt(parsed,caps,'turn_12345678901234567890123456789012');
+  const envelope=inline.text.split('<codex_context_json>\n')[1]!.split('\n</codex_context_json>')[0]!;
+  expect(envelope).not.toContain('*');
+  expect(JSON.parse(envelope).messages[1].content).toBe(parsed.context.messages[1]!.content);
+  unavoidableMultipart(parsed);
+  const multipart=compileChatGptWebPrompt(parsed,caps,'turn_12345678901234567890123456789012',
+    {experimentalMultipartParts:CHATGPT_BIGGER_CONTEXT_PARTS});
+  expect(multipart.multipart).toBeDefined();
+  for(const part of multipart.multipart!.parts){expect(part).not.toContain('*');expect(()=>JSON.parse(part)).not.toThrow();}
+  expect(multipart.multipart!.parts.flatMap(part=>JSON.parse(part).records)
+    .filter((record:{kind:string})=>record.kind==='message').map((record:{message:unknown})=>record.message))
+    .toEqual(JSON.parse(envelope).messages);
 });
 
 test("inline and multipart transports preserve code while escaping its Markdown delimiters", () => {

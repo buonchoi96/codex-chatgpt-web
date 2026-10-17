@@ -752,7 +752,7 @@ describe("trusted Codex task environment continuity", () => {
     expect(backups).toHaveLength(1);
     expect(readFileSync(join(stateRoot, backups[0]!), "utf8")).toBe(corrupt);
     expect(Object.keys(JSON.parse(readFileSync(statePath, "utf8")).threads)).toEqual(["thread_current"]);
-    expect(new ChatGptThreadEnvironmentStore(statePath).resolve(continuation).cwd).toBe(root);
+    expect(() => new ChatGptThreadEnvironmentStore(statePath).resolve(continuation)).toThrow("missing cwd");
   });
 
   test("fresh trusted tasks do not erase unfamiliar or invalid permission records", () => {
@@ -778,11 +778,12 @@ describe("trusted Codex task environment continuity", () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "codex-chatgpt-thread-environment-"));
     temporaryRoots.push(stateRoot);
     const statePath = join(stateRoot, "thread-environments.json");
+    const store = new ChatGptThreadEnvironmentStore(statePath);
     const first = currentWire();
     const firstTools: CodexTool[] = [{ name: "first_tool", description: "first", parameters: { type: "object" } }];
     first.context.tools = firstTools;
 
-    expect(new ChatGptThreadEnvironmentStore(statePath).resolve(first).tools).toEqual(firstTools);
+    expect(store.resolve(first).tools).toEqual(firstTools);
     const onDisk = readFileSync(statePath, "utf8");
     expect(onDisk).toContain('"thread_current"');
     expect(onDisk).not.toContain("first_tool");
@@ -801,13 +802,55 @@ describe("trusted Codex task environment continuity", () => {
       }],
     };
 
-    expect(new ChatGptThreadEnvironmentStore(statePath).resolve(next)).toEqual({
+    expect(store.resolve(next)).toEqual({
       cwd: root,
       roots: [root],
       writableRoots: [root],
       sandboxPolicy: { type: "dangerFullAccess" },
       tools: nextTools,
     });
+
+    // Disk state remains useful for diagnostics, but a fresh process cannot turn it into authority.
+    const restarted = new ChatGptThreadEnvironmentStore(statePath);
+    expect(() => restarted.resolve(next)).toThrow("missing cwd");
+    restarted.resolve(currentWire({ threadId: "thread_unrelated" }));
+    expect(() => restarted.resolve(next)).toThrow("missing cwd");
+  });
+
+  test("verified in-memory authority expires and is bounded independently of persisted records", () => {
+    let now = 1_000;
+    const store = new ChatGptThreadEnvironmentStore(undefined, () => now);
+    for (let index = 0; index < 257; index++) {
+      store.resolve(currentWire({ threadId: `thread_bounded_${index}` }));
+    }
+
+    const continuation = (threadId: string): CodexParsedRequest => {
+      const request = currentWire({ threadId });
+      (request._rawBody as { input: unknown[] }).input = [{
+        type: "message", role: "user", content: [{ type: "input_text", text: "Continue" }],
+      }];
+      return request;
+    };
+    expect(() => store.resolve(continuation("thread_bounded_0"))).toThrow("missing cwd");
+    expect(store.resolve(continuation("thread_bounded_256")).cwd).toBe(root);
+
+    now += 31 * 24 * 60 * 60_000;
+    expect(() => store.resolve(continuation("thread_bounded_256"))).toThrow("missing cwd");
+  });
+
+  test("verified same-thread memory must agree with current native workspace and sandbox metadata", () => {
+    const store = new ChatGptThreadEnvironmentStore();
+    store.resolve(currentWire());
+
+    for (const changed of [
+      currentWire({ sandbox: "read-only" }),
+      currentWire({ workspace: resolve(root, "elsewhere") }),
+    ]) {
+      (changed._rawBody as { input: unknown[] }).input = [{
+        type: "message", role: "user", content: [{ type: "input_text", text: "Continue" }],
+      }];
+      expect(() => store.resolve(changed)).toThrow("Cached ChatGPT thread environment conflicts with current Codex");
+    }
   });
 
   test("does not borrow authority across threads or hide an invalid trusted update", () => {
@@ -1028,6 +1071,22 @@ describe("trusted Codex task environment continuity", () => {
     expect(new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request)).toEqual({
       cwd: root, roots: [root], writableRoots: [root], sandboxPolicy: { type: "dangerFullAccess" },
       tools: request.context.tools,
+    });
+  });
+
+  test("a current native rollout recovers authority after restart despite stale persisted diagnostics", () => {
+    const { codexHome, request } = resumedRootFixture();
+    const statePath = join(codexHome, "thread-environments.json");
+    const stale = resolve(root, "stale-cached-root");
+    writeFileSync(statePath, JSON.stringify({ version: 1, threads: {
+      [rolloutThreadId]: {
+        cwd: stale, roots: [stale], writableRoots: [stale],
+        sandboxPolicy: { type: "dangerFullAccess" }, updatedAt: Date.now(),
+      },
+    } }));
+
+    expect(new ChatGptThreadEnvironmentStore(statePath, Date.now, codexHome).resolve(request)).toMatchObject({
+      cwd: root, roots: [root], writableRoots: [root], sandboxPolicy: { type: "dangerFullAccess" },
     });
   });
 
@@ -1374,8 +1433,8 @@ describe("trusted Codex task environment continuity", () => {
           expect(next.sandboxPolicy).toEqual(initial.sandboxPolicy);
           expect(() => broker.updateEnvironment(token, next)).not.toThrow();
         }
-        expect(new ChatGptThreadEnvironmentStore(statePath, Date.now, codexHome).resolve(cachedFollowup).sandboxPolicy)
-          .toEqual(initial.sandboxPolicy);
+        expect(() => new ChatGptThreadEnvironmentStore(statePath, Date.now, codexHome).resolve(cachedFollowup))
+          .toThrow("missing cwd");
         writeRollout(!enabled);
         expect(() => broker.updateEnvironment(token, store.resolve(withoutEnvelope)))
           .toThrow("environment changed");

@@ -24,7 +24,9 @@ test("Luna Bigger Context reaches the adapter for every Free route and response 
       const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, input: "hello", stream }),
+        body: JSON.stringify({model,stream,
+          client_metadata:{'x-codex-turn-metadata':JSON.stringify({thread_id:`thread_luna_${mode}_${stream}_${model}`,turn_id:'turn_luna_fixture'})},
+          input:[{type:'message',role:'user',id:'msg_luna_fixture',content:[{type:'input_text',text:'hello'}]}]}),
       }), config, () => ({
         name: "luna-bigger-context-test",
         async runTurn(parsed, _incoming, emit) {
@@ -987,7 +989,7 @@ test("a restart recovery turn without a new user instruction fails terminally in
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: {
-      code: "invalid_request_error",
+      code: "REPLAY_PROVENANCE_UNVERIFIED",
       type: "invalid_request_error",
       message: "ChatGPT web current user message conflicts with native Codex turn_id metadata",
     },
@@ -1431,7 +1433,9 @@ test("a web page cannot start or control turns through the loopback route", asyn
     }),
   });
   const base = `http://127.0.0.1:${server.port}`;
-  const body = JSON.stringify({ model: "chatgpt-web/gpt-5.6-luna", input: "hello", stream: false });
+  const body = JSON.stringify({ model: "chatgpt-web/gpt-5.6-luna",stream:false,
+    client_metadata:{'x-codex-turn-metadata':JSON.stringify({thread_id:'thread_origin_fixture',turn_id:'turn_origin_fixture'})},
+    input:[{type:'message',role:'user',id:'msg_origin_fixture',content:[{type:'input_text',text:'hello'}]}]});
   try {
     for (const origin of ["https://attacker.example", `http://rebound.example:${server.port}`, "null"]) {
       for (const path of ["/v1/responses", "/v1/responses/compact", "/v1/alpha/search", "/admin/cancel-turns"]) {

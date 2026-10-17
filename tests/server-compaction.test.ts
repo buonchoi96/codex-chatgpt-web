@@ -92,6 +92,7 @@ for (const stream of [false, true]) test(`browser prompt-too-long auto compacts 
   const body = {
     model,
     stream,
+    client_metadata: {'x-codex-turn-metadata':JSON.stringify({thread_id:`thread_prompt_size_${stream}`,turn_id:'turn_prompt_size'})},
     input: [{
       type: "message",
       id: "msg_prompt_too_long_source",

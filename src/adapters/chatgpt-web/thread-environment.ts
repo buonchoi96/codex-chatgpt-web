@@ -11,6 +11,7 @@ import {
   extractChatGptTurnIdentity,
   extractChatGptThreadSpawnLineage,
   extractChatGptRootThreadMetadata,
+  type ChatGptRootThreadMetadata,
   hasCurrentChatGptEnvironmentContext,
   extractChatGptCalendarEnvironmentDelta,
   hasRawChatGptEnvironmentContext,
@@ -146,14 +147,74 @@ function sameAuthority(claim: ChatGptEnvironmentClaim, right: ChatGptTurnEnviron
         && left.sandboxPolicy.networkAccess === right.sandboxPolicy.networkAccess));
 }
 
+function assertMetadataMatchesAuthority(
+  metadata: Pick<ChatGptRootThreadMetadata, "sandboxType" | "workspaceRoots">,
+  environment: StoredThreadEnvironment,
+): void {
+  if (metadata.sandboxType === "platform"
+    ? environment.sandboxPolicy.type === "dangerFullAccess"
+    : environment.sandboxPolicy.type !== metadata.sandboxType) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex sandbox metadata");
+  }
+  if (metadata.workspaceRoots.length > 0
+    && !metadata.workspaceRoots.some(root => contains(root, environment.cwd))) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex workspace metadata");
+  }
+  if (metadata.workspaceRoots.some(root => !environment.roots.some(knownRoot => (
+    contains(knownRoot, root) || contains(root, knownRoot)
+  )))) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex workspace metadata");
+  }
+}
+
+function currentMetadataConstraints(
+  parsed: CodexParsedRequest,
+  threadId: string,
+): ChatGptRootThreadMetadata | undefined {
+  // Follow-up metadata often omits request_kind even though its sandbox/workspaces still
+  // constrain the current turn. Parse it only to narrow same-thread authority; it grants none.
+  const body = record(parsed._rawBody);
+  const clientMetadata = record(body?.client_metadata);
+  const encoded = clientMetadata?.["x-codex-turn-metadata"];
+  if (typeof encoded !== "string") return undefined;
+  let metadata: Record<string, unknown> | undefined;
+  try { metadata = record(JSON.parse(encoded)); } catch { return undefined; }
+  if (metadata?.thread_id !== threadId) return undefined;
+  if(metadata.workspaces!==undefined&&!record(metadata.workspaces))
+    throw new ChatGptWebAdapterError('Current Codex workspace metadata is malformed; supply an authentic Codex environment before retrying.',
+      {status:400,errorType:'invalid_request_error',code:'TRUSTED_CWD_MISSING_OR_UNVERIFIED',retryable:false});
+  const current = extractChatGptRootThreadMetadata(parsed);
+  if (current) return current;
+  const hasConstraints = metadata.sandbox_mode !== undefined || metadata.sandbox !== undefined
+    || metadata.workspaces !== undefined;
+  if (!hasConstraints) return undefined;
+
+  const constrainedBody = {
+    ...body,
+    client_metadata: {
+      ...clientMetadata,
+      "x-codex-turn-metadata": JSON.stringify({ ...metadata, request_kind: metadata.request_kind ?? "turn" }),
+    },
+  };
+  const constrainedRequest = { ...parsed, _rawBody: constrainedBody };
+  const constraints = extractChatGptRootThreadMetadata(constrainedRequest);
+  if (!constraints) {
+    throw new Error("Current Codex workspace or sandbox metadata cannot be validated against cached ChatGPT thread authority");
+  }
+  return constraints;
+}
+
 /**
  * Codex emits its trusted environment envelope when a task starts or its environment changes,
- * not on every follow-up. This store carries only that trusted authority across turns. Tool
- * declarations are always taken from the current request and are never persisted.
+ * not on every follow-up. Verified authority may carry across turns in this process; persisted
+ * records are diagnostic only. Tool declarations always come from the current request.
  */
 export class ChatGptThreadEnvironmentStore {
   private loaded = false;
   private readonly threads = new Map<string, StoredThreadEnvironment>();
+  // Persisted entries aid diagnosis and recovery inspection, but only a current verified
+  // environment in this process can mark a thread as an authority source.
+  private readonly verifiedThreads = new Map<string, number>();
 
   constructor(
     private readonly path?: string,
@@ -231,13 +292,20 @@ export class ChatGptThreadEnvironmentStore {
       // that proof, do not turn arbitrary history or an invalid update into cached authority.
       if (hasRawChatGptEnvironmentContext(parsed)) throw error;
       const sameThread = this.get(identity.threadId);
-      if (sameThread) return {
-        cwd: sameThread.cwd,
-        roots: sameThread.roots,
-        writableRoots: sameThread.writableRoots,
-        sandboxPolicy: sameThread.sandboxPolicy,
-        tools: parsed.context.tools ?? [],
-      };
+      if (sameThread) {
+        if (lineage) assertMetadataMatchesAuthority(lineage, sameThread);
+        else if (identity.threadId) {
+          const currentConstraints = currentMetadataConstraints(parsed, identity.threadId);
+          if (currentConstraints) assertMetadataMatchesAuthority(currentConstraints, sameThread);
+        }
+        return {
+          cwd: sameThread.cwd,
+          roots: sameThread.roots,
+          writableRoots: sameThread.writableRoots,
+          sandboxPolicy: sameThread.sandboxPolicy,
+          tools: parsed.context.tools ?? [],
+        };
+      }
 
       if (!lineage) throw error;
       const parent = this.get(lineage.parentThreadId);
@@ -267,13 +335,19 @@ export class ChatGptThreadEnvironmentStore {
 
   private get(threadId: string): StoredThreadEnvironment | undefined {
     this.load();
-    const stored = this.threads.get(threadId);
-    if (!stored) return undefined;
-    if (this.now() - stored.updatedAt > THREAD_ENVIRONMENT_TTL_MS) {
-      this.threads.delete(threadId);
-      this.persist();
+    const verifiedAt = this.verifiedThreads.get(threadId);
+    if (verifiedAt === undefined) return undefined;
+    if (this.now() - verifiedAt > THREAD_ENVIRONMENT_TTL_MS) {
+      this.verifiedThreads.delete(threadId);
       return undefined;
     }
+    const stored = this.threads.get(threadId);
+    if (!stored) return undefined;
+    this.threads.delete(threadId);
+    this.threads.set(threadId, stored);
+    this.verifiedThreads.delete(threadId);
+    // Reading previously verified authority is not a fresh verification event.
+    this.verifiedThreads.set(threadId, verifiedAt);
     return stored;
   }
 
@@ -283,10 +357,18 @@ export class ChatGptThreadEnvironmentStore {
     this.load(true);
     this.threads.delete(threadId);
     this.threads.set(threadId, authority(environment, this.now()));
+    this.verifiedThreads.delete(threadId);
+    this.verifiedThreads.set(threadId, this.now());
     while (this.threads.size > MAX_THREAD_ENVIRONMENTS) {
       const oldest = this.threads.keys().next().value as string | undefined;
       if (!oldest) break;
       this.threads.delete(oldest);
+      this.verifiedThreads.delete(oldest);
+    }
+    while (this.verifiedThreads.size > MAX_THREAD_ENVIRONMENTS) {
+      const oldest = this.verifiedThreads.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.verifiedThreads.delete(oldest);
     }
     this.persist();
   }
