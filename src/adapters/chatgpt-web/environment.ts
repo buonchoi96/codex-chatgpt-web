@@ -373,7 +373,22 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
     || (nativeRevision.turnId === undefined && newestUserIndex > newestCheckpointIndex)
     || (nativeRevision.turnId && !priorChatGptAbortedTurnIds(parsed).includes(nativeRevision.turnId)
       && isAuthenticatedNativeGoalContinuation(parsed, extractChatGptTurnIdentity(parsed), nativeRevision)));
-  const recovered = hasActiveSource ? undefined : recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
+  // A valid new steering revision still needs the exact completed checkpoint in
+  // instruction lineage (notably when v1 dropped a synthetic delegation).
+  // Only a stale native rollout lookup may be ignored for a separately authenticated
+  // active instruction; never promote that lookup into checkpoint evidence.
+  let recovered: ReturnType<typeof recoverCompactionInstruction>;
+  if (hasActiveSource) {
+    try {
+      recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
+    } catch (error) {
+      if (!(error instanceof ChatGptWebAdapterError)
+        || error.code !== "REPLAY_PROVENANCE_UNVERIFIED") throw error;
+      recovered = undefined;
+    }
+  } else {
+    recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
+  }
   const prefix = recovered?.sourceWasDelegation ? input.slice(0, recovered.summaryIndex) : [];
   const retained = prefix.map(value => userRevision(value, turnId, metadata)).filter(value => value !== undefined).at(-1);
   const recoverDelegation = recovered?.sourceWasDelegation && (!retained
