@@ -9,7 +9,7 @@ import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compactio
 import {parseRequest} from '../src/responses/parser';
 import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from '../src/adapters/chatgpt-web/codex-rollout-environment';
-import {resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
+import {isAuthenticatedNativeCompactionSource,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
 const owned:string[]=[];
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==';
@@ -604,7 +604,7 @@ test('compact reads a newly authenticated historical-turn source before trying a
   }
 });
 test.each(['counterfeit-source','newer-human','wrong-request-kind','wrong-model'] as const)(
-  'compact cannot reuse obsolete checkpoint to authenticate an invalid new source: %s',change=>{
+  'direct native compaction provenance rejects an invalid new source: %s',change=>{
   const f=recompactAfterStaleCheckpoint();
   const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
   if(change==='counterfeit-source'){
@@ -624,13 +624,10 @@ test.each(['counterfeit-source','newer-human','wrong-request-kind','wrong-model'
     (f.records.at(-1)!.payload as Record<string,unknown>).model='chatgpt-web/gpt-6-pro';
   }
   f.write();
-  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
-  try{
-    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow(/Replay provenance is unverified|Compaction source is not authenticated/);
-  }finally{
-    if(previous===undefined)delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME=previous;
-  }
+  const identity=extractChatGptTurnIdentity(f.parsed);
+  expect(isAuthenticatedNativeCompactionSource(f.parsed,identity,{
+    itemId:f.source.id,turnId:f.oldTurn,content:body.input.at(-1)!.content,
+  },{codexHome:f.home})).toBe(false);
 });
 test('an accepted source on the exact same native turn can restore a source when stale checkpoint lookup fails',()=>{
   const f=fixture();
