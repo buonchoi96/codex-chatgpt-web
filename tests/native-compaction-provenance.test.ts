@@ -1,5 +1,5 @@
 import {afterEach,expect,test} from 'bun:test';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,openSync,closeSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
@@ -8,7 +8,7 @@ import {recoverCompactionInstruction} from '../src/adapters/chatgpt-web/compacti
 import {encodeCompactionSummary,SUMMARY_PREFIX} from '../src/responses/compaction';
 import {parseRequest} from '../src/responses/parser';
 import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
-import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from '../src/adapters/chatgpt-web/codex-rollout-environment';
+import {inspectCurrentCodexRollout,latestNativeCompactionRecord,diagnoseLatestNativeCompactionSource} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {isAuthenticatedNativeCompactionSource,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
 
 const owned:string[]=[];
@@ -805,4 +805,23 @@ test.each(['altered-content','newer-human','missing-native-source','untyped-nati
       f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
     )).toThrow('latest_turn_mismatch');
   }
+});
+
+test('native compact mismatch diagnostics distinguish owner, content, newer instruction, and missing source',()=>{
+  const f=fixture();
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  f.write();
+  const check=(source:{id:string;turnId?:string;content:unknown})=>{
+    const fd=openSync(f.file,'r');
+    try{return diagnoseLatestNativeCompactionSource(fd,statSync(f.file).size,source);}
+    finally{closeSync(fd);}
+  };
+  const exact={id:f.source.id,turnId:f.oldTurn,content:f.source.content};
+  expect(check(exact)).toEqual({matches:true,reason:'matched'});
+  expect(check({...exact,turnId:f.turn}).reason).toBe('native_source_owner_differs');
+  expect(check({...exact,content:'tampered'}).reason).toBe('native_source_content_differs');
+  expect(check({...exact,id:'unknown'}).reason).toBe('source_not_in_native_rollout');
+  const later=structuredClone(f.source);later.id='newer_human';
+  f.records.splice(2,0,{type:'response_item',payload:later});f.write();
+  expect(check(exact).reason).toBe('superseded_by_newer_native_user');
 });

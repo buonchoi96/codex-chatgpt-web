@@ -317,64 +317,91 @@ export function verifyNativeGoalContinuationItems(
  * the claimed source. An intervening human instruction, missing source, or malformed record
  * must fail closed rather than rebinding a checkpoint to a different task.
  */
+export type LatestNativeCompactionSourceReason =
+  | "matched"
+  | "invalid_source_or_size"
+  | "native_read_failed"
+  | "native_record_oversize"
+  | "native_record_incomplete"
+  | "untyped_native_user_after_instruction"
+  | "native_user_identity_missing"
+  | "no_typed_native_user"
+  | "source_not_in_native_rollout"
+  | "superseded_by_newer_native_user"
+  | "native_source_owner_differs"
+  | "native_source_content_differs";
+
+/** Diagnostic classification only: no file path, instruction text, ids, or hashes
+ * are logged. A failed witness never grants permission to compact. */
+export function diagnoseLatestNativeCompactionSource(
+  fd: number, size: number,
+  source: { id: string; turnId?: string; content: unknown },
+): { matches: boolean; reason: LatestNativeCompactionSourceReason } {
+  const reject=(reason:LatestNativeCompactionSourceReason)=>({matches:false,reason});
+  if (size <= 0 || size > 256 * 1024 * 1024 || !source.id
+    || (source.turnId !== undefined && !source.turnId)) return reject("invalid_source_or_size");
+  let offset=0;
+  let pending=Buffer.alloc(0);
+  let latest: { id:string;turnId:string;content:unknown } | undefined;
+  let sawCandidateId=false;
+  while(offset<size){
+    const length=Math.min(ROLLOUT_READ_CHUNK_BYTES,size-offset);
+    const chunk=Buffer.alloc(length);
+    if(readSync(fd,chunk,0,length,offset)!==length)return reject("native_read_failed");
+    offset+=length;
+    const data=Buffer.concat([pending,chunk]);
+    let start=0;
+    for(let end=data.indexOf(0x0a);end>=0;end=data.indexOf(0x0a,start)){
+      const line=data.subarray(start,end);
+      start=end+1;
+      if(!line.length)continue;
+      if(line.length>MAX_ROLLOUT_JSON_LINE_BYTES)return reject("native_record_oversize");
+      const item=parseJsonLine(line);
+      const payload=record(item.payload);
+      if(item.type!=="response_item"||payload?.type!=="message"||payload.role!=="user")continue;
+      const metadata=record(payload.internal_chat_message_metadata_passthrough);
+      const kinds=metadata?.content_item_kinds;
+      const content=payload.content;
+      const bodyText=typeof content==="string"?content:
+        Array.isArray(content)&&content.every(part=>(
+          record(part)?.type==="input_text"&&typeof record(part)?.text==="string"
+        ))?content.map(part=>record(part)!.text).join("\n"):"";
+      const trimmed=bodyText.trim();
+      const nativeContext=/^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(trimmed)
+        ||/^<(environment_context|goal_context|turn_aborted|subagent_notification)>[\s\S]*<\/\1>$/.test(trimmed)
+        ||bodyText.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
+        ||trimmed==="[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
+      if(nativeContext)continue;
+      if(!Array.isArray(kinds)||!kinds.some(kind=>kind==="user.text"||kind==="user.image")){
+        if(latest!==undefined)return reject("untyped_native_user_after_instruction");
+        continue;
+      }
+      const id=payload.id,turnId=metadata?.turn_id;
+      if(typeof id!=="string"||!id||typeof turnId!=="string"||!turnId)
+        return reject("native_user_identity_missing");
+      if(id===source.id)sawCandidateId=true;
+      latest={id,turnId,content:payload.content};
+    }
+    pending=Buffer.from(data.subarray(start));
+    if(pending.length>MAX_ROLLOUT_JSON_LINE_BYTES)return reject("native_record_oversize");
+  }
+  if(pending.length!==0)return reject("native_record_incomplete");
+  if(latest===undefined)return reject("no_typed_native_user");
+  if(latest.id!==source.id)return reject(sawCandidateId
+    ?"superseded_by_newer_native_user":"source_not_in_native_rollout");
+  if(source.turnId!==undefined&&latest.turnId!==source.turnId)
+    return reject("native_source_owner_differs");
+  if(!isDeepStrictEqual(latest.content,source.content))
+    return reject("native_source_content_differs");
+  return {matches:true,reason:"matched"};
+}
+
+/** Only exact native user provenance authorizes a standalone compact. */
 export function verifyLatestNativeCompactionSource(
   fd: number, size: number,
   source: { id: string; turnId?: string; content: unknown },
 ): boolean {
-  // Only a typed native latest human item can authorize an ID-only replay
-  // lacking item-level turn ownership after a stopped Codex turn.
-  if (size <= 0 || size > 256 * 1024 * 1024 || !source.id
-    || (source.turnId !== undefined && !source.turnId)) return false;
-  let offset = 0;
-  let pending = Buffer.alloc(0);
-  let latest: { id: string; turnId: string; content: unknown } | undefined;
-  while (offset < size) {
-    const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, size - offset);
-    const chunk = Buffer.alloc(length);
-    if (readSync(fd, chunk, 0, length, offset) !== length) return false;
-    offset += length;
-    const data = Buffer.concat([pending, chunk]);
-    let start = 0;
-    for (let end = data.indexOf(0x0a); end >= 0; end = data.indexOf(0x0a, start)) {
-      const line = data.subarray(start, end);
-      start = end + 1;
-      if (!line.length) continue;
-      if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
-      const item = parseJsonLine(line);
-      const payload = record(item.payload);
-      if (item.type !== "response_item" || payload?.type !== "message" || payload.role !== "user") continue;
-      const metadata = record(payload.internal_chat_message_metadata_passthrough);
-      const kinds = metadata?.content_item_kinds;
-      const content = payload.content;
-      const bodyText = typeof content === "string" ? content
-        : Array.isArray(content) && content.every(part => (
-          record(part)?.type === "input_text" && typeof record(part)?.text === "string"
-        )) ? content.map(part => record(part)!.text).join("\n") : "";
-      const trimmed = bodyText.trim();
-      const nativeContext = /^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(trimmed)
-        || /^<(environment_context|goal_context|turn_aborted|subagent_notification)>[\s\S]*<\/\1>$/.test(trimmed)
-        || bodyText.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
-        || trimmed === "[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
-      // Native context fragments are not human instructions even when serialized as user.
-      if (nativeContext) continue;
-      if (!Array.isArray(kinds) || !kinds.some(kind => kind === "user.text" || kind === "user.image")) {
-        // An untyped native user item after our last proven human message might
-        // be a newer instruction. It must not silently preserve an older source.
-        if (latest !== undefined) return false;
-        continue;
-      }
-      const id = payload.id;
-      const turnId = metadata?.turn_id;
-      if (typeof id !== "string" || !id || typeof turnId !== "string" || !turnId) return false;
-      latest = { id, turnId, content: payload.content };
-    }
-    pending = Buffer.from(data.subarray(start));
-    if (pending.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
-  }
-  return pending.length === 0 && latest !== undefined
-    && latest.id === source.id
-    && (source.turnId === undefined || latest.turnId === source.turnId)
-    && isDeepStrictEqual(latest.content, source.content);
+  return diagnoseLatestNativeCompactionSource(fd,size,source).matches;
 }
 
 function verifyHistoricalEnvironmentMessages(
@@ -804,15 +831,16 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
         // A standalone compact is not always assigned a persisted turn_context before
         // its request is routed. The exact newest native human source is independently
         // verifiable from the same rollout; arbitrary older messages are never enough.
-        const authenticatedLatestHuman = options.compactionSource !== undefined
-          && verifyLatestNativeCompactionSource(fd, size, options.compactionSource);
-        if (!authenticatedLatestHuman) {
+        const sourceDiagnostic = options.compactionSource === undefined
+          ? undefined : diagnoseLatestNativeCompactionSource(fd, size, options.compactionSource);
+        if (sourceDiagnostic?.matches !== true) {
           // Diagnostically distinguish an absent source witness from an exact
           // native mismatch, without logging paths, message IDs or user text.
           console.warn("[chatgpt-web] native_rollout_source_mismatch " + JSON.stringify({
             compactionSourceProvided: options.compactionSource !== undefined,
             sourceOwnerProvided: options.compactionSource?.turnId !== undefined,
             latestNativeHumanMatches: false,
+            mismatchReason: sourceDiagnostic?.reason ?? "source_not_provided",
             indexedRollout: indexed.kind === "found",
           }));
           if (indexed.kind === "found") {
