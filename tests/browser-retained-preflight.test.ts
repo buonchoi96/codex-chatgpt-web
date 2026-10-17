@@ -44,3 +44,43 @@ test('refused tab retirement releases the prepared draft without starting Web Se
   )).rejects.toThrow('launcher refused retirement');
   expect(released).toBe(true);
 });
+
+test('helper preflight requests prepared_selected before waiting for its daemon ACK', async()=>{
+  const steps:string[]=[];
+  let resolveAck!: (value:{release:()=>void})=>void;
+  const ack=new Promise<{release:()=>void}>(resolve=>{resolveAck=resolve;});
+  const draft={release:()=>steps.push('released')};
+  const prepared=await preflightCanonicalBeforeRetainedRetirement(
+    async()=>{steps.push('prepare-await');return ack;},
+    async()=>{steps.push('retire');},
+    undefined,
+    async()=>{steps.push('prepared_selected');resolveAck(draft);},
+  );
+  expect(prepared).toBe(draft);
+  expect(steps).toEqual(['prepared_selected','prepare-await','retire']);
+  prepared.release();
+  expect(steps.at(-1)).toBe('released');
+});
+
+test('failed helper prompt selection never prepares or retires the retained conversation', async()=>{
+  const steps:string[]=[];
+  await expect(preflightCanonicalBeforeRetainedRetirement(
+    async()=>{steps.push('prepare');return {release(){}};},
+    async()=>{steps.push('retire');},
+    undefined,
+    async()=>{steps.push('prepared_selected');throw new Error('daemon preparation rejected');},
+  )).rejects.toThrow('daemon preparation rejected');
+  expect(steps).toEqual(['prepared_selected']);
+});
+
+test('aborted prompt selection is rejected before old retained tabs can be retired', async()=>{
+  const controller=new AbortController();
+  const steps:string[]=[];
+  await expect(preflightCanonicalBeforeRetainedRetirement(
+    async()=>{steps.push('prepare');return {release(){}};},
+    async()=>{steps.push('retire');},
+    controller.signal,
+    async()=>{steps.push('prepared_selected');controller.abort(new Error('operator cancelled'));},
+  )).rejects.toThrow('operator cancelled');
+  expect(steps).toEqual(['prepared_selected']);
+});

@@ -2465,7 +2465,13 @@ export async function preflightCanonicalBeforeRetainedRetirement<T extends { rel
   prepare: () => Promise<T>,
   retire: () => Promise<unknown>,
   signal?: AbortSignal,
+  // A launcher helper's prepare() waits for prepared_selected. The parent must
+  // request that selection *before* awaiting prepare(), otherwise both sides
+  // wait forever, even for a fresh Codex thread with no retained proof.
+  selectPrompt?: () => void | Promise<void>,
 ): Promise<T> {
+  signal?.throwIfAborted();
+  await selectPrompt?.();
   signal?.throwIfAborted();
   const prepared = await prepare();
   try {
@@ -5387,6 +5393,7 @@ export class ChatGptBrowserWorker {
     // A process restart or changed canonical ancestry invalidates suffix authority.
     // Retire the prior owned lease before acquiring a fresh canonical bootstrap.
     let canonicalPreflight: Awaited<ReturnType<BrowserTurn["prepare"]>> | undefined;
+    let canonicalPromptSelectedBeforeLease = false;
     if (turn.conversationKey && !turn.prepareResume && !turn.requireRetainedConversation) {
       // Never retire the last retained Web tab until the exact canonical
       // bootstrap has passed prompt compilation and transport preflight.
@@ -5398,6 +5405,12 @@ export class ChatGptBrowserWorker {
           turn.prepare,
           () => releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey!),
           turn.abortSignal ? AbortSignal.any([turn.abortSignal, stageSignal]) : stageSignal,
+          async () => {
+            // In helper mode prepare() is a deferred acknowledgement, not a
+            // compiler: onPreparedSelected(false) must initiate the daemon ACK.
+            await turn.onPreparedSelected?.(false);
+            canonicalPromptSelectedBeforeLease = true;
+          },
         ),
       );
       let released = false;
@@ -5473,7 +5486,9 @@ export class ChatGptBrowserWorker {
       if (reused && !turn.prepareResume) {
         throw new Error("Launcher reused a ChatGPT conversation without a continuation prompt");
       }
-      await turn.onPreparedSelected?.(reused);
+      // Preflight already selected and compiled this exact canonical draft.
+      // Asking again after the lease would send a duplicate selection request.
+      if (!canonicalPromptSelectedBeforeLease) await turn.onPreparedSelected?.(reused);
       heartbeatTimer = setInterval(sendHeartbeat, LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS);
       heartbeatTimer.unref?.();
       sendHeartbeat();
