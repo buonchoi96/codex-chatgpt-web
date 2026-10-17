@@ -345,7 +345,7 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
 /** A remote compaction may summarize an instruction from an earlier turn. */
 export function extractChatGptCompactionSourceRevision(
   parsed: CodexParsedRequest,
-  options: { recoverCheckpoint?: boolean } = {},
+  options: { recoverCheckpoint?: boolean; allowAbortedRetainedComparison?: boolean } = {},
 ): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
   const identity = extractChatGptTurnIdentity(parsed);
@@ -361,7 +361,7 @@ export function extractChatGptCompactionSourceRevision(
     && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId)
     ? trusted.revision : undefined;
   const source = revision ?? restored;
-  if (!source || (source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
+  if (!source || (!options.allowAbortedRetainedComparison && source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
     // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
     // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.
     throw new ChatGptWebAdapterError(
