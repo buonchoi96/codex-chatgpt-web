@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { isDeepStrictEqual } from "node:util";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isReadableCompactionSummaryText, OPAQUE_COMPACTION_NOTE } from "../../responses/compaction";
 import { isNativeAgentsMdContext } from "../../responses/native-context";
@@ -323,6 +324,18 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   // A fresh compact with a native-authenticated human source is independent of the
   // previous checkpoint. Do not let stale checkpoint recovery mask this newer source.
   const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, identity) : undefined;
+  if (latest && parsed._compactionRequest && latest.turnId && expectedTurnId
+    && latest.turnId !== expectedTurnId) {
+    // An older-turn item inside a compact request is NOT a source merely
+    // because Codex replayed it. The only alternatives to the direct native
+    // newest-human witness above are an exact authenticated checkpoint source.
+    if (recovered?.source.itemId === latest.itemId
+      && recovered.source.turnId === latest.turnId
+      && isDeepStrictEqual(recovered.source.content, latest.content)) return recovered.source;
+    throw new ChatGptWebAdapterError(
+      "Compaction source is not authenticated by the latest native human instruction or installed checkpoint.",
+      {status:400,errorType:"invalid_request_error",code:"REPLAY_PROVENANCE_UNVERIFIED",retryable:false});
+  }
   if (latest) {
     // A completed compact may have dropped a delegated synthetic instruction.
     return recovered?.sourceWasDelegation && latestIndex < recovered.summaryIndex
