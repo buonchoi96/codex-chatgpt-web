@@ -561,6 +561,7 @@ export class LauncherBrowserHelperClient {
               prepared: {
                 text: prepared.text,
                 images: prepared.images,
+                ...(prepared.turnToken ? { turnToken: prepared.turnToken } : {}),
                 ...(prepared.skillFiles ? { skillFiles: prepared.skillFiles } : {}),
                 ...(prepared.contextArchive ? {contextArchive:prepared.contextArchive} : {}),
                 ...(prepared.transportDecision?{transportDecision:prepared.transportDecision}:{}),

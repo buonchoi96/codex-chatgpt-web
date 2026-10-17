@@ -717,11 +717,21 @@ export async function responseRequest(
     const body = parsed._rawBody as { input?: unknown[] };
     // v1 installs the bounded user-message output, whereas v2 retains the original source.
     // Authenticate both exact producer-defined representations, never arbitrary rewrites.
-    const v1Source = extractChatGptCompactionSourceRevision({
-      ...parsed,
-      _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
-    });
-    rememberCompactionContinuation(parsed, identity, [source, v1Source], summary);
+    // Inspect the literal retained representation: an unchanged summary can match the
+    // previous checkpoint, but must not substitute its recovered delegation here.
+    let v1Source: ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined;
+    try {
+      v1Source = extractChatGptCompactionSourceRevision({
+        ...parsed,
+        _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
+      }, { recoverCheckpoint: false, allowAbortedRetainedComparison: true });
+    } catch (error) {
+      // A v1 compact can retain only an already-aborted older human instruction when
+      // the live task was a synthetic delegation. That retained instruction must not
+      // become an authenticated checkpoint source; the original delegation still is.
+      if (!(error instanceof ChatGptWebAdapterError) || error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING") throw error;
+    }
+    rememberCompactionContinuation(parsed, identity, v1Source ? [source, v1Source] : [source], summary);
   };
   if (compaction && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
     return formatErrorResponse(
