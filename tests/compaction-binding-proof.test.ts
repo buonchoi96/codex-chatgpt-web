@@ -11,7 +11,9 @@ function fixture(rendered: string) {
     valid: true, bubbleCount: 1, contentCount: 1, canonical: "",
     draftText: rendered, connectorPaths: [],
   };
-  const locator = { evaluate: async () => projection };
+  const locator = { evaluate: async () => projection,
+    locator: () => ({ getByRole: () => ({ filter: () => ({ count: async () => 0 }) }) }),
+  };
   return { worker, locator, baseline: {
     submittedText: message, submittedRenderedDraft: { text: message, connectorPaths: [] },
     compactionBindingProof: receipt,
