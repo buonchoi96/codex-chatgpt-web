@@ -304,10 +304,15 @@ export function verifyNativeGoalContinuationItems(
           || !isDeepStrictEqual(payload.content, goal.content)) return false;
         sawGoal = true;
       } else if (sawGoal) {
-        // A later human instruction supersedes this goal boundary. Assistant
-        // outputs and tool results do not, and are deliberately ignored.
-        const kinds = record(payload.internal_chat_message_metadata_passthrough)?.content_item_kinds;
-        if (Array.isArray(kinds) && kinds.some(kind => kind === "user.text" || kind === "user.image"))
+        // A later human or unknown user-role item can supersede this goal.
+        // Only explicitly typed, native-owned non-human context is harmless.
+        // Assistant output and tool results are not user-role items.
+        const native = record(payload.internal_chat_message_metadata_passthrough);
+        const kinds = native?.content_item_kinds;
+        if (typeof payload.id !== "string" || !payload.id
+          || typeof native?.turn_id !== "string" || !native.turn_id
+          || !Array.isArray(kinds) || kinds.length===0
+          || !kinds.every(kind=>typeof kind==="string"&&NATIVE_NONHUMAN_USER_KINDS.has(kind)))
           return false;
       }
     }

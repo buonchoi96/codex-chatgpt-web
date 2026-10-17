@@ -410,6 +410,22 @@ test('goal resume cannot borrow the older instruction when a later raw user item
   }
 });
 
+test('goal continuation provenance fails closed for an untyped native user after the goal receipt',()=>{
+  const f=goalContinuationFixture();
+  f.records.splice(f.records.length-1,0,{type:'response_item',payload:{
+    type:'message',role:'user',id:'untyped_after_goal',
+    content:[{type:'input_text',text:'Potential newer instruction'}],
+  }});
+  f.write();
+  const old=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(isAuthenticatedNativeGoalContinuation(f.parsed,extractChatGptTurnIdentity(f.parsed),
+      {itemId:f.source.id,turnId:f.oldTurn,content:f.source.content})).toBe(false);
+  }finally{
+    if(old===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=old;
+  }
+});
+
 test('goal continuation provenance rejects a later native human instruction after goal receipt',()=>{
   const f=goalContinuationFixture();
   const later={type:'message',role:'user',id:'native_human_after_goal',
