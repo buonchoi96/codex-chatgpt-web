@@ -536,6 +536,11 @@ test('an end-to-end compact source read survives a later turn_context when its n
     type:'message',role:'user',id:'msg_goal_context',
     content:[{type:'input_text',text:'<codex_internal_context source="goal">Continue active goal</codex_internal_context>'}],
   }});
+  f.records.push({type:'response_item',payload:{
+    type:'message',role:'user',id:'msg_old_readable_summary',
+    content:[{type:'input_text',text:SUMMARY_PREFIX+'\\nEarlier verified compact summary.'}],
+    internal_chat_message_metadata_passthrough:{content_item_kinds:['user.text']},
+  }});
   (f.records[3]!.payload as Record<string,unknown>).turn_id=randomUUID();
   f.write();
   const previous=process.env.CODEX_HOME;

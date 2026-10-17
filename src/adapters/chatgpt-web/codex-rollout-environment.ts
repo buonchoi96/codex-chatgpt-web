@@ -348,7 +348,8 @@ export function verifyLatestNativeCompactionSource(
           record(part)?.type === "input_text" && typeof record(part)?.text === "string"
         )) ? content.map(part => record(part)!.text).join("\n") : "";
       const nativeContext = /^<(?:codex_internal_context\s+source="[a-z][a-z0-9_]*"|environment_context|goal_context|turn_aborted|subagent_notification)\b/.test(bodyText.trim())
-        || bodyText.startsWith("The following is a summary of the conversation so far:");
+        || bodyText.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
+        || bodyText === "[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
       // Native context fragments are not human instructions even when serialized as user.
       if (nativeContext) continue;
       if (!Array.isArray(kinds) || !kinds.some(kind => kind === "user.text" || kind === "user.image")) {
