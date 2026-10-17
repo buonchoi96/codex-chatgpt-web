@@ -19,8 +19,8 @@ test("explicit orphan hook recovery requires an exact launcher-generated command
   const command = "codex-web-gpt verified hook";
   for (const original of [
     "",
-    'model = "gpt-5.6-sol"\\n',
-    'model = "gpt-5.6-sol"\\n\\n',
+    'model = "gpt-5.6-sol"\n',
+    'model = "gpt-5.6-sol"\n\n',
   ]) {
     const generated = installCodexInterruptHookCommand(original, configPath, command);
     const clean = removeExactOrphanedCodexInterruptHook(generated.text, configPath, command);
@@ -31,7 +31,7 @@ test("explicit orphan hook recovery requires an exact launcher-generated command
       generated.text, configPath, "a different runtime command",
     )).toThrow("without an exactly matching");
     expect(() => removeExactOrphanedCodexInterruptHook(
-      generated.text + "\\n" + generated.text, configPath, command,
+      generated.text + "\n" + generated.text, configPath, command,
     )).toThrow("ambiguous");
     expect(() => removeExactOrphanedCodexInterruptHook(
       generated.text.replace(generated.installed.trustedHash, "sha256:" + "0".repeat(64)),
