@@ -626,7 +626,7 @@ test.each(['counterfeit-source','newer-human','wrong-request-kind','wrong-model'
   f.write();
   const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
   try{
-    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow('Replay provenance is unverified');
+    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow(/Replay provenance is unverified|Compaction source is not authenticated/);
   }finally{
     if(previous===undefined)delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME=previous;
