@@ -112,7 +112,12 @@ export class RetainedConversationProofStore {
     // Everything before the terminal answer was committed from the final canonical tool round.
     // Skipping newly inserted messages could silently discard tool results or a foreign user turn.
     if (boundary !== proof.prefixLength || boundary === messages.length - 1) return { reason: "answer_boundary_changed" };
-    const answer = answerText(messages[boundary]!);
+    // An assistant tool call is not a final-answer boundary. Never skip a
+    // pending native tool operation just because it has an assistant role.
+    const terminal=messages[boundary]!;
+    if (terminal.role !== "assistant" || terminal.content.some(part => part.type === "toolCall"))
+      return { reason: "answer_boundary_changed" };
+    const answer = answerText(terminal);
     if (!answer || hash(answer) !== proof.answerHash) return { reason: "answer_changed" };
     return { reason: "verified", parsed: { ...parsed, context: { ...parsed.context, messages: messages.slice(boundary + 1) } } };
   }
