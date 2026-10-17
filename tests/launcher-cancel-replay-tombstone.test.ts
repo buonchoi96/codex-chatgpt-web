@@ -22,10 +22,10 @@ test("launcher cancel-all terminalizes the same native /goal execution without b
   expect(sessions.cancelAllForLauncher(reason)).toBe(1);
   expect(sessions.cancelAllForLauncher(reason)).toBe(0);
   expect(await old.browserOutcome).toMatchObject({ type: "error" });
-  expect(() => sessions.getOrCreate("old-native-execution", runtime)).toThrow("Active turn cancelled by launcher");
+  expect(() => sessions.getOrCreate("old-native-execution", runtime)).toThrow("This native Codex turn was cancelled by the launcher");
   await expect(sessions.getOrCreateAfterOwnerRetirement(
     "old-native-execution", "goal-owner", runtime,
-  )).rejects.toThrow("Active turn cancelled by launcher");
+  )).rejects.toThrow("This native Codex turn was cancelled by the launcher");
   expect(starts).toBe(1);
   // A new native task, not a replay of the cancelled request, can proceed.
   sessions.getOrCreate("new-native-execution", runtime, "new-trace", "goal-owner");

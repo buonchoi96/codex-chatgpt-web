@@ -564,7 +564,11 @@ export class ChatGptTurnSessions {
 
   private rememberLauncherCancellation(key: string, reason: Error): void {
     this.launcherCancelledKeys.delete(key);
-    this.launcherCancelledKeys.set(key, { error: reason, at: Date.now() });
+    this.launcherCancelledKeys.set(key, { error: new ChatGptWebAdapterError(
+      "This native Codex turn was cancelled by the launcher. Submit a new turn to continue; a cancelled request cannot be replayed.",
+      { status: 499, errorType: "client_closed_request", code: "client_cancelled",
+        retryable: false, cause: reason },
+    ), at: Date.now() });
     while (this.launcherCancelledKeys.size > this.launcherCancellationMaxKeys) {
       this.launcherCancelledKeys.delete(this.launcherCancelledKeys.keys().next().value!);
     }
