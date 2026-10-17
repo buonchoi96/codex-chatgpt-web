@@ -538,7 +538,7 @@ test('an end-to-end compact source read survives a later turn_context when its n
   }});
   f.records.push({type:'response_item',payload:{
     type:'message',role:'user',id:'msg_old_readable_summary',
-    content:[{type:'input_text',text:SUMMARY_PREFIX+'\\nEarlier verified compact summary.'}],
+    content:[{type:'input_text',text:SUMMARY_PREFIX+'\nEarlier verified compact summary.'}],
     internal_chat_message_metadata_passthrough:{content_item_kinds:['user.text']},
   }});
   (f.records[3]!.payload as Record<string,unknown>).turn_id=randomUUID();
