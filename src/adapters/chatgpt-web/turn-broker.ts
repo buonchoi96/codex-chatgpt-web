@@ -792,7 +792,7 @@ export class TurnBroker implements TurnBrokerOwner {
     this.channels.delete(token); this.pending.delete(token);
     if (channel.bindingId) {
       this.bindings.delete(channel.bindingId);
-      this.retire(this.retiredBindings, channel.bindingId, channel.traceId);
+      this.retire(this.retiredBindings, channel.bindingId, retirementDiagnostics(channel));
       delete channel.bindingId;
     }
     this.retire(this.retiredTokens, token, channel.traceId);
