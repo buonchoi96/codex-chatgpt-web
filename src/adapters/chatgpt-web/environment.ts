@@ -307,8 +307,16 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   const latestIndex = input.findLastIndex(value => userRevision(value, expectedTurnId, metadata) !== undefined);
   const latest = latestIndex >= 0 ? userRevision(input[latestIndex], expectedTurnId, metadata) : undefined;
   // Fresh human input (or a native-rollout-authenticated /goal continuation) supersedes a
-  // stale checkpoint. Never attempt unrelated native provenance before handling this source.
+  // stale checkpoint. Some native current user items have a server id but no item-level turn_id.
+  // Accept those only when they occur after the last checkpoint in the canonical input.
+  const checkpointIndex = input.findLastIndex(value => {
+    const item = record(value);
+    return item && (["compaction", "compaction_summary", "context_compaction"].includes(String(item.type))
+      || (item.type === "message" && item.role === "user"
+        && isReadableCompactionSummaryText(rawMessageText(item))));
+  });
   if (latest && (latest.turnId === expectedTurnId
+    || (latest.turnId === undefined && latestIndex > checkpointIndex)
     || (latest.turnId && expectedTurnId && !priorChatGptAbortedTurnIds(parsed).includes(latest.turnId)
       && isAuthenticatedNativeGoalContinuation(parsed, identity, latest)))) return latest;
   const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, identity) : undefined;
@@ -354,7 +362,15 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
     (value): value is ChatGptTurnUserRevision => value !== undefined).at(-1);
   // A new instruction or independently authenticated goal resumes without forcing
   // validation of an unrelated/stale historical compact record.
+  const newestUserIndex = input.findLastIndex(value => userRevision(value, turnId, metadata) !== undefined);
+  const newestCheckpointIndex = input.findLastIndex(value => {
+    const item = record(value);
+    return item && (["compaction", "compaction_summary", "context_compaction"].includes(String(item.type))
+      || (item.type === "message" && item.role === "user"
+        && isReadableCompactionSummaryText(rawMessageText(item))));
+  });
   const hasActiveSource = nativeRevision && (nativeRevision.turnId === turnId
+    || (nativeRevision.turnId === undefined && newestUserIndex > newestCheckpointIndex)
     || (nativeRevision.turnId && !priorChatGptAbortedTurnIds(parsed).includes(nativeRevision.turnId)
       && isAuthenticatedNativeGoalContinuation(parsed, extractChatGptTurnIdentity(parsed), nativeRevision)));
   const recovered = hasActiveSource ? undefined : recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));

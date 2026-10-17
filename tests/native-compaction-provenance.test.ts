@@ -436,3 +436,20 @@ test('a native goal fragment without an item turn owner is authenticated by its 
     else process.env.CODEX_HOME=prior;
   }
 });
+
+test('an id-only new human message following a compact supersedes stale native provenance',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  const fresh={type:'message',role:'user',id:'msg_id_only_fresh',
+    content:[{type:'input_text',text:'Continue with this new instruction.'}]};
+  body.input.push(fresh);
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try {
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(fresh.content);
+  } finally {
+    if(prior===undefined)delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME=prior;
+  }
+});
