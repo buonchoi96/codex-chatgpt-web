@@ -144,6 +144,43 @@ export function installCodexInterruptHookCommand(
   };
 }
 
+/**
+ * Recover only a byte-for-byte launcher-generated hook when the old integration
+ * journal is missing and the user explicitly selected route replacement.
+ * A marker, command resemblance or TOML trust entry alone is not ownership.
+ * This never rewrites an unrecognized hook or other user configuration.
+ */
+export function removeExactOrphanedCodexInterruptHook(
+  text: string,
+  configPath: string,
+  command: string,
+): string {
+  if (!text.includes(MANAGED_INTERRUPT_HOOK_START) && !text.includes(MANAGED_INTERRUPT_HOOK_END)) {
+    return text;
+  }
+  if (managedMarkerCount(text) !== 1 || text.split(MANAGED_INTERRUPT_HOOK_END).length !== 2) {
+    throw new Error("Codex config contains ambiguous interrupt hook markers; refusing automatic recovery");
+  }
+  const markerAt = text.indexOf(MANAGED_INTERRUPT_HOOK_START);
+  // installCodexInterruptHookCommand adds at most two line endings before the marker.
+  // Reconstruct its exact output, including the state key and trusted command hash.
+  for (let before = markerAt; before >= Math.max(0, markerAt - 4); before -= 1) {
+    const padding = text.slice(before, markerAt);
+    if (!/^(?:\\r\\n|\\n|\\r)*$/.test(padding)) continue;
+    const baseline = text.slice(0, before);
+    try {
+      if (installCodexInterruptHookCommand(baseline, configPath, command).text === text) {
+        return baseline;
+      }
+    } catch {
+      // A malformed baseline cannot establish ownership.
+    }
+  }
+  throw new Error("Codex config contains an interrupt hook marker without an exactly matching "
+    + "launcher-generated command and trust state; refusing automatic recovery. "
+    + "Preserve config.toml and recover from a known-good backup.");
+}
+
 type SourceRange = { start: number; end: number };
 type HookDocument = { hooks?: { Interrupt?: unknown[]; state?: Record<string, unknown> } };
 
