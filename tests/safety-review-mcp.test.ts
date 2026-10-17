@@ -2,6 +2,8 @@ import {expect,test} from 'bun:test';
 import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+// macOS CI TMPDIR can exceed the 103-byte Unix-domain socket pathname limit.
+const shortTmpDir = process.platform === 'win32' ? tmpdir() : '/tmp';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -12,10 +14,10 @@ import {TurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 import {defaultBrokerEndpoint} from '../src/config';
 
 async function fixture(safe=false){
- const dir=mkdtempSync(join(tmpdir(),'cgw-review-mcp-')),file=join(dir,'ledger.json');
+ const dir=mkdtempSync(join(shortTmpDir,'cgw-review-mcp-')),file=join(dir,'ledger.json');
  const ledger=new BlockedOperationLedger(file),scope={cwd:process.cwd(),roots:[process.cwd()]};
  const record=ledger.recordSafetyRefusal({tool:'exec_command',arguments:{cmd:'PRIVATE_INERT_COMMAND'},owner:'fixture-previous-binding',targetScope:scope,affectedGoalRequirement:'SAFE-P0-02'});
- const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(tmpdir(),`review-${crypto.randomUUID()}`)));
+ const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(shortTmpDir,`review-${crypto.randomUUID()}`)));
  const environment={...scope,writableRoots:[],sandboxPolicy:{type:'readOnly' as const,networkAccess:false},tools:[]};
  const token=safe?await broker.registerSafe(environment,'n'.repeat(43)):await broker.register(environment,30000);
  if(safe)broker.confirmSafeTurnSent(token,'n'.repeat(43)); // Simulated manual Send receipt, no browser action.
@@ -71,7 +73,7 @@ test('safe-contract review requires the existing manual start and settles its ac
 },10000);
 
 test('actual MCP stdio restart resumes a scoped review page without execution or ledger mutation',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'cgw-review-stdio-')),home=join(dir,'isolated-home'),file=join(home,'runtime','blocked-operations.json');
+ const dir=mkdtempSync(join(shortTmpDir,'cgw-review-stdio-')),home=join(dir,'isolated-home'),file=join(home,'runtime','blocked-operations.json');
  const ledger=new BlockedOperationLedger(file),scope={cwd:dir,roots:[dir]};
  const ids=Array.from({length:23},(_,i)=>ledger.recordSafetyRefusal({tool:'exec_command',arguments:{cmd:`PRIVATE_FIXTURE_${i}`},owner:'fixture',targetScope:scope,affectedGoalRequirement:'SAFE-P0-02'}).blocker_id);
  const before=readFileSync(file,'utf8'),broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(dir,'broker')));
