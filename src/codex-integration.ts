@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AppConfig } from "./config";
 import { getConfigPath, loadConfig, saveConfig } from "./config";
-import { installCodexInterruptHook, installCodexInterruptHookCommand } from "./codex-interrupt-hook";
+import { codexInterruptHookCommand, installCodexInterruptHook, installCodexInterruptHookCommand,
+  removeExactOrphanedCodexInterruptHook } from "./codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   getCodexConfigPath,
@@ -215,7 +216,9 @@ export function preflightCodexIntegration(
     );
     return;
   }
-  let baseline = currentText;
+  let baseline = !existing && options.replaceExistingRoute === true
+    ? removeExactOrphanedCodexInterruptHook(currentText, configPath, codexInterruptHookCommand(config))
+    : currentText;
   if (existing?.version === 2) {
     if (existsSync(existing.catalogPath) && sha256(readFileSync(existing.catalogPath)) !== existing.catalogSha256) {
       throw new Error(`Managed legacy catalog changed after setup; refusing migration: ${existing.catalogPath}`);
@@ -310,7 +313,9 @@ export function installCodexIntegration(
     return updated;
   }
 
-  let baseline = currentText;
+  let baseline = !existing && options.replaceExistingRoute === true
+    ? removeExactOrphanedCodexInterruptHook(currentText, configPath, codexInterruptHookCommand(config))
+    : currentText;
   if (existing?.version === 2) {
     if (existsSync(existing.catalogPath) && sha256(readFileSync(existing.catalogPath)) !== existing.catalogSha256) {
       throw new Error(`Managed legacy catalog changed after setup; refusing migration: ${existing.catalogPath}`);
