@@ -317,6 +317,13 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   });
   if (latest && (latest.turnId === expectedTurnId
     || (latest.turnId === undefined && latestIndex > checkpointIndex)
+    || (latest.itemId && parsed._compactionRequest
+      && latest.turnId === undefined && latestIndex <= checkpointIndex
+      // Native replay can strip item-level turn_id from the newest real human
+      // instruction while preserving a previous compact checkpoint after it.
+      // Do not consult that obsolete checkpoint first: authenticate the exact
+      // ID and full content against the latest *typed* human rollout item.
+      && isAuthenticatedNativeCompactionSource(parsed, identity, latest))
     || (latest.turnId && expectedTurnId && !priorChatGptAbortedTurnIds(parsed).includes(latest.turnId)
       && (isAuthenticatedNativeGoalContinuation(parsed, identity, latest)
         || isAuthenticatedNativeCompactionSource(parsed, identity, latest))))) return latest;

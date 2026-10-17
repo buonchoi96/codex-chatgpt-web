@@ -555,6 +555,53 @@ test('an end-to-end compact source read survives a later turn_context when its n
   }
 });
 
+test('standalone compact authenticates an ownerless latest native human preceding an old checkpoint',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const metadata=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...metadata,request_kind:'compaction'});
+  const ownerless=structuredClone(f.source) as Record<string,unknown>;
+  delete ownerless.internal_chat_message_metadata_passthrough;
+  body.input.unshift(ownerless);
+  f.parsed._compactionRequest=true;
+  // Only the authentic native rollout, not an ID-only request, supplies the
+  // real source owner. This remains valid even with a newer turn_context.
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(extractChatGptCompactionSourceRevision(f.parsed)).toEqual({
+      content:f.source.content,itemId:f.source.id,
+    });
+  }finally{
+    if(prior===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=prior;
+  }
+});
+
+test('ownerless human compact source is rejected when newer native human supersedes it',()=>{
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const metadata=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...metadata,request_kind:'compaction'});
+  const ownerless=structuredClone(f.source) as Record<string,unknown>;
+  delete ownerless.internal_chat_message_metadata_passthrough;
+  body.input.unshift(ownerless);
+  f.parsed._compactionRequest=true;
+  const newer=structuredClone(f.source);newer.id='msg_subsequent_native_human';
+  newer.content=[{type:'input_text',text:'A different newer instruction'}];
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)},
+    {type:'response_item',payload:newer});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  const prior=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try{
+    expect(()=>extractChatGptCompactionSourceRevision(f.parsed)).toThrow('latest_turn_mismatch');
+  }finally{
+    if(prior===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=prior;
+  }
+});
+
 test('a later untyped native user item cannot silently reinstate the earlier compact source',()=>{
   const f=fixture();
   const body=f.parsed._rawBody as {input:unknown[];client_metadata:Record<string,string>};
