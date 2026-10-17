@@ -2452,6 +2452,27 @@ export function insertPlainTextIntoComposer(element: HTMLElement, value: string)
   return document.execCommand("insertText", false, value);
 }
 
+/**
+ * A rejected canonical bootstrap must not destroy a still-owned retained Web
+ * conversation. Check the transport compiler before relinquishing the tab.
+ * The compiled draft is not submitted here; the canonical history remains
+ * authoritative and no response/tool action has been replayed.
+ */
+export async function preflightCanonicalBeforeRetainedRetirement(
+  prepare: () => Promise<{ release: () => void }>,
+  retire: () => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const prepared = await prepare();
+  try {
+    signal?.throwIfAborted();
+  } finally {
+    prepared.release();
+  }
+  await retire();
+}
+
 export class ChatGptBrowserWorker {
   static forProvider(provider: CodexProviderConfig): ChatGptBrowserWorker {
     const config = resolveBrowserConfig(provider);
@@ -5359,7 +5380,15 @@ export class ChatGptBrowserWorker {
     // A process restart or changed canonical ancestry invalidates suffix authority.
     // Retire the prior owned lease before acquiring a fresh canonical bootstrap.
     if (turn.conversationKey && !turn.prepareResume && !turn.requireRetainedConversation) {
-      await releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey);
+      // An over-budget canonical prompt can fail before Web Send. If we retire
+      // the last retained tab first, that failure irreversibly loses the only
+      // currently accessible browser context. Validate the canonical bootstrap
+      // before retiring the tab, and never treat its preparation as a Send.
+      await preflightCanonicalBeforeRetainedRetirement(
+        turn.prepare,
+        () => releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey!),
+        turn.abortSignal,
+      );
     }
 
     const lease = await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
