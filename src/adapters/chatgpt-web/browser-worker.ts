@@ -1256,6 +1256,9 @@ export function resolveChatGptWebMultipartStagingMode(
 }
 
 export const browserStageTimeouts = {
+  // The helper/daemon prompt selection and canonical preparation handshake are
+  // pre-Send operations. A dead broker/compiler must not leave Codex Working forever.
+  promptPreparation: 120_000,
   browserPage: 60_000,
   temporaryChatPreparation: 150_000,
   effortSelection: 120_000,
@@ -5387,10 +5390,15 @@ export class ChatGptBrowserWorker {
     if (turn.conversationKey && !turn.prepareResume && !turn.requireRetainedConversation) {
       // Never retire the last retained Web tab until the exact canonical
       // bootstrap has passed prompt compilation and transport preflight.
-      const ready = await preflightCanonicalBeforeRetainedRetirement(
-        turn.prepare,
-        () => releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey!),
-        turn.abortSignal,
+      const ready = await this.runStage(
+        turn.traceId,
+        "canonical_preflight",
+        browserStageTimeouts.promptPreparation,
+        stageSignal => preflightCanonicalBeforeRetainedRetirement(
+          turn.prepare,
+          () => releaseLauncherRetainedConversation(this.config.browserHostDescriptorPath!, turn.conversationKey!),
+          turn.abortSignal ? AbortSignal.any([turn.abortSignal, stageSignal]) : stageSignal,
+        ),
       );
       let released = false;
       canonicalPreflight = {
@@ -5553,7 +5561,18 @@ export class ChatGptBrowserWorker {
     const requestedMode = resolveChatGptWebModelMode(turn.modelId, turn.reasoning, browserCapabilities);
     const prepare = reuseConversation ? turn.prepareResume : turn.prepare;
     if (!prepare) throw new Error("The retained ChatGPT conversation has no continuation prompt");
-    const prepared = await prepare();
+    // This boundary previously awaited the launcher -> daemon preparation ACK without
+    // any stage deadline or browser diagnostics. A broken IPC/broker handshake could
+    // keep the native turn Working indefinitely without ever reaching browser_page.
+    const prepared = await this.runStage(
+      turn.traceId,
+      "prompt_preparation",
+      browserStageTimeouts.promptPreparation,
+      stageSignal => withBrowserTurnAbort(
+        prepare(),
+        turn.abortSignal ? AbortSignal.any([turn.abortSignal, stageSignal]) : stageSignal,
+      ),
+    );
     const diagnostics = new ChatGptBrowserDiagnostics(
       turn.traceId,
       this.config.browserDiagnosticsPath ?? join(getConfigDir(), "diagnostics", "browser-turns"),
