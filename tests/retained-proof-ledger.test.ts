@@ -28,6 +28,9 @@ test('archive-style retained proof survives daemon restart without storing canon
   expect(raw).not.toContain('Completed previous turn');
   expect(new RetainedConversationProofStore(()=>110,()=>f.file).check(f.key,f.next).parsed?.context.messages)
     .toEqual(f.next.context.messages.slice(2));
+  // A goal may spend hours in a single browser turn before the next native Send.
+  expect(new RetainedConversationProofStore(()=>2*60*60_000+100,()=>f.file).check(f.key,f.next).reason)
+    .toBe('verified');
   f.next.context.messages[0]!.timestamp=999;
   expect(new RetainedConversationProofStore(()=>120,()=>f.file).check(f.key,f.next).reason).toBe('verified');
   f.next.context.messages[0]!.content='tampered';
