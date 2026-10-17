@@ -4396,7 +4396,7 @@ export class ChatGptBrowserWorker {
         activeToolCalls: externalToolCallsInFlight,
         currentText: snapshot.visibleText,
         activityText: JSON.stringify(snapshot.traceBlocks
-          .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+          .filter(block => block.kind === "commentary")
           .map(block => [block.kind, block.text])),
       });
       if (running || responseStreamActive) generation?.progress();
@@ -6210,7 +6210,7 @@ export class ChatGptBrowserWorker {
             activeToolCalls: (turn.externalProgress?.snapshot().activeToolCalls ?? 0) > 0,
             currentText: snapshot.visibleText,
             activityText: JSON.stringify(snapshot.traceBlocks
-              .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+              .filter(block => block.kind === "commentary")
               .map(block => [block.kind, block.text])),
           });
           const composerReady = await this.activeComposer(page, 1_000, originalAbortSignal)
@@ -6594,7 +6594,7 @@ export class ChatGptBrowserWorker {
           activeToolCalls: externalToolCallsInFlight,
           currentText: snapshot.visibleText,
           activityText: JSON.stringify(snapshot.traceBlocks
-            .filter(block => block.kind === "reasoning" || block.kind === "commentary")
+            .filter(block => block.kind === "commentary")
             .map(block => [block.kind, block.text])),
         });
         if (running || responseStreamActive) generation.progress();
