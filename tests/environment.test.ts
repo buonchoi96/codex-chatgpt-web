@@ -1502,7 +1502,7 @@ describe("trusted Codex task environment continuity", () => {
   }
 
   // Reproduction from @itruonghai in PR #728, with additional grant-boundary checks.
-  test("steering accepts a native output write root beyond the workspace roots", () => {
+  for (const declaredRoots of [true, false]) test(`steering accepts native output grants with ${declaredRoots ? "declared" : "omitted"} rollout workspace roots`, () => {
     const { codexHome, request, body, rolloutPath, environment, auxiliary } = steeredRolloutFixture(false, []);
     const output = join(codexHome, "visualizations", "current-task");
     environment.content[1]!.text = environment.content[1]!.text.replace(
@@ -1520,7 +1520,7 @@ describe("trusted Codex task environment continuity", () => {
     writeFileSync(rolloutPath, [
       { type: "session_meta", payload: { id: rolloutThreadId, source: "vscode" } },
       childTurnContext(rolloutTurnId, {
-        workspace_roots: [root, auxiliary],
+        workspace_roots: declaredRoots ? [root, auxiliary] : undefined,
         sandbox_policy: { type: "workspace-write", writable_roots: [auxiliary, output], network_access: false },
         permission_profile: { type: "managed", file_system: { type: "restricted", entries }, network: "restricted" },
         file_system_sandbox_policy: { kind: "restricted", entries },
@@ -1528,7 +1528,7 @@ describe("trusted Codex task environment continuity", () => {
     ].map(value => JSON.stringify(value)).join("\n") + "\n");
 
     const actual = new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request);
-    expect(actual.roots).toEqual([root, auxiliary]);
+    expect(actual.roots).toEqual(declaredRoots ? [root, auxiliary] : [root]);
     expect(actual.writableRoots).toEqual([root, auxiliary, output]);
     expect(actual.sandboxPolicy).toEqual({
       type: "workspaceWrite", writableRoots: [root, auxiliary, output], networkAccess: false,
