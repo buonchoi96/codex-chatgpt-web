@@ -650,3 +650,51 @@ test('an accepted source on the exact same native turn can restore a source when
     else process.env.CODEX_HOME=previous;
   }
 });
+
+/** A stopped long-running goal may leave a standalone /compact request whose
+ * newest human item has a native id but no item-level owner. The owning rollout
+ * is the only authority allowed to resolve that owner, not the request itself. */
+function ownerlessPostAbortCompact(){
+  const f=fixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[];client_metadata:Record<string,string>};
+  const metadata=JSON.parse(body.client_metadata['x-codex-turn-metadata']!);
+  body.client_metadata['x-codex-turn-metadata']=JSON.stringify({...metadata,request_kind:'compaction'});
+  f.parsed._compactionRequest=true;
+  const ownerless=structuredClone(f.source) as Record<string,unknown>;
+  delete ownerless.internal_chat_message_metadata_passthrough;
+  body.input.push(ownerless);
+  f.records.splice(1,0,{type:'response_item',payload:structuredClone(f.source)});
+  (f.records.at(-1)!.payload as Record<string,unknown>).turn_id=randomUUID();
+  f.write();
+  return f;
+}
+
+test('post-abort compact authenticates an ownerless input only through the latest exact native human',()=>{
+  const f=ownerlessPostAbortCompact();
+  expect(resolveNativeCompactionSource(
+    f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
+  )?.source).toEqual({content:f.source.content,turnId:f.oldTurn,itemId:f.source.id});
+});
+test.each(['altered-content','newer-human','missing-native-source','untyped-native-source','ordinary-replay'] as const)(
+  'post-abort compact fails closed without latest native human proof: %s',change=>{
+  const f=ownerlessPostAbortCompact();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  if(change==='altered-content'){
+    body.input.at(-1)!.content=[{type:'input_text',text:'Altered source'}];
+  }
+  if(change==='newer-human'){
+    const newer=structuredClone(f.source);
+    newer.id='msg_newer_human';
+    newer.content=[{type:'input_text',text:'Newer task, not the compact source'}];
+    f.records.splice(f.records.length-1,0,{type:'response_item',payload:newer});
+  }
+  if(change==='missing-native-source')f.records.splice(1,1);
+  if(change==='untyped-native-source'){
+    delete (f.records[1]!.payload as Record<string,unknown>).internal_chat_message_metadata_passthrough;
+  }
+  if(change==='ordinary-replay')f.parsed._compactionRequest=false;
+  f.write();
+  expect(()=>resolveNativeCompactionSource(
+    f.parsed,extractChatGptTurnIdentity(f.parsed),{codexHome:f.home},
+  )).toThrow('latest_turn_mismatch');
+});

@@ -191,13 +191,23 @@ export function resolveNativeCompactionSource(parsed:CodexParsedRequest,identity
   // Only a native-owned source item in this exact request can name that alternate
   // turn, and the installed checkpoint must still match byte-for-byte below.
   const nativeSource = parsed._compactionRequest
-    ? input.map(item => userRevision(item, identity.turnId)).filter(
-      (value): value is ChatGptTurnUserRevision => value !== undefined).at(-1)
-    : undefined;
+    ? input.flatMap(item => {
+      const message = record(item);
+      // A tool result or goal-control payload cannot attest to the human
+      // instruction that preceded the stopped native turn.
+      if (message?.type !== 'message' || message.role !== 'user') return [];
+      const revision = userRevision(item, identity.turnId);
+      return revision?.itemId ? [revision] : [];
+    }).at(-1) : undefined;
   const compactionSourceTurnId = nativeSource?.turnId && nativeSource.turnId !== identity.turnId
     ? nativeSource.turnId : undefined;
-  const compactionSource = nativeSource?.itemId && nativeSource.turnId
-    ? { id: nativeSource.itemId, turnId: nativeSource.turnId, content: nativeSource.content } : undefined;
+  // A current compact request may replay an ID-only user item after a cancelled
+  // turn: the exact most-recent persisted native human item establishes its owner.
+  // Never accept an ID alone; verifyLatestNativeCompactionSource checks full content,
+  // typed native human metadata, recency, and rejects intervening instructions.
+  const compactionSource = nativeSource?.itemId
+    ? { id: nativeSource.itemId, ...(nativeSource.turnId ? {turnId:nativeSource.turnId} : {}),
+      content: nativeSource.content } : undefined;
   let installationDigest:string|undefined;
   const installationHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'undefined').digest('hex');
   try{
