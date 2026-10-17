@@ -6,7 +6,7 @@ import type {CodexParsedRequest} from '../../types';
 import {ChatGptWebAdapterError} from './adapter-error';
 import {extractChatGptRootThreadMetadata,extractChatGptThreadSpawnLineage,userRevision,
   type ChatGptTurnIdentity,type ChatGptTurnUserRevision} from './environment';
-import {inspectCurrentCodexRollout,latestNativeCompactionRecord} from './codex-rollout-environment';
+import {inspectCurrentCodexRollout,latestNativeCompactionRecord,verifyNativeGoalContinuationItems} from './codex-rollout-environment';
 
 function record(value:unknown):Record<string,unknown>|undefined{
   return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
@@ -66,6 +66,56 @@ export interface NativeCompactionSource {
   source:ChatGptTurnUserRevision;
   summaryIndex:number;
   provenance:{kind:'native_compacted';checkpoint_sha256:string;source_id:string;source_revision:string};
+}
+
+/**
+ * Authorize a cross-turn /goal resume without manufacturing a compaction checkpoint.
+ * The native thread must itself record the exact old human instruction, a new
+ * task_started boundary and the exact new goal-control item. Never use cached
+ * browser summaries or an unverified incoming XML string as the witness.
+ */
+export function isAuthenticatedNativeGoalContinuation(
+  parsed: CodexParsedRequest, identity: ChatGptTurnIdentity,
+  historical: ChatGptTurnUserRevision,
+  options: NativeCompactionRecoveryOptions = {},
+): boolean {
+  if(parsed._compactionRequest || !identity.threadId || !identity.turnId
+    || !boundedString(historical.itemId) || !boundedString(historical.turnId)
+    || historical.turnId === identity.turnId) return false;
+  const body=record(parsed._rawBody),client=record(body?.client_metadata);
+  let metadata:Record<string,unknown>|undefined;
+  const encoded=client?.['x-codex-turn-metadata'];
+  try { metadata=typeof encoded==='string'?record(JSON.parse(encoded)):record(encoded); } catch { return false; }
+  if(metadata?.request_kind!=='turn' || metadata.turn_id!==identity.turnId
+    || metadata.thread_id!==identity.threadId) return false;
+  const input=body?.input;
+  if(!Array.isArray(input))return false;
+  const last=input.map(record).filter(Boolean).at(-1);
+  if(last?.type!=='message' || last.role!=='user'
+    || !boundedString(last.id) || owner(last)!==identity.turnId) return false;
+  const parts=last.content;
+  const text=typeof parts==='string'?parts:Array.isArray(parts)
+    && parts.length===1 && record(parts[0])?.type==='input_text'
+    ? record(parts[0])?.text : undefined;
+  if(typeof text!=='string' || !/^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(text.trim()))return false;
+  const lineage=extractChatGptThreadSpawnLineage(parsed)??extractChatGptRootThreadMetadata(parsed);
+  if(!lineage || lineage.threadId!==identity.threadId)return false;
+  try {
+    return inspectCurrentCodexRollout({
+      codexHome:options.codexHome??getCodexHome(),
+      ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),
+      lineage,turnId:identity.turnId,
+    },({fd,size,turn})=>{
+      if(typeof body?.model!=='string'||turn.model!==body.model
+        || !boundedString(turn.effort)||!NATIVE_EFFORTS.has(turn.effort)
+        || (parsed.options.reasoning!==undefined && turn.effort!==parsed.options.reasoning))return false;
+      return verifyNativeGoalContinuationItems(fd,size,identity.turnId!,{
+        id:historical.itemId!,turnId:historical.turnId!,content:historical.content,
+      },{id:last.id as string,content:last.content});
+    }) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** No bridge JSON cache, prompt XML or supplied file path establishes this proof.
