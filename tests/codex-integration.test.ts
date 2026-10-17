@@ -18,6 +18,7 @@ import {
   uninstallCodexIntegration,
 } from "../src/codex-integration";
 import { defaultConfig, loadConfig, saveConfig } from "../src/config";
+import { codexInterruptHookCommand, installCodexInterruptHookCommand, MANAGED_INTERRUPT_HOOK_START } from "../src/codex-interrupt-hook";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   MANAGED_COMMENT,
@@ -59,6 +60,46 @@ afterEach(() => {
   delete process.env.CODEX_HOME;
   delete process.env.CODEX_CHATGPT_WEB_HOME;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("verified orphan interrupt hook recovery", () => {
+  test("explicit replacement reclaims only the exact generated hook with no journal", () => {
+    const { codexHome } = fixture();
+    const file = join(codexHome, "config.toml");
+    const config = nativeConfig("browser-only");
+    const baseline = 'model = "gpt-5.6-sol"\n';
+    const command = codexInterruptHookCommand(config);
+    const orphan = installCodexInterruptHookCommand(baseline, file, command).text;
+    writeFileSync(file, orphan);
+    expect(() => preflightCodexIntegration(config)).toThrow("already contains");
+    expect(readFileSync(file, "utf8")).toBe(orphan);
+    expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true })).not.toThrow();
+    expect(readFileSync(file, "utf8")).toBe(orphan);
+    installCodexIntegration(config, { replaceExistingRoute: true });
+    expect(inspectCodexIntegration().errors).toEqual([]);
+    expect(readFileSync(file, "utf8").split(MANAGED_INTERRUPT_HOOK_START).length).toBe(2);
+    uninstallCodexIntegration();
+    const restored = readFileSync(file, "utf8");
+    expect(restored).toContain('model = "gpt-5.6-sol"');
+    expect(restored).not.toContain(MANAGED_INTERRUPT_HOOK_START);
+  });
+
+  test("explicit replacement refuses modified trust state and leaves unknown config untouched", () => {
+    const { codexHome } = fixture();
+    const file = join(codexHome, "config.toml");
+    const config = nativeConfig("browser-only");
+    const orphan = installCodexInterruptHookCommand(
+      'model = "gpt-5.6-sol"\n', file, codexInterruptHookCommand(config),
+    );
+    const damaged = orphan.text.replace(orphan.installed.trustedHash, "sha256:" + "0".repeat(64));
+    writeFileSync(file, damaged);
+    expect(() => preflightCodexIntegration(config, { replaceExistingRoute: true }))
+      .toThrow("without an exactly matching");
+    expect(() => installCodexIntegration(config, { replaceExistingRoute: true }))
+      .toThrow("without an exactly matching");
+    expect(readFileSync(file, "utf8")).toBe(damaged);
+    expect(existsSync(getCodexJournalPath())).toBe(false);
+  });
 });
 
 describe("reversible native Codex route integration", () => {
