@@ -1,7 +1,10 @@
 /** Routed catalog policy; browser request capacity and effective recall are independent. */
 export const WEB_CONTEXT_POLICY_VERSION = 3;
 export const WEB_CONTEXT_TARGET_TOKENS = 272_000;
-/** Native semantic compaction remains 95% of the 272K canonical window.\n * Browser transfer and native context windows are independent: retained-delta\n * and authenticated recovery handle transport, never an artificial lower onset. */\nexport const WEB_CONTEXT_COMPACT_RATIO = 0.95;
+/** Native semantic compaction remains 95% of the 272K canonical window.
+ * Browser transfer and native context windows are independent: retained-delta
+ * and authenticated recovery handle transport, never an artificial lower onset. */
+export const WEB_CONTEXT_COMPACT_RATIO = 0.95;
 export const WEB_CONTEXT_COMPACT_TARGET_TOKENS = Math.floor(WEB_CONTEXT_TARGET_TOKENS * WEB_CONTEXT_COMPACT_RATIO);
 
 export const WEB_CONTEXT_POLICY = Object.freeze({

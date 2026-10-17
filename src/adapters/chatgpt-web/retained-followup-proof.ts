@@ -29,7 +29,10 @@ type Proof = { prefixLength: number; prefixHash: string; policyHash: string; ans
 export type RetainedReuseReason = "verified" | "proof_missing" | "ledger_invalid" | "ledger_io_failed" | "proof_expired"
   | "policy_changed" | "ancestry_changed" | "answer_boundary_changed" | "answer_changed";
 type ReuseCheck = { reason: RetainedReuseReason; parsed?: CodexParsedRequest };
-/** A verified retained browser tab can legitimately survive multi-hour Codex goal turns.\n * The launcher still verifies the exact surface on every reuse; expiration is\n * a bounded failsafe, not a substitute for canonical ancestry/owner proof. */\nconst TTL_MS = 24 * 60 * 60_000;
+/** A verified retained browser tab can legitimately survive multi-hour Codex goal turns.
+ * The launcher still verifies the exact surface on every reuse; expiration is
+ * a bounded failsafe, not a substitute for canonical ancestry/owner proof. */
+const TTL_MS = 24 * 60 * 60_000;
 const digestPattern = /^[a-f0-9]{64}$/;
 
 /** Hashes prove canonical ancestry; the launcher must independently prove its owned surface. */
