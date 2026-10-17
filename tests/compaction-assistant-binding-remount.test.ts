@@ -64,5 +64,5 @@ test("a different user bubble still cannot take ownership of a detached assistan
   const f = fixture(false);
   await expect(f.worker.reconcileAssistantTurnBinding(f.page, f.baseline, f.binding))
     .rejects.toThrow("ChatGPT opened another user turn while the bound assistant response was detached");
-  expect(f.baseline.acceptedUserIdentity).toBeUndefined();
+  expect(f.baseline).not.toHaveProperty("acceptedUserIdentity");
 });
