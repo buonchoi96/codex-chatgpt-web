@@ -22,7 +22,7 @@ import {
   type ChatGptSandboxPolicy,
   type ChatGptTurnEnvironment,
 } from "./environment";
-import { resolveCurrentCodexRolloutEnvironment } from "./codex-rollout-environment";
+import { resolveCurrentCodexRolloutEnvironment, resolveExactNativeRootTurnEnvironment } from "./codex-rollout-environment";
 import { ChatGptWebAdapterError } from "./adapter-error";
 
 interface StoredThreadEnvironment {
@@ -304,6 +304,27 @@ export class ChatGptThreadEnvironmentStore {
           }
           this.set(rolloutIdentity.threadId, rolloutEnvironment);
           return rolloutEnvironment;
+        }
+      }
+      // An ordinary root /goal resume can omit optional current workspace claims
+      // after restarting the bridge. Recover only when the exact latest native
+      // root turn_context proves identity, model, effort, cwd, and permissions.
+      // Never apply this path to /compact, subagents or untrusted XML updates.
+      if (!rolloutIdentity && !parsed._compactionRequest
+        && identity.threadId && identity.turnId
+        && !hasRawChatGptEnvironmentContext(parsed)) {
+        const nativeRoot=resolveExactNativeRootTurnEnvironment({
+          codexHome:this.codexHome,
+          ...(this.sqliteHome?{sqliteHome:this.sqliteHome}:{}),
+          threadId:identity.threadId,turnId:identity.turnId,
+          modelId:parsed.modelId,effort:parsed.options.reasoning,
+          tools:parsed.context.tools,
+        });
+        if(nativeRoot){
+          const constraints=currentMetadataConstraints(parsed,identity.threadId);
+          if(constraints) assertMetadataMatchesAuthority(constraints,authority(nativeRoot,this.now()));
+          this.set(identity.threadId,nativeRoot);
+          return nativeRoot;
         }
       }
       // Only a current native rollout can supersede an unrecognized historical envelope. Without

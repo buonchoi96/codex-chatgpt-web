@@ -750,6 +750,10 @@ export interface CurrentCodexRolloutOptions {
   compactionSource?: { id: string; turnId: string; content: unknown };
   tools?: readonly CodexTool[];
   historicalEnvironmentMessages?: ChatGptUnattributedEnvironmentMessage[];
+  /** Internal root-only fallback when current Codex metadata omits optional
+   * workspace/sandbox claims. The authority must come exclusively from the
+   * exact current native root turn, never from the request or a cache. */
+  nativeCurrentRootOnly?: boolean;
 }
 
 /** The inspector runs synchronously while the exact authenticated file is open.
@@ -758,6 +762,13 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
   inspect:(snapshot:{fd:number;size:number;turn:Record<string,unknown>;environment:ChatGptTurnEnvironment})=>T,
   validateAppend?:(snapshot:{fd:number;size:number})=>void):T|undefined {
   const { codexHome, lineage, turnId, tools, compactionSourceTurnId } = options;
+  const nativeRootOnly=options.nativeCurrentRootOnly===true;
+  if(nativeRootOnly && ("parentThreadId" in lineage
+    || lineage.sandboxType!=="platform" || lineage.workspaceRoots.length!==0
+    || compactionSourceTurnId!==undefined || options.compactionSource!==undefined
+    || options.historicalEnvironmentMessages!==undefined)) {
+    throw new Error("Native root fallback cannot carry delegated or request-derived authority");
+  }
   const nativeThreadId = CODEX_ID.test(lineage.threadId);
   const nativeTurnId = CODEX_ID.test(turnId);
   if (!nativeThreadId && !nativeTurnId) return undefined;
@@ -797,7 +808,7 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
         }
       }
       const environment = environmentFromTurnContext(latest, latest.turn_id as string, tools);
-      validateMetadataConsistency(lineage, environment);
+      if (!nativeRootOnly) validateMetadataConsistency(lineage, environment);
       if (options.historicalEnvironmentMessages) {
         verifyHistoricalEnvironmentMessages(fd, size, turnId, options.historicalEnvironmentMessages);
       }
@@ -820,6 +831,38 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
     throw new Error("Codex has multiple canonical rollouts for the requested current turn");
   }
   return matching[0]!;
+}
+
+/**
+ * A resumed root turn can omit its workspace/sandbox envelope after restarting
+ * the bridge. Recover exclusively from the exact current native Codex rollout:
+ * canonical path, root session_meta, latest matching turn_context and matching
+ * model/effort. Never use the persisted ChatGPT environment file as authority.
+ * Subagents, older turns, different models and missing native files fail closed.
+ */
+export function resolveExactNativeRootTurnEnvironment(options:{
+  codexHome:string;
+  sqliteHome?:string;
+  threadId:string;
+  turnId:string;
+  modelId:string;
+  effort?:string;
+  tools?:readonly CodexTool[];
+}):ChatGptTurnEnvironment|undefined {
+  if (!CODEX_ID.test(options.threadId) || !CODEX_ID.test(options.turnId)
+    || !options.modelId || !options.effort) return undefined;
+  return inspectCurrentCodexRollout({
+    codexHome:options.codexHome,
+    ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),
+    lineage:{threadId:options.threadId,sandboxType:"platform",workspaceRoots:[]},
+    turnId:options.turnId,
+    tools:options.tools,
+    nativeCurrentRootOnly:true,
+  },({turn,environment})=>{
+    if(turn.model!==options.modelId || turn.effort!==options.effort)
+      throw new Error("Native root current model/effort differs from the Codex request");
+    return environment;
+  });
 }
 
 export function resolveCurrentCodexRolloutEnvironment(options:CurrentCodexRolloutOptions):ChatGptTurnEnvironment|undefined {
