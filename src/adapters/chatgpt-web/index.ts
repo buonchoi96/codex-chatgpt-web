@@ -1355,13 +1355,20 @@ export function createChatGptWebAdapter(
                     try {
                       // Operator cancellation ends the logical compaction, but cancel-all must not
                       // acknowledge until the retained browser/helper owner has physically retired.
-                      await (preserveFinalResponse
-                        ? chatGptTurnSessions.retireConversationPreservingFinalResponse(
-                          retainedKey,
-                          source!,
-                          compactedSourceExecutionKey,
-                        )
-                        : chatGptTurnSessions.retireConversationAndWait(retainedKey));
+                      // Cleanup must obey the same bounded compaction deadline.
+                      // The retirement journal still owns physical settlement in
+                      // the background and blocks a competing reused tab, but the
+                      // native Codex observer must never wait indefinitely here.
+                      await withAbort(
+                        preserveFinalResponse
+                          ? chatGptTurnSessions.retireConversationPreservingFinalResponse(
+                            retainedKey,
+                            source!,
+                            compactedSourceExecutionKey,
+                          )
+                          : chatGptTurnSessions.retireConversationAndWait(retainedKey),
+                        operationSignal,
+                      );
                     } catch (retirementError) {
                       handoffError = new AggregateError(
                         [handoffError, retirementError instanceof Error ? retirementError : new Error(String(retirementError))],
@@ -1407,12 +1414,17 @@ export function createChatGptWebAdapter(
               });
               return;
             }
+            console.info("[chatgpt-web] native_compaction_result_ready " + JSON.stringify({
+              implementation: "bounded-retirement-v1",
+              summaryCharacters: summary.length,
+            }));
             emit({ type: "text_delta", text: summary, phase: "final_answer" });
             emitBrowserCompletion(
               { type: "final", answer: summary },
               estimateChatGptWebUsage(parsed, { answer: summary, reasoning: [] }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
               emit,
             );
+            console.info("[chatgpt-web] native_compaction_result_emitted");
             chatGptWebTurnRetryPolicy.clear(retryKey);
             return;
           }
