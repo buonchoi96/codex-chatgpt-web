@@ -1551,7 +1551,9 @@ export function createChatGptWebAdapter(
                 // result is the only safe passive checkpoint boundary; /goal may
                 // otherwise finish with >71K canonical tokens and no rebootstrap.
                 const checkpointOwner = session.runtime.conversationKey;
-                const checkpointNeeded = captureEnhancedRecoveryCheckpoint
+                const checkpointNeeded = !parsed._compactionRequest && !manualRequest
+                  && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
+                  && structuredBroker !== undefined && retainedLauncherDescriptor !== undefined
                   && checkpointOwner !== undefined
                   && !inFlightRecoveryCheckpoints.has(checkpointOwner)
                   && enhancedRecoveryCheckpointStore.shouldCheckpoint(
