@@ -129,7 +129,7 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
   expect(() => compileChatGptWebPrompt(source, capabilities, turnToken))
     .toThrow(/canonical context requires/);
   const reduced = compileChatGptWebPrompt(checkpointed.parsed, capabilities, turnToken);
-  expect(reduced.transportDecision.choice).not.toBe("BLOCK");
+  expect(reduced.transportDecision?.choice).not.toBe("BLOCK");
 
   const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
   expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.apply(parsed)");
