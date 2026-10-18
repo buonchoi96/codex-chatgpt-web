@@ -134,7 +134,7 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
   const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
   expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.apply(parsed)");
   expect(adapterSource).toContain("prepare: () => prepareWith(checkpointInput.parsed)");
-  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.checkpointAdmission(");
 
 });
 
@@ -186,7 +186,7 @@ test("recovery and compaction one-shot control tokens cannot be cross-used", asy
 test("passive recovery checkpoint remains asynchronous after tool-result delivery", () => {
   const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
   expect(source).toContain("void structuredBroker.waitForCompactionHandoff(ticket.token).then(");
-  expect(source).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+  expect(source).toContain("enhancedRecoveryCheckpointStore.checkpointAdmission(");
   expect(source).toContain("enhancedRecoveryCheckpointStore.commit(parsed, summary)");
   expect(source).toContain("passiveRecoveryCheckpointInstruction(checkpoint)");
   expect(source).not.toContain("await structuredBroker.waitForCompactionHandoff(ticket.token)");
@@ -197,7 +197,7 @@ test("subagent Sol follow-up preparation requests passive checkpoint before 71K 
   roots.push(root);
   const store=new EnhancedRecoveryCheckpointStore(join(root,"recovery.json"));
   const all=completeHistory();
-  all[3]!.content = "A".repeat(115_000);
+  all[3]!.content = Array.from({length:21_000},(_,n)=>"p"+n.toString(36).padStart(6,"0")).join(" ");
   const source=parsed(all,{modelId:"gpt-6-sol",_chatgptModelFamily:"6"});
   const admission=store.checkpointAdmission(source);
   expect(admission.due).toBe(true);

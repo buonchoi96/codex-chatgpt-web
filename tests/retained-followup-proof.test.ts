@@ -79,3 +79,21 @@ test('retained proof never skips an inserted user message ahead of the anchored 
   next.context.messages.splice(1,0,{role:'user',content:'Uncommitted new task',timestamp:5});
   expect(store.check('owned',next).reason).toBe('answer_boundary_changed');
 });
+
+test('retained proof survives routing-only knobs, but fails on changed tools or semantic generation policy',()=>{
+  const source=request(),store=new RetainedConversationProofStore();
+  store.commit('owned',source,'A verified');
+  const safe=followup(source);
+  safe.options={...safe.options,maxOutputTokens:4096,serviceTier:'default',
+    promptCacheKey:'runtime-affinity',hideThinkingSummary:true};
+  expect(store.check('owned',safe).reason).toBe('verified');
+  const semantic=followup(source);
+  semantic.options={...semantic.options,parallelToolCalls:false};
+  expect(store.check('owned',semantic).reason).toBe('policy_changed');
+  const tools=followup(source);
+  tools.context.tools=[{name:'exec',description:'An agent tool',inputSchema:{type:'object'}}] as any;
+  expect(store.check('owned',tools).reason).toBe('policy_changed');
+  const effort=followup(source);
+  effort.options={...effort.options,reasoning:'low'};
+  expect(store.check('owned',effort).reason).toBe('policy_changed');
+});
