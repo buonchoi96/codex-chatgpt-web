@@ -105,7 +105,8 @@ test.each([false,true])('restart recovery reaches replay, lineage and model inpu
       steeringPreserved:nextLineage.predecessors.has(lineage.current),latestWins:JSON.stringify(e.extractChatGptTurnUserRevision(next)).includes('Show the verified diff next.')}));`;
   const child=Bun.spawn([process.execPath,'--eval',program],{env:{...process.env,CODEX_HOME:f.home,CODEX_SQLITE_HOME:f.home},stdout:'pipe',stderr:'pipe'});
   const [output,error,exit]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
-  expect(exit,error).toBe(0);const result=JSON.parse(output);
+  expect(exit,error).toBe(0);const lastLine=output.trim().split(/\r?\n/).at(-1);
+  expect(lastLine).toBeDefined();const result=JSON.parse(lastLine!);
   expect(result.revisionHash).toBe(createHash('sha256').update(JSON.stringify(f.source.content)).digest('hex'));
   expect(result.key).toMatch(/^[0-9a-f]{64}$/);expect(result.lineage).toMatch(/^[0-9a-f]{64}$/);
   expect(result.sourceDelivered).toBe(true);expect(result.historical).toBe(true);expect(result.rawUnchanged).toBe(true);
