@@ -136,12 +136,14 @@ export class RetainedConversationProofStore {
     const messages = parsed.context.messages;
     if (messages.length <= proof.prefixLength
       || messagesHash(messages.slice(0, proof.prefixLength)) !== proof.prefixHash) return { reason: "ancestry_changed" };
-    const boundary = messages.findLastIndex(message => message.role === "assistant");
-    // Everything before the terminal answer was committed from the final canonical tool round.
-    // Skipping newly inserted messages could silently discard tool results or a foreign user turn.
-    if (boundary !== proof.prefixLength || boundary === messages.length - 1) return { reason: "answer_boundary_changed" };
-    // An assistant tool call is not a final-answer boundary. Never skip a
-    // pending native tool operation just because it has an assistant role.
+    // The accepted Web answer is anchored at the exact recorded prefix
+    // boundary. Finding the LAST assistant anywhere in the new request is
+    // incorrect: a later Codex tool/assistant round may append more messages.
+    // Those later messages remain in the retained suffix, never omitted.
+    const boundary = proof.prefixLength;
+    if (boundary === messages.length - 1) return { reason: "answer_boundary_changed" };
+    // An assistant tool call is not a final-answer boundary. Validate the
+    // precise previously accepted answer, not a later uncommitted assistant.
     const terminal=messages[boundary]!;
     if (terminal.role !== "assistant" || terminal.content.some(part => part.type === "toolCall"))
       return { reason: "answer_boundary_changed" };

@@ -48,3 +48,34 @@ test('matching answer cannot authorize skipping inserted uncommitted evidence', 
   store.invalidate('owned');
   expect(store.check('owned',followup(source)).reason).toBe('proof_missing');
 });
+
+test('retained proof anchors the accepted final answer even after later assistant tool rounds', () => {
+  const store=new RetainedConversationProofStore();
+  const source=request();
+  expect(store.commit('owned',source,'A verified')).toBe(true);
+  const next=followup(source);
+  // The accepted Web answer is at index 1, but Codex may append more
+  // assistant tool activity. None of that later activity may be dropped.
+  next.context.messages.push(
+    {role:'assistant',content:[{type:'toolCall',id:'tool_after',name:'exec',arguments:{}}],timestamp:5},
+    {role:'tool',content:[{type:'text',text:'result'}],timestamp:6},
+    {role:'assistant',content:[{type:'text',text:'Uncommitted follow-up output'}],timestamp:7},
+    {role:'user',content:'Next goal step',timestamp:8},
+  );
+  const reuse=store.check('owned',next);
+  expect(reuse.reason).toBe('verified');
+  expect(reuse.parsed?.context.messages).toEqual(next.context.messages.slice(2));
+  // Replacing the authenticated answer cannot be excused by a later
+  // assistant message that happens to look like the original final.
+  next.context.messages[1]!.content=[{type:'text',text:'Wrong earlier answer'}];
+  expect(store.check('owned',next).reason).toBe('answer_changed');
+});
+
+test('retained proof never skips an inserted user message ahead of the anchored answer', () => {
+  const store=new RetainedConversationProofStore();
+  const source=request();
+  store.commit('owned',source,'A verified');
+  const next=followup(source);
+  next.context.messages.splice(1,0,{role:'user',content:'Uncommitted new task',timestamp:5});
+  expect(store.check('owned',next).reason).toBe('answer_boundary_changed');
+});
