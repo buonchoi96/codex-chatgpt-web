@@ -51,3 +51,32 @@ test("a consumed handoff remains a completed result when its observer aborts lat
     store.close();
   }
 });
+
+
+test("passive recovery receipt must persist before its one-shot token is acknowledged", async () => {
+  const store = new CompactionTransactionStore();
+  const saved:string[]=[];
+  const transaction=store.begin("passive-native-checkpoint",10_000,summary=>saved.push(summary));
+  try {
+    expect(() => store.submit(transaction.token,transaction.handoffId,"summary","compaction"))
+      .toThrow("does not match");
+    expect(saved).toEqual([]);
+    store.submit(transaction.token,transaction.handoffId,"  summary  ","recovery");
+    expect(saved).toEqual(["summary"]);
+    expect(await store.wait(transaction.token)).toBe("summary");
+    expect(() => store.submit(transaction.token,transaction.handoffId,"duplicate","recovery"))
+      .toThrow("invalid, expired, or consumed");
+  } finally { store.close(); }
+});
+
+test("failed checkpoint persistence cannot produce a successful recovery handoff", () => {
+  const store=new CompactionTransactionStore();
+  const checkpoint=store.begin("durable-write-denied",10_000,()=>{throw new Error("disk unavailable");});
+  try {
+    expect(()=>store.submit(checkpoint.token,checkpoint.handoffId,"summarized","recovery"))
+      .toThrow("disk unavailable");
+    // No completion was acknowledged; a retry still requires a working durable store.
+    expect(()=>store.submit(checkpoint.token,checkpoint.handoffId,"summarized","compaction"))
+      .toThrow("does not match");
+  } finally {store.close();}
+});

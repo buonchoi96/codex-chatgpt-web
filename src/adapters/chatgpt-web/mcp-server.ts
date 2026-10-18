@@ -6,7 +6,7 @@ import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
-import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
+import { CODEX_COMPACTION_CONTROL_WIRE_NAME, CODEX_RECOVERY_CHECKPOINT_WIRE_NAME } from "./native-compaction-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerRetirementDiagnostics, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
 import {ARCHIVE_READ_CONTROL_WIRE_NAME,assertArchiveReadProof} from './archive-read-proof';
@@ -147,6 +147,7 @@ function safeVisibleTools(environment: ChatGptTurnEnvironment, contract: ChatGpt
     .map(tool => tool.namespace!));
   return environment.tools.filter(tool => (
     wireName(tool) !== CODEX_COMPACTION_CONTROL_WIRE_NAME
+    && wireName(tool) !== CODEX_RECOVERY_CHECKPOINT_WIRE_NAME
     && !BRIDGE_TOOL_NAMES.has(tool.name)
     // Zero Risk does not expose model-authored JavaScript. Automatic Full mode keeps the native
     // Codex exec surface and applies its transport guard at invocation time below.
@@ -1162,7 +1163,8 @@ export async function createChatGptMcpServer(options: {
         assertArchiveReadProof(args);
         return result(await callTurnBroker(options.brokerSocketPath,{method:'archive_confirm',token:requestId,arguments:args},5000,extra.signal));
       }
-      if (contract === "native" && wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME) {
+      if (contract === "native" && (wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME
+        || wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME)) {
         if (input !== undefined) {
           throw new Error("Compaction control handoff does not accept freeform input");
         }
@@ -1175,7 +1177,8 @@ export async function createChatGptMcpServer(options: {
           throw new Error("Compaction control handoff requires summary");
         }
         await callTurnBroker(options.brokerSocketPath, {
-          method: "submit_compaction_handoff",
+          method: wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME
+            ? "submit_recovery_checkpoint" : "submit_compaction_handoff",
           token: requestId,
           handoffId,
           summary,
