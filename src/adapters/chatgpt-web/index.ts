@@ -57,6 +57,7 @@ import { retainedConversationProofs } from './retained-followup-proof';
 import { EnhancedRecoveryCheckpointStore, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS } from './enhanced-recovery-checkpoint';
 import { passiveRecoveryCheckpointInstruction } from './native-compaction-control';
 import { createSameTabRecoveryDelta } from './same-tab-recovery-policy';
+import { awaitFinalBrokerRetirement } from './finalization-gate';
 import {LiveSteering} from './live-steering';
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
@@ -1695,7 +1696,16 @@ export function createChatGptWebAdapter(
                 emitNewText(session.runtime.text.drain());
                 session.setFinalReasoning(roundReasoning);
                 session.setFinalEvents(session.roundEvents(roundKey));
-                if (turnToken) await broker.revoke(turnToken);
+                // Web completion is not native Responses completion. A remote
+                // broker owner may acknowledge retirement late or never close
+                // its transport; never leave a partially streamed Codex answer
+                // in Working indefinitely. Failure is terminal, not replayable.
+                console.info(`[chatgpt-web] finalization trace=${traceId} stage=broker_retirement_started`);
+                if (turnToken) {
+                  await withAbort(awaitFinalBrokerRetirement(
+                    () => broker.revoke(turnToken), 20_000), incoming.abortSignal);
+                }
+                console.info(`[chatgpt-web] finalization trace=${traceId} stage=broker_retirement_acknowledged`);
                 if (completedOutcome.type === "error") throw completedOutcome.error;
                 if (session.runtime.text.value() !== completedOutcome.answer) {
                   throw new Error("ChatGPT browser Markdown stream did not reproduce the completed answer");
@@ -1710,6 +1720,7 @@ export function createChatGptWebAdapter(
                   estimateChatGptWebUsage(currentUsageInput(parsed), { answer: completedOutcome.answer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
                   buffer,
                 ));
+                console.info(`[chatgpt-web] finalization trace=${traceId} stage=adapter_done_journaled`);
                 session.completeRound(roundKey);
                 chatGptWebTurnRetryPolicy.clear(retryKey);
               };

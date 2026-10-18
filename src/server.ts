@@ -974,6 +974,9 @@ export async function responseRequest(
           : {}),
         ...(compactionItem ? { compaction: true } : {}),
         onCompletedResponse: rememberCompletedResponse,
+        // Emits only when a terminal SSE event was actually enqueued,
+        // not when the browser finished. Not a client ACK.
+        onTerminal: status => console.info(`[chatgpt-web] responses_sse_terminal trace=${traceId ?? "unknown"} status=${status}`),
       },
     );
     return new Response(stream, {

@@ -56,3 +56,35 @@ test("Darwin SSE remains decodable through Bun.serve under sustained chunking", 
     await server.stop(true);
   }
 });
+
+test("completed Windows Web response preserves final line and does not self-cancel",async()=>{
+  let cancelled=0;
+  const events:AsyncGenerator<AdapterEvent>=(async function*(){
+    yield {type:"text_delta",text:"First line."};
+    yield {type:"text_delta",text:" Final line."};
+    yield {type:"done",stopReason:"stop",endTurn:true};
+  })();
+  const stream=bridgeToResponsesSSE(events,"chatgpt-web/test",
+    undefined,undefined,undefined,()=>{cancelled++;},2000,{streamPlatform:"win32"});
+  const body=await new Response(stream).text();
+  expect(body).toContain("First line.");
+  expect(body).toContain(" Final line.");
+  expect(body).toContain("event: response.completed");
+  expect(body).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n","\n"));
+  expect(cancelled).toBe(0);
+});
+
+test("completed native pull SSE includes terminal and preserves the answer",async()=>{
+  let cancelled=0;
+  const events:AsyncGenerator<AdapterEvent>=(async function*(){
+    yield {type:"text_delta",text:"Last instruction survived."};
+    yield {type:"done",stopReason:"stop",endTurn:true};
+  })();
+  const stream=bridgeToResponsesSSE(events,"chatgpt-web/test",
+    undefined,undefined,undefined,()=>{cancelled++;},2000,{streamPlatform:"linux"});
+  const body=await new Response(stream).text();
+  expect(body).toContain("Last instruction survived.");
+  expect(body).toContain("event: response.completed");
+  expect(body).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n","\n"));
+  expect(cancelled).toBe(0);
+});

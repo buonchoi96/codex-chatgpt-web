@@ -366,6 +366,7 @@ export function bridgeToResponsesSSE(
       // we synthesize response.completed below, so Codex never hits the parser's
       // "stream closed before response.completed" (responses.rs) -> ApiError::Stream.
       let terminated = false;
+      let cancelAfterTerminalClose = false;
       let firstOutputReported = false;
       const reportFirstOutput = (event: AdapterEvent): void => {
         if (firstOutputReported) return;
@@ -673,7 +674,11 @@ export function bridgeToResponsesSSE(
             }
           }
           if (terminalEvent) {
-            onCancel?.();
+            // Never abort the accepted Web turn while response.completed and
+            // [DONE] are still queued for Codex's native SSE reader. Successful
+            // completion needs no upstream cancellation; failure/incomplete
+            // cleanup takes place only after the stream is closed.
+            cancelAfterTerminalClose = event.type !== "done";
             terminated = true;
             returnIterator();
             break;
@@ -728,9 +733,16 @@ export function bridgeToResponsesSSE(
       } catch {
         /* already closed (e.g. client cancelled) */
       }
+      console.info("[bridge] native_sse_terminal_closed " + JSON.stringify({
+        responseId, terminal: terminated ? "adapter_terminal" : "adapter_eof",
+        frameCount: emittedFrames,
+        platform: options?.streamPlatform ?? process.platform,
+        compaction: options?.compaction === true,
+      }));
       closed = true;
       gated = true;
       stepping = false;
+      if (cancelAfterTerminalClose) onCancel?.();
       };
 
       const startStream = () => {
