@@ -3957,7 +3957,7 @@ export class ChatGptBrowserWorker {
   ): Promise<Locator> {
     throwIfPromptAttachmentAborted(abortSignal);
     const expectedConnectorId = await withBrowserTurnAbort(assertChatGptConnectorRoute(
-      page, this.config.appName, this.config.expectedConnectorTunnelId,
+      page, this.config.appName, this.config.expectedConnectorTunnelId, abortSignal,
     ), abortSignal);
     const capture = async (checkpoint: string): Promise<void> => {
       throwIfPromptAttachmentAborted(abortSignal);
@@ -6152,7 +6152,7 @@ export class ChatGptBrowserWorker {
             await this.assertSelectedEffort(page, mode);
             if(mode.localTools){
               const connectorId=await withBrowserTurnAbort(assertChatGptConnectorRoute(page,this.config.appName,
-                this.config.expectedConnectorTunnelId),turn.abortSignal);
+                this.config.expectedConnectorTunnelId,turn.abortSignal),turn.abortSignal);
               if(!await this.connectorIsSelected(await this.activeComposer(page),turn.abortSignal,connectorId))
                 throw new ChatGptWebAdapterError('The selected Native2 connector changed before Send; the draft was not submitted.',
                   {status:409,errorType:'connector_error',code:'connector_selection_lost',retryable:false});

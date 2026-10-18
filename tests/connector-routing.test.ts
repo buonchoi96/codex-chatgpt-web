@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import type { Page } from "playwright-core";
-import { assertChatGptConnectorRoute } from "../src/adapters/chatgpt-web/connector-routing";
+import { assertChatGptConnectorRoute, CONNECTOR_ROUTE_MAX_PROBES } from "../src/adapters/chatgpt-web/connector-routing";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 
 const expectedTunnel = `tunnel_${"a".repeat(32)}`;
@@ -16,12 +16,15 @@ const page = {
   evaluate: async (fn: (input: unknown) => unknown, input: unknown) => fn(input),
 } as unknown as Page;
 
-function serveRoute(tunnelId: unknown, links: Array<{ name: string; connector_name?: string; connector_id: string }> = [{ name: appName, connector_id: connectorId }]) {
+function serveRoute(tunnelId: unknown, links: Array<{ name: string; connector_name?: string; connector_id: string }> = [{ name: appName, connector_id: connectorId }], transientCatalogFailures = 0) {
+  let catalogProbes = 0;
   const fakeFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (input === "/api/auth/session") return Response.json({ accessToken: credential });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${credential}`);
     expect(init?.redirect).toBe("error");
     if (input === "/backend-api/aip/connectors/links/list_accessible") {
+      catalogProbes++;
+      if (catalogProbes <= transientCatalogFailures) return new Response(null, { status: 503 });
       expect(init?.method).toBe("POST");
       expect(JSON.parse(String(init?.body))).toEqual({ principals: [], link_refresh_strategy: "BLOCKING" });
       return Response.json({ links });
@@ -32,6 +35,7 @@ function serveRoute(tunnelId: unknown, links: Array<{ name: string; connector_na
     throw new Error("Unexpected connector metadata request");
   };
   fetchSpy = spyOn(globalThis, "fetch").mockImplementation(fakeFetch as typeof fetch);
+  return () => catalogProbes;
 }
 
 test("rejects a same-name connector routed to another runtime without disclosing identifiers or credentials", async () => {
@@ -129,3 +133,44 @@ for (const replacementMatches of [true, false]) {
     }
   });
 }
+
+test("rechecks a temporarily unavailable connector catalog before editing or sending a prompt", async () => {
+  const probes = serveRoute(expectedTunnel, [{name:appName,connector_id:connectorId}], 2);
+  expect(await assertChatGptConnectorRoute(page, appName, expectedTunnel)).toBe(connectorId);
+  expect(probes()).toBe(3);
+});
+
+test("a stable wrong tunnel is refused on its first probe rather than retried", async () => {
+  const probes = serveRoute(otherTunnel);
+  await expect(assertChatGptConnectorRoute(page, appName, expectedTunnel))
+    .rejects.toMatchObject({code:"connector_tunnel_mismatch"});
+  expect(probes()).toBe(1);
+});
+
+test("an ambiguous duplicate connector name is refused without a retry or arbitrary selection", async () => {
+  const probes=serveRoute(expectedTunnel, [
+    {name:appName,connector_id:connectorId},
+    {name:appName,connector_id:"asdk_app_different"},
+  ]);
+  await expect(assertChatGptConnectorRoute(page,appName,expectedTunnel))
+    .rejects.toMatchObject({code:"connector_route_unverified"});
+  expect(probes()).toBe(1);
+});
+
+test("a permanently unavailable catalog fails closed after a bounded number of probes", async () => {
+  const probes=serveRoute(expectedTunnel, [{name:appName,connector_id:connectorId}], 10);
+  await expect(assertChatGptConnectorRoute(page,appName,expectedTunnel))
+    .rejects.toMatchObject({code:"connector_route_unverified",retryable:false});
+  expect(probes()).toBe(CONNECTOR_ROUTE_MAX_PROBES);
+});
+
+test("cancellation during a connector catalog backoff prevents another probe", async () => {
+  const controller=new AbortController();
+  const probes=serveRoute(expectedTunnel, [{name:appName,connector_id:connectorId}], 3);
+  const operation=assertChatGptConnectorRoute(page,appName,expectedTunnel,controller.signal);
+  await Promise.resolve();
+  await Promise.resolve();
+  controller.abort(new DOMException("cancelled","AbortError"));
+  await expect(operation).rejects.toMatchObject({name:"AbortError"});
+  expect(probes()).toBeLessThanOrEqual(1);
+});
