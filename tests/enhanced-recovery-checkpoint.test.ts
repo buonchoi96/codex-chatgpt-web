@@ -124,20 +124,18 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
     proAvailable: true,
   };
   const turnToken = "turn_12345678901234567890123456789012";
-  const canonical = compileChatGptWebPrompt(source, capabilities, turnToken);
+  // The Web account cannot cold-transport this full canonical tool transcript.
+  // A checksum-bound checkpoint is the only permitted reduced bootstrap.
+  expect(() => compileChatGptWebPrompt(source, capabilities, turnToken))
+    .toThrow(/canonical context requires/);
   const reduced = compileChatGptWebPrompt(checkpointed.parsed, capabilities, turnToken);
-  expect(canonical.archive).toBeDefined();
-  expect(reduced.archive).toBeUndefined();
+  expect(reduced.transportDecision.choice).not.toBe("BLOCK");
 
   const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
-  expect(adapterSource).toContain("const compilePreparedInput = (");
-  expect(adapterSource).toContain("checkpointInput.applied");
-  expect(adapterSource).toContain("const canonicalCompiled = compileChatGptWebPrompt(");
-  expect(adapterSource).toContain("if (canonicalCompiled.archive)");
-  expect(adapterSource).not.toContain("&& !compiled.archive");
-  expect(adapterSource).toContain("...compilePreparedInput(checkpointInput.parsed, undefined)");
-  expect(adapterSource).toContain("const compiled = compilePreparedInput(input, turnToken, activeTurnRecovery)");
-  expect(adapterSource).toContain("passive recovery checkpoint kept canonical archive transport");
+  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.apply(parsed)");
+  expect(adapterSource).toContain("prepare: () => prepareWith(checkpointInput.parsed)");
+  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+
 });
 
 test("recovery checkpoint is never created across an incomplete tool boundary", () => {
