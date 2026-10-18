@@ -1551,13 +1551,29 @@ export function createChatGptWebAdapter(
                 // result is the only safe passive checkpoint boundary; /goal may
                 // otherwise finish with >71K canonical tokens and no rebootstrap.
                 const checkpointOwner = session.runtime.conversationKey;
-                const checkpointNeeded = !parsed._compactionRequest && !manualRequest
+                const checkpointEligible = !parsed._compactionRequest && !manualRequest
                   && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
                   && structuredBroker !== undefined && retainedLauncherDescriptor !== undefined
-                  && checkpointOwner !== undefined
-                  && !inFlightRecoveryCheckpoints.has(checkpointOwner)
-                  && enhancedRecoveryCheckpointStore.shouldCheckpoint(
-                    parsed, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS);
+                  && checkpointOwner !== undefined;
+                const checkpointAdmission = checkpointEligible
+                  ? enhancedRecoveryCheckpointStore.checkpointAdmission(
+                    parsed, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS)
+                  : undefined;
+                const checkpointNeeded = checkpointEligible
+                  && !inFlightRecoveryCheckpoints.has(checkpointOwner!)
+                  && checkpointAdmission?.due === true;
+                if (checkpointAdmission
+                  && parsed.context.messages.length >= 24
+                  && (checkpointAdmission.due || checkpointAdmission.reason === "no_complete_tool_boundary")) {
+                  console.info("[chatgpt-web] passive_recovery_admission " + JSON.stringify({
+                    reason: checkpointAdmission.reason,
+                    deltaTokens: checkpointAdmission.deltaTokens,
+                    canonicalTokens: checkpointAdmission.canonicalTokens,
+                    checkpointAlreadyPresent: checkpointAdmission.prefixLength > 0,
+                    inFlight: inFlightRecoveryCheckpoints.has(checkpointOwner!),
+                    canonicalMessageCount: parsed.context.messages.length,
+                  }));
+                }
                 let checkpoint: Awaited<ReturnType<TurnBroker["beginRecoveryCheckpoint"]>> | undefined;
                 if (checkpointNeeded && structuredBroker) {
                   // Never stop work solely because passive recovery is unavailable.
