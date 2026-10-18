@@ -1355,13 +1355,20 @@ export function createChatGptWebAdapter(
                     try {
                       // Operator cancellation ends the logical compaction, but cancel-all must not
                       // acknowledge until the retained browser/helper owner has physically retired.
-                      await (preserveFinalResponse
-                        ? chatGptTurnSessions.retireConversationPreservingFinalResponse(
-                          retainedKey,
-                          source!,
-                          compactedSourceExecutionKey,
-                        )
-                        : chatGptTurnSessions.retireConversationAndWait(retainedKey));
+                      // Cleanup must obey the same bounded compaction deadline.
+                      // The retirement journal still owns physical settlement in
+                      // the background and blocks a competing reused tab, but the
+                      // native Codex observer must never wait indefinitely here.
+                      await withAbort(
+                        preserveFinalResponse
+                          ? chatGptTurnSessions.retireConversationPreservingFinalResponse(
+                            retainedKey,
+                            source!,
+                            compactedSourceExecutionKey,
+                          )
+                          : chatGptTurnSessions.retireConversationAndWait(retainedKey),
+                        operationSignal,
+                      );
                     } catch (retirementError) {
                       handoffError = new AggregateError(
                         [handoffError, retirementError instanceof Error ? retirementError : new Error(String(retirementError))],
@@ -1407,12 +1414,17 @@ export function createChatGptWebAdapter(
               });
               return;
             }
+            console.info("[chatgpt-web] native_compaction_result_ready " + JSON.stringify({
+              implementation: "bounded-retirement-v1",
+              summaryCharacters: summary.length,
+            }));
             emit({ type: "text_delta", text: summary, phase: "final_answer" });
             emitBrowserCompletion(
               { type: "final", answer: summary },
               estimateChatGptWebUsage(parsed, { answer: summary, reasoning: [] }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),
               emit,
             );
+            console.info("[chatgpt-web] native_compaction_result_emitted");
             chatGptWebTurnRetryPolicy.clear(retryKey);
             return;
           }
@@ -1551,13 +1563,29 @@ export function createChatGptWebAdapter(
                 // result is the only safe passive checkpoint boundary; /goal may
                 // otherwise finish with >71K canonical tokens and no rebootstrap.
                 const checkpointOwner = session.runtime.conversationKey;
-                const checkpointNeeded = !parsed._compactionRequest && !manualRequest
+                const checkpointEligible = !parsed._compactionRequest && !manualRequest
                   && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
                   && structuredBroker !== undefined && retainedLauncherDescriptor !== undefined
-                  && checkpointOwner !== undefined
-                  && !inFlightRecoveryCheckpoints.has(checkpointOwner)
-                  && enhancedRecoveryCheckpointStore.shouldCheckpoint(
-                    parsed, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS);
+                  && checkpointOwner !== undefined;
+                const checkpointAdmission = checkpointEligible
+                  ? enhancedRecoveryCheckpointStore.checkpointAdmission(
+                    parsed, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS)
+                  : undefined;
+                const checkpointNeeded = checkpointEligible
+                  && !inFlightRecoveryCheckpoints.has(checkpointOwner!)
+                  && checkpointAdmission?.due === true;
+                if (checkpointAdmission
+                  && parsed.context.messages.length >= 24
+                  && (checkpointAdmission.due || checkpointAdmission.reason === "no_complete_tool_boundary")) {
+                  console.info("[chatgpt-web] passive_recovery_admission " + JSON.stringify({
+                    reason: checkpointAdmission.reason,
+                    deltaTokens: checkpointAdmission.deltaTokens,
+                    canonicalTokens: checkpointAdmission.canonicalTokens,
+                    checkpointAlreadyPresent: checkpointAdmission.prefixLength > 0,
+                    inFlight: inFlightRecoveryCheckpoints.has(checkpointOwner!),
+                    canonicalMessageCount: parsed.context.messages.length,
+                  }));
+                }
                 let checkpoint: Awaited<ReturnType<TurnBroker["beginRecoveryCheckpoint"]>> | undefined;
                 if (checkpointNeeded && structuredBroker) {
                   // Never stop work solely because passive recovery is unavailable.

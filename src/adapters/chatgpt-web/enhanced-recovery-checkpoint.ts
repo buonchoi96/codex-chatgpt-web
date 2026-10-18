@@ -11,7 +11,23 @@ import {
 } from "../../responses/compaction-ledger";
 
 export const ENHANCED_RECOVERY_CHECKPOINT_MAX_SUMMARY_TOKENS = 8_000;
-export const ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS = 32_000;
+// A transport-recovery cadence only; Codex native auto-compact stays at 258K.
+// Reserve margin for an asynchronous subagent follow-up that may cancel the
+// active accepted browser turn before that subagent emits a final answer.
+export const ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS = 16_000;
+export const ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS = 48_000;
+
+export type EnhancedCheckpointAdmissionReason =
+  | "ready" | "missing_thread" | "no_complete_tool_boundary" | "below_transport_checkpoint_cadence";
+export interface EnhancedCheckpointAdmission {
+  due: boolean;
+  reason: EnhancedCheckpointAdmissionReason;
+  /** Token accounting is diagnostic; it never creates trusted provenance. */
+  deltaTokens: number;
+  canonicalTokens: number;
+  prefixLength: number;
+}
+
 
 const ENHANCED_RECOVERY_CHECKPOINT_TTL_MS = 30 * 24 * 60 * 60_000;
 const MAX_ENHANCED_RECOVERY_CHECKPOINTS = 128;
@@ -150,21 +166,42 @@ export class EnhancedRecoveryCheckpointStore {
   ) {}
 
   shouldCheckpoint(parsed: CodexParsedRequest, limitTokens = ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS): boolean {
+    return this.checkpointAdmission(parsed, limitTokens).due;
+  }
+
+  /** Explain skipped checkpoints without leaking user messages or native IDs. */
+  checkpointAdmission(parsed: CodexParsedRequest,
+    limitTokens = ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS): EnhancedCheckpointAdmission {
     const currentIdentity = checkpointIdentity(parsed);
-    if (!currentIdentity || !Number.isFinite(limitTokens) || limitTokens <= 0) return false;
+    if (!Number.isFinite(limitTokens) || limitTokens <= 0) throw new Error("Invalid recovery checkpoint cadence");
+    if (!currentIdentity) {
+      return { due:false,reason:"missing_thread",deltaTokens:0,canonicalTokens:0,prefixLength:0 };
+    }
     this.load();
     this.prune(this.checkpoints);
-
     const stored = this.checkpoints.get(currentIdentity.threadId);
     let baseline = 0;
     if (stored && sameIdentity(stored, currentIdentity) && this.matchesPrefix(parsed, stored)) {
       baseline = stored.prefixLength;
     }
-
     const boundary = latestCompleteToolResultBoundary(parsed.context.messages, baseline - 1);
-    if (boundary === undefined || boundary + 1 <= baseline) return false;
+    if (boundary === undefined || boundary + 1 <= baseline) {
+      return { due:false,reason:"no_complete_tool_boundary",deltaTokens:0,canonicalTokens:0,prefixLength:baseline };
+    }
     const tail = parsed.context.messages.slice(baseline, boundary + 1);
-    return estimateTokens(JSON.stringify(normalizedMessages(tail))) >= limitTokens;
+    const deltaTokens = estimateTokens(JSON.stringify(normalizedMessages(tail)));
+    // A large policy/system/tool prefix may exhaust the measured Web transport
+    // BEFORE the assistant/tool suffix reaches the recovery cadence. Request
+    // an early checkpoint only when no checkpoint is installed for this epoch.
+    const canonicalTokens = baseline === 0
+      ? estimateTokens(JSON.stringify({
+          systemPrompt:parsed.context.systemPrompt??[],tools:parsed.context.tools??[],
+          messages:normalizedMessages(parsed.context.messages.slice(0,boundary+1)),
+        })) : 0;
+    const due = deltaTokens >= limitTokens
+      || (baseline === 0 && canonicalTokens >= ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS);
+    return {due,reason:due?"ready":"below_transport_checkpoint_cadence",
+      deltaTokens,canonicalTokens,prefixLength:baseline};
   }
 
   commit(parsed: CodexParsedRequest, summary: string): void {

@@ -821,3 +821,11 @@ test("refuses a ChatGPT Web continuation when local previous-response state is u
   const body = await response.json() as { error: { message: string } };
   expect(body.error.message).toContain("partial Codex context");
 });
+
+test('structured handoff cleanup is bounded even after backend compaction finishes', () => {
+  const source=require('node:fs').readFileSync('src/adapters/chatgpt-web/index.ts','utf8');
+  const cleanup=source.match(/\/\/ Cleanup must obey the same bounded compaction deadline\.[\s\S]{0,1200}?operationSignal,\s*\);/);
+  expect(cleanup).toBeTruthy();
+  expect(source).toContain('native_compaction_result_ready');
+  expect(source).toContain('native_compaction_result_emitted');
+});

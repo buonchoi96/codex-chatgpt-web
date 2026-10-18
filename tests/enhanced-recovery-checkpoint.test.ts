@@ -134,7 +134,7 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
   const adapterSource = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
   expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.apply(parsed)");
   expect(adapterSource).toContain("prepare: () => prepareWith(checkpointInput.parsed)");
-  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+  expect(adapterSource).toContain("enhancedRecoveryCheckpointStore.checkpointAdmission(");
 
 });
 
@@ -186,8 +186,41 @@ test("recovery and compaction one-shot control tokens cannot be cross-used", asy
 test("passive recovery checkpoint remains asynchronous after tool-result delivery", () => {
   const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
   expect(source).toContain("void structuredBroker.waitForCompactionHandoff(ticket.token).then(");
-  expect(source).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+  expect(source).toContain("enhancedRecoveryCheckpointStore.checkpointAdmission(");
   expect(source).toContain("enhancedRecoveryCheckpointStore.commit(parsed, summary)");
   expect(source).toContain("passiveRecoveryCheckpointInstruction(checkpoint)");
   expect(source).not.toContain("await structuredBroker.waitForCompactionHandoff(ticket.token)");
+});
+
+test("subagent Sol follow-up preparation requests passive checkpoint before 71K Web limit",()=>{
+  const root=mkdtempSync(join(tmpdir(),"checkpoint-subagent-"));
+  roots.push(root);
+  const store=new EnhancedRecoveryCheckpointStore(join(root,"recovery.json"));
+  const all=completeHistory();
+  all[3]!.content = Array.from({length:21_000},(_,n)=>"p"+n.toString(36).padStart(6,"0")).join(" ");
+  const source=parsed(all,{modelId:"gpt-6-sol",_chatgptModelFamily:"6"});
+  const admission=store.checkpointAdmission(source);
+  expect(admission.due).toBe(true);
+  expect(admission.reason).toBe("ready");
+  expect(admission.prefixLength).toBe(0);
+  expect(admission.canonicalTokens).toBeGreaterThan(0);
+  store.commit(source,"Persisted verification of completed tool call; continue pending follow-up.");
+  const withFollowup=parsed([...all,{role:"user",content:"New subagent follow-up",timestamp:5}],
+    {modelId:"gpt-6-sol",_chatgptModelFamily:"6"});
+  const recovered=store.apply(withFollowup);
+  expect(recovered.applied).toBe(true);
+  expect(recovered.parsed.context.messages.find(x=>x.role==="user"&&x.content==="New subagent follow-up")).toBeDefined();
+  expect(recovered.parsed.context.messages.some(x=>x.role==="toolResult")).toBe(false);
+});
+
+test("unmatched in-flight tool calls never become an authenticated recovery boundary",()=>{
+  const root=mkdtempSync(join(tmpdir(),"checkpoint-unmatched-"));
+  roots.push(root);
+  const store=new EnhancedRecoveryCheckpointStore(join(root,"recovery.json"));
+  const source=parsed([{role:"user",content:"Task",timestamp:1},
+    {role:"assistant",timestamp:2,content:[{type:"toolCall",id:"call_1",name:"exec",arguments:{}}]},
+    {role:"toolResult",toolCallId:"foreign",toolName:"exec",content:"large".repeat(20000),isError:false,timestamp:3}]);
+  const admission=store.checkpointAdmission(source);
+  expect(admission.due).toBe(false);
+  expect(admission.reason).toBe("no_complete_tool_boundary");
 });

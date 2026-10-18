@@ -16,9 +16,17 @@ function answerText(message: CodexMessage): string | undefined {
   if (message.role !== "assistant" || message.content.some(part => part.type === "toolCall")) return undefined;
   return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("").replaceAll("\r\n", "\n").trimEnd();
 }
+// Request-scoped routing and cache knobs never enter the ChatGPT model's
+// instruction/tool state. Keep all semantic generation options in the proof.
+const semanticOptions = (options: CodexParsedRequest["options"]) => {
+  const { maxOutputTokens: _outputCap, serviceTier: _tier,
+    promptCacheKey: _cache, hideThinkingSummary: _visibility,
+    ...semantic } = options;
+  return semantic;
+};
 const policyHash = (parsed: CodexParsedRequest): string => hash({
   model: parsed.modelId,
-  options: parsed.options,
+  options: semanticOptions(parsed.options),
   family: parsed._chatgptModelFamily,
   system: parsed.context.systemPrompt,
   tools: parsed.context.tools,
