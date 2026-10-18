@@ -58,7 +58,7 @@ test('retained proof anchors the accepted final answer even after later assistan
   // assistant tool activity. None of that later activity may be dropped.
   next.context.messages.push(
     {role:'assistant',content:[{type:'toolCall',id:'tool_after',name:'exec',arguments:{}}],timestamp:5},
-    {role:'toolResult',content:[{type:'text',text:'result'}],timestamp:6},
+    {role:'toolResult',toolCallId:'tool_after',toolName:'exec',content:[{type:'text',text:'result'}],isError:false,timestamp:6},
     {role:'assistant',content:[{type:'text',text:'Uncommitted follow-up output'}],timestamp:7},
     {role:'user',content:'Next goal step',timestamp:8},
   );
