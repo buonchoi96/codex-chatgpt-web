@@ -17,7 +17,7 @@ export function passiveRecoveryCheckpointInstruction(transaction: CompactionTran
     `arguments ${JSON.stringify({handoff_id:transaction.handoffId,summary:"<complete recovery summary>"})}`,
     "After submitted=true, continue with your original task capability; do not show the checkpoint to the user.",
     "</codex_recovery_checkpoint>",
-  ].join("\\n");
+  ].join("\n");
 }
 export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_REQUEST";
 

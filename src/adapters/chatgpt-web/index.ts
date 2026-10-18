@@ -54,6 +54,8 @@ import {
   chatGptConversationKey,
 } from "./conversation-key";
 import { retainedConversationProofs } from './retained-followup-proof';
+import { EnhancedRecoveryCheckpointStore, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS } from './enhanced-recovery-checkpoint';
+import { passiveRecoveryCheckpointInstruction } from './native-compaction-control';
 import { createSameTabRecoveryDelta } from './same-tab-recovery-policy';
 import {LiveSteering} from './live-steering';
 
@@ -435,6 +437,10 @@ export function createChatGptWebAdapter(
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const blockedOperationLedger=dependencies.blockedOperationLedger??new BlockedOperationLedger();
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
+  // Passive recovery is separate from native 272K/258K compaction. Checkpoints
+  // only replace already-completed assistant/tool transcripts on fresh Web tabs.
+  const enhancedRecoveryCheckpointStore = new EnhancedRecoveryCheckpointStore();
+  const inFlightRecoveryCheckpoints = new Set<string>();
   const timeoutMs = provider.chatgptWeb?.turnTimeoutMs;
   const experimentalSkillAttachments = provider.chatgptWeb?.experimentalSkillAttachments;
   if (experimentalSkillAttachments !== undefined && typeof experimentalSkillAttachments !== "boolean") {
@@ -514,9 +520,22 @@ export function createChatGptWebAdapter(
       && !experimentalBiggerContext
       && !parsed._compactionRequest
       && Boolean(identity.threadId && identity.turnId);
+    const captureEnhancedRecoveryCheckpoint = !manualRequest
+      && mode.localTools && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID
+      && !parsed._compactionRequest && structuredBroker !== undefined
+      && retainedLauncherDescriptor !== undefined;
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
-      : { parsed, applied: false };
+      : captureEnhancedRecoveryCheckpoint
+        ? enhancedRecoveryCheckpointStore.apply(parsed)
+        : { parsed, applied: false };
+    if (captureEnhancedRecoveryCheckpoint && checkpointInput.applied) {
+      console.info("[chatgpt-web] passive_recovery_verified " + JSON.stringify({
+        checkpointApplied: true,
+        canonicalMessages: parsed.context.messages.length,
+        fallbackMessages: checkpointInput.parsed.context.messages.length,
+      }));
+    }
     const conversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
       && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || experimentalBiggerContext)
@@ -524,7 +543,7 @@ export function createChatGptWebAdapter(
       ? chatGptConversationKey(checkpointInput.parsed, executionNamespace)
       : undefined;
     const retainedProof = conversationKey
-      ? retainedConversationProofs.check(conversationKey, checkpointInput.parsed)
+      ? retainedConversationProofs.check(conversationKey, parsed)
       : undefined;
     const resumeInput = retainedProof?.parsed;
     if (conversationKey && retainedProof && retainedProof.reason !== "verified") {
@@ -1527,11 +1546,63 @@ export function createChatGptWebAdapter(
                 if (results.length !== outstanding.length) {
                   throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
-                for (const message of results) {
-                  await broker.completeTool(turnToken, message.toolCallId, chatGptWebBrokerResult(message));
-                  session.runtime.externalProgress.recordToolResult();
-                  session.runtime.trace.recordProgress();
-                  session.markResultDelivered(message.toolCallId);
+                // Capture a cumulative recovery summary while the existing Web
+                // response and its tool context are still authoritative. A tool
+                // result is the only safe passive checkpoint boundary; /goal may
+                // otherwise finish with >71K canonical tokens and no rebootstrap.
+                const checkpointOwner = session.runtime.conversationKey;
+                const checkpointNeeded = captureEnhancedRecoveryCheckpoint
+                  && checkpointOwner !== undefined
+                  && !inFlightRecoveryCheckpoints.has(checkpointOwner)
+                  && enhancedRecoveryCheckpointStore.shouldCheckpoint(
+                    parsed, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS);
+                let checkpoint: Awaited<ReturnType<TurnBroker["beginRecoveryCheckpoint"]>> | undefined;
+                if (checkpointNeeded && structuredBroker) {
+                  // Never stop work solely because passive recovery is unavailable.
+                  try {
+                    checkpoint = await structuredBroker.beginRecoveryCheckpoint(
+                      traceId, 5 * 60_000,
+                      summary => enhancedRecoveryCheckpointStore.commit(parsed, summary));
+                    inFlightRecoveryCheckpoints.add(checkpointOwner!);
+                  } catch (error) {
+                    console.warn("[chatgpt-web] passive_recovery_unavailable " + JSON.stringify({
+                      reason: error instanceof Error ? error.name : "unknown",
+                    }));
+                  }
+                }
+                try {
+                  for (const [resultIndex, message] of results.entries()) {
+                    const nativeResult=chatGptWebBrokerResult(message);
+                    // Attach the one-shot recovery instruction after the last
+                    // canonical tool result in the batch. No native tool is rerun.
+                    const toolResult=checkpoint && resultIndex === results.length - 1
+                      ? {...nativeResult,content:[...nativeResult.content,{
+                          type:"text",text:passiveRecoveryCheckpointInstruction(checkpoint),
+                        }]} : nativeResult;
+                    await broker.completeTool(turnToken, message.toolCallId, toolResult);
+                    session.runtime.externalProgress.recordToolResult();
+                    session.runtime.trace.recordProgress();
+                    session.markResultDelivered(message.toolCallId);
+                  }
+                } catch (error) {
+                  if (checkpoint && structuredBroker) {
+                    structuredBroker.abortCompactionTransaction(checkpoint.token);
+                    inFlightRecoveryCheckpoints.delete(checkpointOwner!);
+                  }
+                  throw error;
+                }
+                if (checkpoint && structuredBroker) {
+                  const ticket=checkpoint;
+                  const owner=checkpointOwner!;
+                  void structuredBroker.waitForCompactionHandoff(ticket.token).then(
+                    () => console.info("[chatgpt-web] passive_recovery_durable " + JSON.stringify({
+                      implementation: "archive-checkpoint-v2",
+                      intervalTokens: ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
+                    })),
+                    error => console.warn("[chatgpt-web] passive_recovery_not_durable " + JSON.stringify({
+                      reason: error instanceof Error ? error.name : "unknown",
+                    })),
+                  ).finally(() => inFlightRecoveryCheckpoints.delete(owner));
                 }
               }
             } else if (session.outstanding().length > 0) {
