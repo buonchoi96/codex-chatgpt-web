@@ -108,7 +108,7 @@ test("large canonical history cannot be downgraded from ZIP transport by passive
       role: "toolResult",
       toolCallId: "call-large",
       toolName: "inspect",
-      content: "x".repeat(180_000),
+      content: "x".repeat(900_000),
       isError: false,
       timestamp: 4,
     },
