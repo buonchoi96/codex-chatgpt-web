@@ -23,6 +23,7 @@ import type { AppConfig } from "./config";
 import { providerConfig } from "./config";
 import { AsyncEventQueue } from "./event-queue";
 import { readJsonRequestBody } from "./http-body";
+import { HttpSseTerminalObserver } from "./http-sse-terminal";
 import { httpStatusFromTerminalError } from "./lib/errors";
 import { createHash } from "node:crypto";
 import { augmentNativeModelCatalog } from "./model-catalog";
@@ -306,6 +307,8 @@ export class HttpTurnCounter {
       // when the client disconnects and cancels the observer branch.
       const [clientBody, lifecycleBody] = response.body.tee();
       const reader = lifecycleBody.getReader();
+      // Only a transport-side drain receipt, never a Codex client ACK.
+      const terminalProbe = endpoint === "responses" ? new HttpSseTerminalObserver() : undefined;
       let chunks = 0;
       let bytes = 0;
       streamAbortListener = () => {
@@ -322,6 +325,7 @@ export class HttpTurnCounter {
             if (chunk.done) break;
             chunks += 1;
             bytes += chunk.value.byteLength;
+            terminalProbe?.observe(chunk.value);
             // Consume eagerly so the lifecycle branch never backpressures the client branch.
           }
         } catch (error) {
@@ -338,6 +342,18 @@ export class HttpTurnCounter {
           }
           // Stream failure is delivered to the client branch; lifecycle cleanup stays best-effort.
         } finally {
+          if (terminalProbe && !abort.signal.aborted) {
+            const receipt = terminalProbe.snapshot();
+            console.info("[codex-chatgpt-web] win_http_sse_terminal_drained " + JSON.stringify({
+              httpTurnId: id, endpoint, chunks, bytes, ...receipt,
+              clientAcknowledged: false,
+            }));
+            if (!receipt.terminal || !receipt.done) {
+              console.warn("[codex-chatgpt-web] win_http_sse_tail_missing " + JSON.stringify({
+                httpTurnId: id, endpoint, terminal: receipt.terminal, done: receipt.done,
+              }));
+            }
+          }
           release();
         }
       })();

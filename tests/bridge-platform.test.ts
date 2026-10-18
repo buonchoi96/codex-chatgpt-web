@@ -88,3 +88,48 @@ test("completed native pull SSE includes terminal and preserves the answer",asyn
   expect(body).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n","\n"));
   expect(cancelled).toBe(0);
 });
+
+test("final_answer output and completed plus DONE are delivered in one terminal chunk on Windows", async () => {
+  let cancelled = 0;
+  const finalLine = "Final subagent response was accepted.";
+  async function* completed(): AsyncGenerator<AdapterEvent> {
+    yield { type: "text_delta", text: finalLine.slice(0, 12), phase: "final_answer" };
+    yield { type: "text_delta", text: finalLine.slice(12), phase: "final_answer" };
+    yield { type: "done", stopReason: "stop", endTurn: true };
+  }
+  const stream = bridgeToResponsesSSE(completed(), "chatgpt-web/test",
+    undefined, undefined, undefined, () => { cancelled++; }, 2000, { streamPlatform: "win32" });
+  const reader = stream.getReader();
+  const chunks: string[] = [];
+  for (;;) {
+    const item = await reader.read();
+    if (item.done) break;
+    chunks.push(new TextDecoder().decode(item.value));
+  }
+  const body = chunks.join("");
+  const output = body.split("\n").find(line => line.startsWith("data: ")
+    && line.includes('"type":"response.output_item.done"')
+    && line.includes('"phase":"final_answer"'));
+  expect(output).toBeDefined();
+  expect(JSON.parse(output!.slice(6)).item.content[0].text).toBe(finalLine);
+  expect(body.match(/event: response.completed/g)).toHaveLength(1);
+  expect(body.match(/data: \[DONE\]/g)).toHaveLength(1);
+  expect(chunks.at(-1)).toContain("event: response.completed");
+  expect(chunks.at(-1)).toContain("data: [DONE]\n\n");
+  expect(cancelled).toBe(0);
+});
+
+test("terminal diagnostic callback failure cannot swallow a final answer", async () => {
+  async function* completed(): AsyncGenerator<AdapterEvent> {
+    yield { type: "text_delta", text: "Final message.", phase: "final_answer" };
+    yield { type: "done", stopReason: "stop", endTurn: true };
+  }
+  const body = await new Response(bridgeToResponsesSSE(completed(), "chatgpt-web/test",
+    undefined, undefined, undefined, undefined, 2000, {
+      streamPlatform: "win32",
+      onTerminal: () => { throw new Error("diagnostic callback failure"); },
+    })).text();
+  expect(body).toContain("Final message.");
+  expect(body).toContain("event: response.completed");
+  expect(body).toEndWith("data: [DONE]\n\n");
+});

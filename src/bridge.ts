@@ -156,10 +156,16 @@ export function bridgeToResponsesSSE(
   let closed = false;
   let clientCancelled = false;
   let terminalReported = false;
+  // Queue the terminal event and [DONE] atomically to avoid a split tail
+  // during Bun/Windows SSE stream teardown.
+  let terminalFrameEnqueued = false;
+  let terminalFrameName: string | undefined;
   const reportTerminal = (status: ResponsesTerminalStatus) => {
     if (terminalReported || clientCancelled || closed) return;
     terminalReported = true;
-    options?.onTerminal?.(status);
+    // Metrics are a side channel. An exception here must not swallow the
+    // accepted final answer or prevent the native terminal from closing.
+    try { options?.onTerminal?.(status); } catch { /* diagnostic listener only */ }
   };
   // RC3 keep-alive: Codex's idle timer is timeout(idle_timeout, stream.next()) over an
   // eventsource_stream; ANY received event re-arms it, while an unknown type is ignored
@@ -173,14 +179,23 @@ export function bridgeToResponsesSSE(
   const emit = (name: string, data: Record<string, unknown>) => {
         if (closed) return;
         try {
-          controller.enqueue(encoder.encode(sseEvent(name, { type: name, sequence_number: seq++, ...data })));
+          const terminal = name === "response.completed"
+            || name === "response.incomplete" || name === "response.failed";
+          const frame = sseEvent(name, { type: name, sequence_number: seq++, ...data });
+          // The last protocol event and [DONE] share a single physical enqueue.
+          // Existing clients still parse two distinct SSE records in order.
+          controller.enqueue(encoder.encode(terminal ? frame + "data: [DONE]\n\n" : frame));
           emittedFrames++;
+          if (terminal) {
+            terminalFrameEnqueued = true;
+            terminalFrameName = name;
+          }
         } catch {
           closed = true;
         }
       };
       const emitDone = () => {
-        if (closed) return;
+        if (closed || terminalFrameEnqueued) return;
         try {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           emittedFrames++;
@@ -738,6 +753,9 @@ export function bridgeToResponsesSSE(
         frameCount: emittedFrames,
         platform: options?.streamPlatform ?? process.platform,
         compaction: options?.compaction === true,
+        terminalFrame: terminalFrameName ?? "missing",
+        doneCoalesced: terminalFrameEnqueued,
+        finalAnswerItems: finishedItems.filter(item => item.type === "message" && item.phase === "final_answer").length,
       }));
       closed = true;
       gated = true;
