@@ -165,7 +165,7 @@ test("recovery and compaction one-shot control tokens cannot be cross-used", asy
     recovery.handoffId,
     "checkpoint",
     "compaction",
-  )).toThrow("does not match its token");
+  )).toThrow("does not match");
   expect(committed).toEqual([]);
 
   transactions.submit(recovery.token, recovery.handoffId, " checkpoint ", "recovery");
@@ -178,20 +178,16 @@ test("recovery and compaction one-shot control tokens cannot be cross-used", asy
     compaction.handoffId,
     "summary",
     "recovery",
-  )).toThrow("does not match its token");
+  )).toThrow("does not match");
   transactions.abort(compaction.token);
 });
 
 
-test("passive recovery checkpoint never blocks the active tool observer", () => {
+test("passive recovery checkpoint remains asynchronous after tool-result delivery", () => {
   const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
-  const waitBlock = "await withAbort(Promise.race([\n                      structuredBroker.waitForCompactionHandoff";
-  expect(source).not.toContain(waitBlock);
-  expect(source).toContain("const armRecoveryCheckpoint = () => recoveryCheckpoint && structuredBroker");
-  expect(source).toContain("...(nextRecoveryCheckpoint ? [nextRecoveryCheckpoint] : [])");
-  expect(source).toContain("passive recovery checkpoint superseded by active tool");
-  const nextTools = source.indexOf("let nextTools = armNextTools()");
-  const checkpointRace = source.indexOf("let nextRecoveryCheckpoint = armRecoveryCheckpoint()");
-  expect(nextTools).toBeGreaterThan(0);
-  expect(checkpointRace).toBeGreaterThan(nextTools);
+  expect(source).toContain("void structuredBroker.waitForCompactionHandoff(ticket.token).then(");
+  expect(source).toContain("enhancedRecoveryCheckpointStore.shouldCheckpoint(");
+  expect(source).toContain("enhancedRecoveryCheckpointStore.commit(parsed, summary)");
+  expect(source).toContain("passiveRecoveryCheckpointInstruction(checkpoint)");
+  expect(source).not.toContain("await structuredBroker.waitForCompactionHandoff(ticket.token)");
 });

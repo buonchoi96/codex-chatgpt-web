@@ -1133,7 +1133,6 @@ export async function createChatGptMcpServer(options: {
         "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
-          `A one-shot private checkpoint request may provide ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}. It accepts only the issued control token and {handoff_id,summary}, not a work-tool invocation.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
           'This connector also implements reserved codex.control.safety_review with arguments {offset?,limit?,snapshot_sha256?}. It uses the same read-only scoped journal review as codex_safety_review; it cannot execute, retry, approve or resolve an operation.',
         ] : []),
