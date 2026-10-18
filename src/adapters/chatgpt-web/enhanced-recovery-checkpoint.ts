@@ -54,6 +54,18 @@ interface StoredEnhancedRecoveryCheckpointFile {
   checkpoints: StoredEnhancedRecoveryCheckpoint[];
 }
 
+/** Every immutable canonical boundary needs its own proof, even within one native thread.
+ * Two subagent branches (or a late checkpoint) must not evict each other. */
+function checkpointKey(checkpoint: StoredEnhancedRecoveryCheckpoint): string {
+  return compactionDigest([
+    checkpoint.threadId, checkpoint.modelId, checkpoint.modelFamily,
+    checkpoint.effort, checkpoint.epochHash, checkpoint.prefixLength,
+    checkpoint.prefixHash, checkpoint.ledger.rawPrefix,
+  ]);
+}
+
+const MAX_ENHANCED_RECOVERY_CHECKPOINTS_PER_THREAD = 24;
+
 const normalizedMessages = normalizedCompactionMessages;
 const prefixHash = compactionPrefixHash;
 const latestCompleteToolResultBoundary = latestCompletedCompactionBoundary;
@@ -179,11 +191,8 @@ export class EnhancedRecoveryCheckpointStore {
     }
     this.load();
     this.prune(this.checkpoints);
-    const stored = this.checkpoints.get(currentIdentity.threadId);
-    let baseline = 0;
-    if (stored && sameIdentity(stored, currentIdentity) && this.matchesPrefix(parsed, stored)) {
-      baseline = stored.prefixLength;
-    }
+    const stored = this.findMatchingCheckpoint(parsed, currentIdentity);
+    const baseline = stored?.prefixLength ?? 0;
     const boundary = latestCompleteToolResultBoundary(parsed.context.messages, baseline - 1);
     if (boundary === undefined || boundary + 1 <= baseline) {
       return { due:false,reason:"no_complete_tool_boundary",deltaTokens:0,canonicalTokens:0,prefixLength:baseline };
@@ -231,8 +240,11 @@ export class EnhancedRecoveryCheckpointStore {
     };
     const stored: StoredEnhancedRecoveryCheckpoint = { ...payload, integrityHash: compactionDigest(payload) };
     const next = new Map(this.checkpoints);
-    next.delete(currentIdentity.threadId);
-    next.set(currentIdentity.threadId, stored);
+    const key = checkpointKey(stored);
+    // A delayed handoff for an already verified boundary cannot replace its
+    // earlier accepted summary. Store divergent prefixes independently.
+    if (next.has(key)) return;
+    next.set(key, stored);
     this.prune(next);
     this.persist(next);
     this.checkpoints = next;
@@ -243,13 +255,20 @@ export class EnhancedRecoveryCheckpointStore {
     if (!currentIdentity) return { parsed, applied: false, reason: "missing native thread identity" };
     this.load();
     this.prune(this.checkpoints);
-    const stored = this.checkpoints.get(currentIdentity.threadId);
-    if (!stored) return { parsed, applied: false, reason: "no recovery checkpoint for this thread" };
-    if (!sameIdentity(stored, currentIdentity)) {
+    const threadCandidates = [...this.checkpoints.values()]
+      .filter(checkpoint => checkpoint.threadId === currentIdentity.threadId);
+    if (threadCandidates.length === 0) {
+      return { parsed, applied: false, reason: "no recovery checkpoint for this thread" };
+    }
+    const identityCandidates = threadCandidates.filter(checkpoint => sameIdentity(checkpoint, currentIdentity));
+    if (identityCandidates.length === 0) {
       return { parsed, applied: false, reason: "recovery checkpoint model identity mismatch" };
     }
-    if (!this.matchesPrefix(parsed, stored)) {
-      return { parsed, applied: false, reason: "recovery checkpoint canonical prefix mismatch" };
+    const stored = this.findMatchingCheckpoint(parsed, currentIdentity);
+    if (!stored) {
+      const newest = identityCandidates.sort((left, right) => right.prefixLength - left.prefixLength)[0]!;
+      return { parsed, applied: false,
+        reason: `recovery checkpoint canonical prefix mismatch (${this.prefixMismatch(parsed, newest) ?? "unknown"})` };
     }
 
     const messages = parsed.context.messages;
@@ -279,22 +298,39 @@ export class EnhancedRecoveryCheckpointStore {
     const applied = this.apply(parsed);
     if (!applied.applied) return { parsed, mode: "full", prefixLength: 0, reason: applied.reason };
     const identity = checkpointIdentity(parsed)!;
-    const checkpoint = this.checkpoints.get(identity.threadId)!;
+    const checkpoint = this.findMatchingCheckpoint(parsed, identity)!;
     return { parsed: applied.parsed, mode: "delta", prefixLength: checkpoint.prefixLength };
   }
 
+  /** Prefer the furthest completed canonical boundary, never the last writer. */
+  private findMatchingCheckpoint(
+    parsed: CodexParsedRequest, identity: CheckpointIdentity,
+  ): StoredEnhancedRecoveryCheckpoint | undefined {
+    return [...this.checkpoints.values()]
+      .filter(checkpoint => sameIdentity(checkpoint, identity))
+      .sort((left, right) => right.prefixLength - left.prefixLength || right.updatedAt - left.updatedAt)
+      .find(checkpoint => this.matchesPrefix(parsed, checkpoint));
+  }
+
   private matchesPrefix(parsed: CodexParsedRequest, stored: StoredEnhancedRecoveryCheckpoint): boolean {
+    return this.prefixMismatch(parsed, stored) === undefined;
+  }
+
+  /** Safe categorical diagnostics only; never emit raw instructions or tool output. */
+  private prefixMismatch(parsed: CodexParsedRequest, stored: StoredEnhancedRecoveryCheckpoint): string | undefined {
     const messages = parsed.context.messages;
-    if (messages.length < stored.prefixLength) return false;
-    if (latestCompleteToolResultBoundary(messages.slice(0, stored.prefixLength)) !== stored.prefixLength - 1) return false;
+    if (messages.length < stored.prefixLength) return "history_too_short";
+    if (latestCompleteToolResultBoundary(messages.slice(0, stored.prefixLength)) !== stored.prefixLength - 1)
+      return "incomplete_tool_boundary";
     // Collapsing tool images into textual hashes would remove visual evidence. Use full input.
     if (messages.slice(0, stored.prefixLength).some(message => message.role === "toolResult"
-      && Array.isArray(message.content) && message.content.some(part => part.type === "image"))) return false;
-    if (prefixHash(messages, stored.prefixLength) !== stored.prefixHash) return false;
+      && Array.isArray(message.content) && message.content.some(part => part.type === "image")))
+      return "image_evidence";
+    if (prefixHash(messages, stored.prefixLength) !== stored.prefixHash) return "parsed_prefix_changed";
     try {
       return compactionDigest(compactionRawPrefixProof(parsed, stored.prefixLength))
-        === compactionDigest(stored.ledger.rawPrefix);
-    } catch { return false; }
+        === compactionDigest(stored.ledger.rawPrefix) ? undefined : "raw_prefix_changed";
+    } catch { return "raw_prefix_unavailable"; }
   }
 
   private load(): void {
@@ -311,8 +347,9 @@ export class EnhancedRecoveryCheckpointStore {
           }
           checkpoints.sort((left, right) => left.updatedAt - right.updatedAt);
           for (const checkpoint of checkpoints) {
-            next.delete(checkpoint.threadId);
-            next.set(checkpoint.threadId, checkpoint);
+            const key = checkpointKey(checkpoint);
+            next.delete(key);
+            next.set(key, checkpoint);
           }
         }
       } catch {
@@ -327,8 +364,22 @@ export class EnhancedRecoveryCheckpointStore {
 
   private prune(checkpoints: Map<string, StoredEnhancedRecoveryCheckpoint>): void {
     const cutoff = this.now() - ENHANCED_RECOVERY_CHECKPOINT_TTL_MS;
-    for (const [threadId, checkpoint] of checkpoints) {
-      if (checkpoint.updatedAt < cutoff) checkpoints.delete(threadId);
+    const chronological = [...checkpoints].sort((left, right) => left[1].updatedAt - right[1].updatedAt);
+    checkpoints.clear();
+    for (const [key, checkpoint] of chronological) {
+      if (checkpoint.updatedAt >= cutoff) checkpoints.set(key, checkpoint);
+    }
+    // Bound storage while preserving the newest proofs of each native thread.
+    const countByThread = new Map<string, number>();
+    for (const checkpoint of checkpoints.values()) {
+      countByThread.set(checkpoint.threadId, (countByThread.get(checkpoint.threadId) ?? 0) + 1);
+    }
+    for (const [key, checkpoint] of checkpoints) {
+      const count = countByThread.get(checkpoint.threadId)!;
+      if (count > MAX_ENHANCED_RECOVERY_CHECKPOINTS_PER_THREAD) {
+        checkpoints.delete(key);
+        countByThread.set(checkpoint.threadId, count - 1);
+      }
     }
     while (checkpoints.size > MAX_ENHANCED_RECOVERY_CHECKPOINTS) {
       const oldest = checkpoints.keys().next().value as string | undefined;

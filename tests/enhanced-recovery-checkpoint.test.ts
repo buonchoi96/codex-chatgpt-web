@@ -224,3 +224,62 @@ test("unmatched in-flight tool calls never become an authenticated recovery boun
   expect(admission.due).toBe(false);
   expect(admission.reason).toBe("no_complete_tool_boundary");
 });
+
+test("out-of-order passive recovery handoffs preserve the most advanced checkpoint", () => {
+  const root = mkdtempSync(join(tmpdir(), "checkpoint-order-"));
+  roots.push(root);
+  const path = join(root, "recovery.json");
+  const shorter = parsed(completeHistory());
+  const longer = parsed([...completeHistory(),
+    {role:"assistant",timestamp:5,content:[{type:"toolCall",id:"call-2",name:"inspect",arguments:{path:"more"}}]},
+    {role:"toolResult",toolCallId:"call-2",toolName:"inspect",content:"evidence two",isError:false,timestamp:6},
+    {role:"user",content:"Continue goal",timestamp:7},
+  ]);
+  const store = new EnhancedRecoveryCheckpointStore(path);
+  // Later boundary resolves first, earlier handoff settles late.
+  store.commit(longer, "Later evidence from call-2 has been inspected.");
+  store.commit(shorter, "Earlier evidence from call-1 was inspected.");
+  const followup = parsed([...longer.context.messages, {role:"user",content:"Next turn",timestamp:8}]);
+  const applied = new EnhancedRecoveryCheckpointStore(path).apply(followup);
+  expect(applied.applied).toBe(true);
+  const rendered = JSON.stringify(applied.parsed.context.messages);
+  expect(rendered).toContain("Later evidence from call-2");
+  expect(rendered).not.toContain("Earlier evidence from call-1");
+  expect(rendered).toContain("Next turn");
+  expect(store.checkpointAdmission(followup).prefixLength).toBe(6);
+});
+
+test("divergent /goal histories on one thread retain separate authenticated prefixes", () => {
+  const root = mkdtempSync(join(tmpdir(), "checkpoint-branches-"));
+  roots.push(root);
+  const path = join(root, "recovery.json");
+  const branchA = parsed(completeHistory("Branch A exact instruction"));
+  const branchB = parsed(completeHistory("Branch B exact instruction"));
+  const store = new EnhancedRecoveryCheckpointStore(path);
+  store.commit(branchA, "Observed only branch A");
+  store.commit(branchB, "Observed only branch B");
+  const loaded = new EnhancedRecoveryCheckpointStore(path);
+  const selectedA = loaded.apply(parsed([...branchA.context.messages,
+    {role:"user",content:"Continue A",timestamp:5}]));
+  const selectedB = loaded.apply(parsed([...branchB.context.messages,
+    {role:"user",content:"Continue B",timestamp:5}]));
+  expect(selectedA.applied).toBe(true);
+  expect(selectedB.applied).toBe(true);
+  expect(JSON.stringify(selectedA.parsed.context.messages)).toContain("Observed only branch A");
+  expect(JSON.stringify(selectedB.parsed.context.messages)).toContain("Observed only branch B");
+  expect(JSON.stringify(selectedA.parsed.context.messages)).not.toContain("Observed only branch B");
+  const changed = parsed(completeHistory("Foreign branch instruction"));
+  expect(loaded.apply(changed).reason).toContain("parsed_prefix_changed");
+});
+
+test("a wrong-model recovery checkpoint remains unavailable after adding multiple candidates", () => {
+  const root = mkdtempSync(join(tmpdir(), "checkpoint-identity-"));
+  roots.push(root);
+  const path = join(root, "recovery.json");
+  const store = new EnhancedRecoveryCheckpointStore(path);
+  store.commit(parsed(completeHistory()), "Verified only for model 5.6.");
+  store.commit(parsed(completeHistory("Other branch")), "Other canonical branch.");
+  expect(new EnhancedRecoveryCheckpointStore(path).apply(
+    parsed(completeHistory(), {modelId:"gpt-6-sol",_chatgptModelFamily:"6"}),
+  ).reason).toContain("model identity mismatch");
+});

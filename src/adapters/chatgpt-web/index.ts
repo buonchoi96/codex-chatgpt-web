@@ -536,6 +536,11 @@ export function createChatGptWebAdapter(
         canonicalMessages: parsed.context.messages.length,
         fallbackMessages: checkpointInput.parsed.context.messages.length,
       }));
+    } else if (captureEnhancedRecoveryCheckpoint && parsed.context.messages.length >= 24) {
+      console.info("[chatgpt-web] passive_recovery_not_applied " + JSON.stringify({
+        reason: checkpointInput.reason ?? "unknown",
+        canonicalMessages: parsed.context.messages.length,
+      }));
     }
     const conversationKey = !parsed._compactionRequest
       && !freshConversationPerTurn
@@ -554,6 +559,9 @@ export function createChatGptWebAdapter(
       // the measured browser input budget.
       console.info(`[chatgpt-web] retained_delta_unavailable ${JSON.stringify({
         reason: retainedProof.reason,
+        checkpointApplied: checkpointInput.applied,
+        checkpointReason: checkpointInput.applied ? undefined : checkpointInput.reason,
+        canonicalMessages: parsed.context.messages.length,
         contextMessages: checkpointInput.parsed.context.messages.length,
       })}`);
     }
