@@ -6,7 +6,7 @@ import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
-import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
+import { CODEX_COMPACTION_CONTROL_WIRE_NAME, CODEX_RECOVERY_CHECKPOINT_WIRE_NAME } from "./native-compaction-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerRetirementDiagnostics, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
 import {ARCHIVE_READ_CONTROL_WIRE_NAME,assertArchiveReadProof} from './archive-read-proof';
@@ -147,6 +147,7 @@ function safeVisibleTools(environment: ChatGptTurnEnvironment, contract: ChatGpt
     .map(tool => tool.namespace!));
   return environment.tools.filter(tool => (
     wireName(tool) !== CODEX_COMPACTION_CONTROL_WIRE_NAME
+    && wireName(tool) !== CODEX_RECOVERY_CHECKPOINT_WIRE_NAME
     && !BRIDGE_TOOL_NAMES.has(tool.name)
     // Zero Risk does not expose model-authored JavaScript. Automatic Full mode keeps the native
     // Codex exec surface and applies its transport guard at invocation time below.
@@ -1132,6 +1133,7 @@ export async function createChatGptMcpServer(options: {
         "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
+          `A one-shot private checkpoint request may provide ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}. It accepts only the issued control token and {handoff_id,summary}, not a work-tool invocation.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
           'This connector also implements reserved codex.control.safety_review with arguments {offset?,limit?,snapshot_sha256?}. It uses the same read-only scoped journal review as codex_safety_review; it cannot execute, retry, approve or resolve an operation.',
         ] : []),
@@ -1162,7 +1164,8 @@ export async function createChatGptMcpServer(options: {
         assertArchiveReadProof(args);
         return result(await callTurnBroker(options.brokerSocketPath,{method:'archive_confirm',token:requestId,arguments:args},5000,extra.signal));
       }
-      if (contract === "native" && wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME) {
+      if (contract === "native" && (wire_name === CODEX_COMPACTION_CONTROL_WIRE_NAME
+        || wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME)) {
         if (input !== undefined) {
           throw new Error("Compaction control handoff does not accept freeform input");
         }
@@ -1175,7 +1178,8 @@ export async function createChatGptMcpServer(options: {
           throw new Error("Compaction control handoff requires summary");
         }
         await callTurnBroker(options.brokerSocketPath, {
-          method: "submit_compaction_handoff",
+          method: wire_name === CODEX_RECOVERY_CHECKPOINT_WIRE_NAME
+            ? "submit_recovery_checkpoint" : "submit_compaction_handoff",
           token: requestId,
           handoffId,
           summary,
