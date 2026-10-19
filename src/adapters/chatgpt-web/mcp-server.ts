@@ -50,9 +50,12 @@ const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
 ]);
 
 const turnTokenSchema = z.string().min(20).max(256);
-const nativeTurnTokenSchema = z.string().regex(/^turn_[A-Za-z0-9_-]{32}$/,
-  "Copy turn_token exactly from the current request: turn_ followed by 32 case-sensitive characters. Do not guess or reuse an earlier token.")
-  .describe("Opaque capability for this request. Copy the complete turn_token from the current request unchanged, including case, hyphens and underscores. Never infer it from another turn or from an error.");
+// Native task capabilities are turn_<32>; strictly one-shot compaction/recovery
+// handoffs have control_<32 hex> tokens, authenticated again by the exact
+// broker transaction and wire name. Never accept arbitrary token strings.
+const nativeTurnTokenSchema = z.string().regex(/^(?:turn_[A-Za-z0-9_-]{32}|control_[a-f0-9]{32})$/,
+  "Copy the exact current turn_token or one-shot control token; never guess or reuse a capability.")
+  .describe("Opaque, exact capability from the current request: turn_ + 32 characters, or a one-shot control_ + 32 lowercase hex characters. Do not alter its case or infer one from earlier turns.");
 const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
 const safetyReviewShape={offset:z.number().int().min(0).max(10_000).optional(),
   limit:z.number().int().min(1).max(50).optional(),snapshot_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()};
