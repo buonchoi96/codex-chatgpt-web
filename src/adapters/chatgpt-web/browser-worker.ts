@@ -5471,7 +5471,18 @@ export class ChatGptBrowserWorker {
       stoppedThinkingLabels: [...CHATGPT_STOPPED_THINKING_LABELS],
       knownKey: cache?.key,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
-    }, { timeout: 2_000 }).catch(() => undefined);
+    }, { timeout: CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS }).catch(error => {
+      // A busy 500K-character conversation can stall Playwright's DOM projection.
+      // A timeout is NOT evidence that the response was unmounted. Propagate it to
+      // the existing same-surface reconnect path without replaying the accepted Send.
+      if (error instanceof Error && (error.name === "TimeoutError"
+        || error instanceof ChatGptBrowserObservationTimeoutError)) {
+        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS);
+      }
+      // A detached locator during React remount remains a missing response:
+      // the caller will reconcile the exact assistant/user turn binding.
+      return undefined;
+    });
     if (observed?.extractionError) throw new Error(observed.extractionError);
     if (!observed) {
       if (responseTurn.page().isClosed()) {
@@ -6738,7 +6749,34 @@ export class ChatGptBrowserWorker {
           continue;
         }
 
-        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+        let snapshot: ChatGptResponseDomSnapshot;
+        try {
+          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+        } catch (error) {
+          if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
+          consecutiveObservationRebinds += 1;
+          if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS) {
+            throw new Error(
+              `ChatGPT response observation remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-surface rebinds`,
+              { cause: error },
+            );
+          }
+          await rebindLauncherPage(consecutiveObservationRebinds, error, turn.abortSignal);
+          submissionBaseline = {
+            ...submissionBaseline,
+            userTurns: page.locator(CHATGPT_USER_TURN_SELECTOR),
+            responseTurns: page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR),
+            domCache: {},
+          };
+          responseTurn = {
+            ...responseTurn,
+            locator: page.locator(chatGptAssistantTurnSelector(responseTurn.identity)),
+          };
+          responseDomCache.key = undefined;
+          responseDomCache.snapshot = undefined;
+          await diagnostics.capture(page, "response-observation-timeout-rebound");
+          continue;
+        }
         if (!snapshot.responsePresent) {
           try {
             const rebound = await withChatGptBrowserObservationTimeout(
