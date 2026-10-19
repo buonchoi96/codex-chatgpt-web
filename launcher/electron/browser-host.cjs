@@ -1353,19 +1353,38 @@ class BrowserHost {
     });
   }
 
-  async refreshChatGptHomeDocument(useSavedChats = false) {
+  /** Apply UA on the exact owned home view *before* ChatGPT navigation.
+   * Saved Chats and login/navigation elsewhere retain desktop UA. Reversible
+   * without mutating the partition's UA or Codex API request headers. */
+  configureHomeTemporaryChatUserAgent(useSavedChats = false) {
     const contents = this.view.webContents;
     const enableAndroid = shouldUseAndroidTemporaryChatUserAgent(
       !useSavedChats, this.getTemporaryChatAndroidUserAgent?.() === true,
     );
     if (enableAndroid) {
-      if (!this.homeDesktopUserAgent) this.homeDesktopUserAgent = contents.getUserAgent();
-      contents.setUserAgent(androidTemporaryChatUserAgent(this.homeDesktopUserAgent));
-      this.logger.info("browser.temporary_chat_user_agent", { uaClass: "android-mobile", scope: "home-verification" });
-    } else if (this.homeDesktopUserAgent) {
+      if (this.homeDesktopUserAgent) return false;
+      const desktop = contents.getUserAgent();
+      const mobile = androidTemporaryChatUserAgent(desktop);
+      this.homeDesktopUserAgent = desktop;
+      contents.setUserAgent(mobile);
+      this.logger?.info?.("browser.temporary_chat_user_agent", {
+        uaClass: "android-mobile", scope: "home-view",
+      });
+      return true;
+    }
+    if (this.homeDesktopUserAgent) {
       contents.setUserAgent(this.homeDesktopUserAgent);
       this.homeDesktopUserAgent = null;
+      this.logger?.info?.("browser.temporary_chat_user_agent", {
+        uaClass: "desktop", scope: "home-view",
+      });
+      return true;
     }
+    return false;
+  }
+
+  async refreshChatGptHomeDocument(useSavedChats = false) {
+    this.configureHomeTemporaryChatUserAgent(useSavedChats);
     // A navigation from the idle host already creates a fresh ChatGPT document. Reload only an
     // existing new-chat document in the selected mode so the helper sees one fresh catalog.
     const targetUrl = useSavedChats ? `${CHATGPT_ORIGIN}/` : TEMPORARY_CHAT_URL;
@@ -2133,9 +2152,21 @@ class BrowserHost {
   async reveal(inspectSession = true) {
     if (inspectSession) requireAutomaticBrowserInspection(this, "ChatGPT session inspection");
     this.show();
-    if (!this.selectedTurnTab() && this.view.webContents.getURL() === IDLE_BROWSER_URL) {
-      await this.view.webContents.loadURL(TEMPORARY_CHAT_URL);
-      if (inspectSession) await this.probeAuthentication();
+    if (!this.selectedTurnTab()) {
+      const homeUrl = this.view.webContents.getURL();
+      if (homeUrl === IDLE_BROWSER_URL || homeUrl === TEMPORARY_CHAT_URL) {
+        // The visible launcher tab can be opened independently of a Codex turn.
+        // It must receive the same UA mitigation as a fresh harness tab.
+        const changed = this.configureHomeTemporaryChatUserAgent(false);
+        if (homeUrl === IDLE_BROWSER_URL) {
+          await this.view.webContents.loadURL(TEMPORARY_CHAT_URL);
+          if (inspectSession) await this.probeAuthentication();
+        } else if (changed) {
+          // The old desktop build is already hydrated: reload under new UA.
+          await this.view.webContents.reload();
+          if (inspectSession) await this.probeAuthentication();
+        }
+      }
     }
     return this.snapshot();
   }
