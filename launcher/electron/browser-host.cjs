@@ -635,7 +635,7 @@ class BrowserHost {
     view.webContents.setZoomFactor(this.state.zoomFactor);
     this.bindShellZoomShortcuts(view.webContents);
     if (shouldUseAndroidTemporaryChatUserAgent(
-      !this.getUseSavedChats(), this.getTemporaryChatAndroidUserAgent(),
+      this.getUseSavedChats?.() === false, this.getTemporaryChatAndroidUserAgent?.() === true,
     )) {
       // Each turn already owns a fresh WebContentsView. Override before its
       // first ChatGPT navigation; destroying the view restores desktop defaults.
