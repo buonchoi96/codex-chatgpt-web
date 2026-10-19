@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { CodexMessage, CodexParsedRequest } from "../src/types";
 import {
   EnhancedRecoveryCheckpointStore,
+  ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
+  ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS,
 } from "../src/adapters/chatgpt-web/enhanced-recovery-checkpoint";
 import { CompactionTransactionStore } from "../src/adapters/chatgpt-web/compaction-transaction";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
@@ -282,4 +284,21 @@ test("a wrong-model recovery checkpoint remains unavailable after adding multipl
   expect(new EnhancedRecoveryCheckpointStore(path).apply(
     parsed(completeHistory(), {modelId:"gpt-6-sol",_chatgptModelFamily:"6"}),
   ).reason).toContain("model identity mismatch");
+});
+
+test("passive transport checkpoints precede account-budget exhaustion without changing native compact", () => {
+  expect(ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS).toBe(8_000);
+  expect(ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS).toBe(32_000);
+  const root = mkdtempSync(join(tmpdir(), "early-transport-recovery-"));
+  roots.push(root);
+  const source = completeHistory();
+  source[3]!.content = Array.from({ length: 45_000 }, (_, n) =>
+    `verified-value-${n.toString(36).padStart(8, "0")}`).join(" ");
+  const store = new EnhancedRecoveryCheckpointStore(join(root, "checkpoints.json"));
+  const admission = store.checkpointAdmission(parsed(source));
+  expect(admission.due).toBeTrue();
+  expect(admission.reason).toBe("ready");
+  expect(admission.canonicalTokens).toBeGreaterThan(ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS);
+  store.commit(parsed(source), "Exact completed tool-result boundary summary; no new authority.");
+  expect(store.apply(parsed([...source, { role: "user", content: "Next goal turn", timestamp: 5 }])).applied).toBeTrue();
 });
