@@ -4813,3 +4813,18 @@ test("a stage that spans a system sleep is not charged for the slept time", asyn
   await stage;
   expect(outcome).toEqual(["ChatGPT browser stage timed out: probe"]);
 }, 10_000);
+
+test("response disappearance rebinds the existing surface once instead of replaying an accepted Send", () => {
+  const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
+  const start = worker.indexOf('if (domError === "ChatGPT response DOM disappeared while the browser turn was active"');
+  const end = worker.indexOf('if (domError) throw chatGptResponseIncompleteError(domError);', start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const probe = worker.slice(start, end);
+  expect(probe).toContain("!missingDomReconnectAttempted && launcherSurfaceId");
+  expect(probe).toContain("await rebindLauncherPage(1,");
+  expect(probe).toContain("domHealthTracker.suspendForProgress()");
+  expect(probe).not.toContain("startRecoveryRun(");
+  expect(probe).not.toContain("send.press(");
+  expect(probe).not.toContain("page.goto(");
+});
