@@ -1,4 +1,4 @@
-name: Promote upstream 6.1.9 release after green CI
+name: Promote upstream 6.1.11 release after green CI
 on:
   workflow_run:
     workflows: ["CI"]
@@ -12,7 +12,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
-      - name: Preserve previous releases as prereleases and dispatch official v6.1.9
+      - name: Preserve previous releases as prereleases and dispatch official v6.1.11
         env:
           GH_TOKEN: ${{ github.token }}
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -25,7 +25,7 @@ jobs:
             echo "::notice::Main moved since green CI; do not release stale sources"
             exit 0
           fi
-          tag="v6.1.9"
+          tag="v6.1.11"
           if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
             echo "::notice::Official release already exists; leaving published release untouched"
             exit 0
