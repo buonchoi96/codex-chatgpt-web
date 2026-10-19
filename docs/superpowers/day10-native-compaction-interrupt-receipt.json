@@ -1,0 +1,64 @@
+{
+  "at": "2026-10-16T06:56:48.179Z",
+  "status": "NATIVE_STOP_PENDING_PROVIDER_RECOVERY_ACCEPTED_AFTER_PEER_CORRECTION",
+  "classification": "REAL_NATIVE_PROTOCOL_FIXED_PROVIDER_ONLY",
+  "raw_receipt": {
+    "path": "output/day10-native-compact-interrupt-258400-1792133683749.json",
+    "sha256": "18b98f6d27b333db9af7ffee0779bb08a80d6a7629cb5224d88661f013359349"
+  },
+  "native_rollout": {
+    "path": "output/day10-native-compaction-interrupt-evidence-20261016.jsonl",
+    "sha256": "1c898586ad2d10e224363542742ce9be4195d0784c01b2707bc5896717135c57"
+  },
+  "native": {
+    "version": "0.163.0-alpha.10.2",
+    "binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/e78bad9887fa50cf/codex.exe",
+    "sha256": "9ecb9df2ecafcc00542ef0966c6f1737a81397dc9531b0a4b178238e2bf4a46d",
+    "pid": 24788,
+    "thread_id": "01a1437d-ddf0-7900-be49-79f592364fac",
+    "interrupted_turn_id": "01a1437d-e010-7d21-8b1b-fdcafcefd14f"
+  },
+  "native_stop": {
+    "status": "interrupted",
+    "interrupt_requested_at": "2026-10-16T06:54:45.340Z",
+    "provider_abort_at": "2026-10-16T06:54:45.456Z",
+    "propagation_ms": 116,
+    "compacted_before_recovery": 0
+  },
+  "explicit_inert_recovery": {
+    "compact_requests": 2,
+    "installed_checkpoints": 1,
+    "original_source_marker_preserved": true,
+    "turn_id": "01a1437d-e137-7b10-beda-a298b0d92d68"
+  },
+  "requests": 4,
+  "actual_model_calls": 0,
+  "injected_usage": true,
+  "provider": "Fixed inert text-only; never calls browser/Web/native tools",
+  "cleanup": {
+    "native_exit": 0,
+    "http_server_stopped": true,
+    "complete": true
+  },
+  "source_sha256": "678251898127480f62c41a5242c69f0499b63e18415099cfd567527a1ff37357",
+  "typecheck_log": "output/day10-native-compaction-interrupt-typecheck-20261016.log",
+  "execution_log": "output/day10-native-compaction-interrupt-live-20261016.log",
+  "limits": [
+    "Stop occurred while the first remote provider awaited completion; it did not submit a summary.",
+    "Does not exercise the submitted-summary-before-consume store race fixed by separate unit/broker tests.",
+    "No actual Web compaction, large-context recall, approval or tool side effects exercised.",
+    "Coding-peer review completed with a preserved correction addendum; no independent native rerun."
+  ],
+  "observer_image_mode": "DISABLED",
+  "production_changed": false,
+  "safety_operations_retried": false,
+  "peer_review": {
+    "actor": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "initial_report": "output/day10-native-compaction-interrupt-review-round9-report.json",
+    "corrected_addendum": "output/day10-native-compaction-interrupt-review-round10-report.json",
+    "corrections": "Recovery turn UUID and precise116ms calculation independently reconciled against raw rollout; initial report preserved",
+    "native_reruns": 0
+  }
+}

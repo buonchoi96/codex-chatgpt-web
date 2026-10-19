@@ -56,3 +56,12 @@ export class ChatGptRecoveryWatchdog {
       elapsedAwakeMs: this.elapsed, suspended: busy, expired: Boolean(observed.errorKind && !busy && this.elapsed >= limit) };
   }
 }
+
+/** Recheck a stalled response using fresh DOM/native evidence immediately before Stop.
+ * A previously expired watchdog is not a permanent Stop authorization. Steering
+ * is separately authorized by its still-pending canonical user revision. */
+export function freshRecoveryStall(watchdog: ChatGptRecoveryWatchdog,
+  observation: RecoveryWatchdogObservation, awakeNow: number, steeringPending: boolean): boolean {
+  const current = watchdog.update(observation, awakeNow);
+  return steeringPending || current.expired;
+}

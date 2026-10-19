@@ -1,0 +1,174 @@
+{
+  "recorded_at": "2026-10-15T20:24:48.792Z",
+  "classification": "ACTUAL_NATIVE_WEB_INSTALLATION_AND_SOURCE_PROVENANCE",
+  "status": "PASS_FOR_EXPLICIT_COMPACT_AND_AUTHENTIC_NEXT_USER_TURN",
+  "raw_receipt": "output/day10-native-web-1792095381814.json",
+  "raw_receipt_sha256": "0306fdb133c38739ff98ae75cccc21d268598c30fafce295c334e9f0825d2c85",
+  "log": "output/day10-native-web-install-live-v2-20261016.log",
+  "log_sha256": "09632cb1bf7a286a8cf8dc9919cbbd445020138a5fae74ccb6bf6c90782681ea",
+  "binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/9614f1d9b40d9c4f/codex.exe",
+  "binary_sha256": "e98c516f1c8935789aabe9122ee7e05ec4c3efd1ba6acf179242e031c495b99e",
+  "version": "0.162.0-alpha.17.2",
+  "launcher_pid": 5636,
+  "native_thread_id": "01a14135-6eae-7a51-933a-6c56fd57dd22",
+  "rollout": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-web-cKV0Al\\profile\\sessions\\2026\\10\\16\\rollout-2026-10-16T03-16-23-01a14135-6eae-7a51-933a-6c56fd57dd22.jsonl",
+  "installation_line": 16,
+  "compaction_response_id": "resp_14a3c041d4be445b8587303638a1438e",
+  "installed_sha256": "f0be5ac45ff59ef603fada5c93305930b167aa85e388af825b16f6a5ca97b1f3",
+  "actual_source_recovery": {
+    "source_id": "msg_01a14135-6f81-74f2-88ce-fbfb0e54fe4f",
+    "source_turn_id": "01a14135-6ecf-7770-9c4f-61ce6858c163",
+    "summary_index": 5,
+    "provenance": {
+      "kind": "native_compacted",
+      "checkpoint_sha256": "564ec9f8515260078971c180356db2ff1010aac521e0706e05e879846bbbdd51",
+      "source_id": "msg_01a14135-6f81-74f2-88ce-fbfb0e54fe4f",
+      "source_revision": "retained_01a14135-6f82-7ba0-a218-160dc204d60a"
+    }
+  },
+  "native_contexts": [
+    {
+      "line": 6,
+      "turn_id": "01a14135-6ecf-7770-9c4f-61ce6858c163",
+      "model": "chatgpt-web/gpt-6-sol",
+      "effort": "high",
+      "sandbox": {
+        "type": "read-only"
+      }
+    },
+    {
+      "line": 18,
+      "turn_id": "01a14137-2613-7d93-9eb8-4c657079cd9f",
+      "model": "chatgpt-web/gpt-6-sol",
+      "effort": "high",
+      "sandbox": {
+        "type": "read-only"
+      }
+    },
+    {
+      "line": 25,
+      "turn_id": "01a14138-99b7-7861-bdf5-4783f845c0de",
+      "model": "chatgpt-web/gpt-6-sol",
+      "effort": "high",
+      "sandbox": {
+        "type": "read-only"
+      }
+    }
+  ],
+  "stages": [
+    {
+      "kind": "initial",
+      "started_at": "2026-10-15T20:16:23.509Z",
+      "input_messages": 4,
+      "finished_at": "2026-10-15T20:18:15.489Z",
+      "answer_sha256": "1afc73e07986a0444e7c0c6597933b433f4ecd86863ae4754be1cbadbdbc4a53",
+      "answer_length": 6,
+      "matched": true,
+      "elapsed_ms": 111980
+    },
+    {
+      "kind": "compact",
+      "started_at": "2026-10-15T20:18:15.796Z",
+      "input_messages": 6,
+      "finished_at": "2026-10-15T20:19:50.631Z",
+      "answer_sha256": "1788a48efa764e0c694ab235ff441c25580c87350dca098c4b1b89715ff9f3b5",
+      "answer_length": 1049,
+      "matched": true,
+      "elapsed_ms": 94835
+    },
+    {
+      "kind": "continuation",
+      "started_at": "2026-10-15T20:19:51.078Z",
+      "input_messages": 6,
+      "finished_at": "2026-10-15T20:21:35.355Z",
+      "answer_sha256": "cae0e91b6c91aed297863e7d8f4cc9c0e057731533a9f7c2176ed9e9ed67b64f",
+      "answer_length": 40,
+      "matched": true,
+      "elapsed_ms": 104277
+    }
+  ],
+  "physical_sends": [
+    {
+      "traceId": "17fd059c598b",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "372a915e885b",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "5127d83d3eb9",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    }
+  ],
+  "native_tool_actions": 0,
+  "source_sha256": {
+    "src/server.ts": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257",
+    "src/adapters/chatgpt-web/index.ts": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6",
+    "src/adapters/chatgpt-web/native-compaction-provenance.ts": "4e052c82c12dbc46d7f163152c7d4b262c8d7ee1fb0bec16b3696d9b188c88e2",
+    "src/adapters/chatgpt-web/browser-worker.ts": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e",
+    "src/adapters/chatgpt-web/prompt.ts": "a3cf78428d53f04c89af6fc3e7a2d51d8fd7b80a38b178749513fe7c266aeb26"
+  },
+  "tests": {
+    "regression": {
+      "log": "output/day10-native-glob-regression-20261016.log",
+      "pass": 264,
+      "skip": 25,
+      "fail": 0,
+      "assertions": 1698,
+      "files": 7
+    },
+    "dom": {
+      "log": "output/day10-native-glob-dom-final-20261016.log",
+      "pass": 29,
+      "fail": 0,
+      "assertions": 208,
+      "files": 2
+    },
+    "typecheck": {
+      "log": "output/day10-native-glob-typecheck-20261016.log",
+      "exit": 0
+    }
+  },
+  "source_fix": "JSON Unicode encodes literal asterisks in history; decoded source unchanged and whole-message comparator unchanged",
+  "retained_failures": {
+    "live": "output/day10-native-web-1792094893428.json",
+    "live_log": "output/day10-native-web-install-live-20261016.log",
+    "observed": "First mismatch after connector prefix at serialized references/*.md; exactly2stars, post-Send+2codeunits; one physical Send,6native reconnects,0native actions",
+    "unit_red": "output/day10-native-glob-red-20261016.log",
+    "dom": "output/day10-native-glob-dom-20261016.log",
+    "dom_followup": "Focused debug1pass then whole29pass with no source/test change; transient initial attachment failure root cause UNCONFIRMED"
+  },
+  "original_safety_operations_retried": false,
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "production_changed": false,
+  "acceptance_limits": [
+    "Manual isolated compact only; not automatic258400 onset",
+    "No effective272K recall proof",
+    "No actual synthetic-only /goal continuation or many-tool source settlement race",
+    "No bridge/native process restart recovery yet",
+    "No current Luna peer review of new asterisk encoding patch: existing owned child scope/handle unavailable"
+  ],
+  "cleanup": {
+    "native_pid": 3692,
+    "native_exit": 0,
+    "web": [
+      "completed",
+      "completed"
+    ],
+    "complete": true
+  }
+}

@@ -158,3 +158,59 @@ test.each([false,true])("nested exec gateway preserves image blocks and actual e
     await relay.broker.close();
   }
 });
+
+test.each([false,true])('nested gateway forwards connector content_items and original error status %s without flattening image bytes into text', async (isError) => {
+  const relay = await connectedRelay(true);
+  try {
+    const pending = relay.client.callTool({name:'codex_tool_call',arguments:{
+      turn_token:relay.requestToken,wire_name:'mcp__computer_use_swift__desktop_observe',arguments:{},
+    }});
+    const [request] = await relay.broker.nextToolBatch(relay.requestToken);
+    expect(request).toMatchObject({wireName:'exec',freeform:true});
+    const emitted:Array<Record<string,unknown>>=[];
+    const asyncFunction=Object.getPrototypeOf(async()=>{}).constructor as new(...args:string[])=>(...args:unknown[])=>Promise<void>;
+    const execute=new asyncFunction('tools','ALL_TOOLS','text','image','audio','generatedImage',request!.input!);
+    await execute({mcp__computer_use_swift__desktop_observe:async()=>({
+      content:'Tool returned multimodal content.',content_items:imageBlocks,isError,
+      structuredContent:{frame_id:'connector-multimodal'},_meta:{trace_id:'connector-test'},
+    })},[{name:'mcp__computer_use_swift__desktop_observe',description:'Observe'}],
+    (value:unknown)=>emitted.push({type:'text',text:typeof value==='string'?value:JSON.stringify(value)}),
+    (value:unknown)=>emitted.push(value as Record<string,unknown>),()=>{},()=>{});
+    expect(emitted.slice(0,imageBlocks.length)).toEqual(imageBlocks);
+    expect(emitted.filter(item=>item.type==='text').map(item=>item.text).join('\n')).not.toMatch(/iVBOR|\/9j\//);
+    relay.broker.completeTool(relay.requestToken,request!.callId,{content:emitted});
+    const received=await pending;
+    expect(received.content).toEqual(imageBlocks);
+    expect(received.isError).toBe(isError);
+    expect(received.structuredContent).toEqual({frame_id:'connector-multimodal'});
+    expect(received._meta).toEqual({trace_id:'connector-test'});
+  } finally {
+    await relay.client.close();await relay.server.close();await relay.broker.close();
+  }
+});
+
+test('codex_view_image nested gateway forwards native connector image content_items within one MCP result',async()=>{
+  const relay=await connectedRelay(true);
+  try {
+    const pending=relay.client.callTool({name:'codex_view_image',arguments:{turn_token:relay.requestToken,
+      path:'C:\\isolated-fixtures\\unread.png',detail:'original'}});
+    const [request]=await relay.broker.nextToolBatch(relay.requestToken);
+    expect(request).toMatchObject({wireName:'exec',freeform:true});
+    const emitted:Array<Record<string,unknown>>=[];
+    const asyncFunction=Object.getPrototypeOf(async()=>{}).constructor as new(...args:string[])=>(...args:unknown[])=>Promise<void>;
+    const execute=new asyncFunction('tools','ALL_TOOLS','text','image','audio','generatedImage',request!.input!);
+    await execute({view_image:async()=>({content:'Tool returned multimodal content.',
+      content_items:[{type:'image',mimeType:'image/png',data:png}],isError:false})},
+      [{name:'view_image',description:'Mocked native image read'}],
+      (value:unknown)=>emitted.push({type:'text',text:typeof value==='string'?value:JSON.stringify(value)}),
+      (value:unknown)=>emitted.push(value as Record<string,unknown>),()=>{},()=>{});
+    expect(emitted.some(item=>item.type==='image')).toBe(true);
+    expect(JSON.stringify(emitted.filter(item=>item.type==='text'))).not.toContain(png);
+    relay.broker.completeTool(relay.requestToken,request!.callId,{content:emitted});
+    const received=await pending;
+    expect(received.content).toEqual([{type:'image',mimeType:'image/png',data:png}]);
+    expect(received.isError).toBe(false);
+  } finally {
+    await relay.client.close();await relay.server.close();await relay.broker.close();
+  }
+});

@@ -139,7 +139,17 @@ export function selectChatGptWebTransport(
       : "canonical context and all attachments fit the measured one-message limits");
   }
 
+  // The ZIP is only an alternative transport for the *same* complete asset set.
+  // An eligible flag alone cannot prove that twelve original images (or skills)
+  // survived archival; reject missing, reclassified, or unrecognized assets.
+  const archiveInventoryMatches = input.archive !== undefined
+    && input.attachmentTypes.length === input.attachmentCount
+    && input.attachmentTypes.every(type => input.supportedAttachmentTypes.includes(type))
+    && input.archive.imageCount === input.attachmentTypes.filter(type => type.startsWith("image/")).length
+    && input.archive.skillCount === input.attachmentTypes.filter(type => type === "text/plain").length
+    && input.archive.imageCount + input.archive.skillCount === input.attachmentCount;
   const archiveFits = canonicalFits
+    && archiveInventoryMatches
     && input.archive?.eligible === true
     && input.archive.mediaType === "application/zip"
     && input.archive.promptChars <= (input.composerCharLimit ?? Number.POSITIVE_INFINITY)

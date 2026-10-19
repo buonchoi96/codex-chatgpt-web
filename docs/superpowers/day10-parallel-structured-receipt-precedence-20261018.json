@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C structured lifecycle evidence takes precedence over command stdout",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "workspace_reconciliation": {
+    "source": "stash@{0}: pre-recovery-hotfix-20261018-212012",
+    "restored_tracked_changes": 21,
+    "restored_untracked_files": 122,
+    "upstream_content_overlaps": 0,
+    "stash_retained": true,
+    "main_rewritten": false
+  },
+  "source_files": [
+    "src/adapters/chatgpt-web/parallel-native-commands.ts",
+    "tests/parallel-native-capacity.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/parallel-native-commands.ts": "C21C71F53A4B479736BE8FC253624D0790A33599416C49DED84548138331D17B",
+    "tests/parallel-native-capacity.test.ts": "6C3BCB7ED8915DF4C241C575A96C57487B29543A95523626FE8D73255281627C"
+  },
+  "failure_mode": "When structuredContent reported an ongoing native session, text content produced by the command could contain JSON with exit_code:0 and falsely settle a poll or newly dispatched child, releasing native capacity before terminal proof.",
+  "fix": "Treat connector structuredContent containing session_id or exit_code as authoritative for lifecycle decisions; ignore contradictory text JSON. Continue accepting JSON-only lifecycle receipts when structured lifecycle metadata is absent.",
+  "test_evidence": {
+    "red": "2 focused FAIL / 0 PASS; both false terminal proofs released slots while sessions remained live",
+    "green": "96 PASS / 0 FAIL / 351 assertions across parallel-native-capacity and parallel-native-commands suites on restored main",
+    "typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1681 PASS / 93 SKIP / 2 Windows symlinkSync EPERM FAIL in a historical checkpoint"
+  },
+  "limitations": {
+    "real_native_parallel_overlap": "NOT_RUN",
+    "native_parallel_exec_advertised": false,
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "safety_review_tool_advertised": false
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

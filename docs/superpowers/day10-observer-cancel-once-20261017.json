@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-17",
+  "kind": "native_reader_abort_and_read_failure_cancel_deduplication",
+  "classification": "RED_GREEN_PRIVATE_WINDOWS_NAMED_PIPE",
+  "source": "src/adapters/chatgpt-web/screen-observation.ts",
+  "source_sha256": "37390fa5c8c77042cdafc1edff82b79047866ade5ecc52451ec50b2e9c7d3acd",
+  "test": "tests/screen-reader-pipe-framing.test.ts",
+  "test_sha256": "aaef29e0737df6830ae32015066fa22ba9521d738ab5a38b041b0455d3835376",
+  "red": {
+    "command": "bun test tests/screen-reader-pipe-framing.test.ts",
+    "result": "1 pass, 1 fail, 3 expect calls",
+    "failure": "After one AbortSignal and one native read error, private named pipe received 2 observer_cancel messages instead of 1.",
+    "native_exec_chunk_id": "d911e2"
+  },
+  "fix": "A synchronous cancellationRequested guard sends at most one native observer_cancel request per observe operation, even when abort listener and read catch both execute.",
+  "green": {
+    "command": "bun test tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-reader-pipe-framing.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "tests_passed": 55,
+    "tests_failed": 0,
+    "assertions": 344,
+    "files": 8,
+    "log": "output/day10-screen-observer-cancel-dedup-final-20261017.log",
+    "log_sha256": "b1cf7281348aaf52ec19be83e452d6496a076ec3968ccb7411c2db94d0d2890a",
+    "root_typecheck_exit": 0,
+    "typecheck_log": "output/day10-screen-observer-cancel-dedup-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689",
+    "git_diff_check_exit": 0
+  },
+  "previous_same_turn_frame_order_receipt": "docs/superpowers/day10-observer-all-formats-frame-order-20261017.json",
+  "native_integration_current": "NOT_VERIFIED_AFTER_CHANGE: private native retest failed at FOCUS_FAILED before first observer call",
+  "native_retest_receipt": "output/day10-reader-mixed-chain-1792239979837/results.json",
+  "authenticated_web_model_e2e": "NOT_RUN",
+  "native_input_actions": 0,
+  "model_pixels": "NOT_RUN",
+  "safety_refusal_retries": 0,
+  "subagents": 0,
+  "production_configuration_changes": 0,
+  "git_reference_changes": 0,
+  "web_head": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "matrix_status_upgrades": 0,
+  "full_scope": 175
+}

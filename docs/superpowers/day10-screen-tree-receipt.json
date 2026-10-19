@@ -1,0 +1,106 @@
+{
+  "at": "2026-10-16T13:16:15.767Z",
+  "status": "OPTIONAL_NATIVE2_COMPACT_JSON_TREE_ACCEPTED_FOR_NAMED_LOCAL_SCENARIOS",
+  "source_sha256": {
+    "src/adapters/chatgpt-web/screen-tree.ts": "8134df81cdbb745ebb16767d25562ae9dda2aaf0ad3640d7e378fedbbcba4489",
+    "src/adapters/chatgpt-web/screen-observation.ts": "d81259a73b75d634f4c56a63670159778578a5441f2b3114f4ce50e62ad84ee8",
+    "src/adapters/chatgpt-web/mcp-server.ts": "df8356d8ab66e9b671fd368cb93b2274b6729fa21a2cee7ea9389f0a86dc6831",
+    "tests/screen-tree.test.ts": "8adbb55287f2ee817833970c19d6c73ccde70234987dfce602f162a88ae5e681",
+    "tests/mcp-screen-tree.test.ts": "504d55c3e06cbc332b3fd1ce8792149115c2094bcf97b4e8374b8d61d2769e21",
+    "tests/native-screen-observer-config.test.ts": "e1e63d5dfa0bf735a6d9f90a207d16ec0afe9c024b3438fb3f2719f51291ad69",
+    "tests/setup-observer-runtime-change.test.ts": "993b8c45276d7cb8342fd494eca37e8ed162335ce6b42e4d871dcdceabb7dade",
+    "tests/mcp-stdio-screen-observer.test.ts": "d34859c653e1dc40605eb31317faa0b6e0931234a8dc8f5a04df1e71aa2bd665",
+    "tests/mcp-stdio-image-relay.test.ts": "1159318439a02c8d0aa1457e26718745a13e7d33f0550d30b4378e46b742a2f6",
+    "tests/setup-lifecycle.test.ts": "88e5d8f6a6c299efe640cebb0d7b05de65290b89e90ab94aa06fcafc89a2f18a",
+    "docs/native-screen-observer.md": "032d4722d189d934d5c027eac6a5109109d0868b90fc940c403c8e0f498dea8a"
+  },
+  "implementation": "output/day10-screen-tree-implementation-complete.json",
+  "main_review": "output/day10-screen-tree-main-final-review-20261016.json",
+  "independent_final_review": "output/day10-screen-tree-final-supervisor-report.json",
+  "independent_final": {
+    "pass": 51,
+    "skip": 1,
+    "fail": 0,
+    "assertions": 334,
+    "tests": 52,
+    "files": 7,
+    "exit_code": 0,
+    "log": "output/day10-screen-tree-final-supervisor.log",
+    "log_sha256": "4e85b2c4e5b41f44261b49a003859a452985d8c246f3724c39a066197fe63082",
+    "report_sha256": "85cdb3fa194ab236bb13804d50272693aa2fe93e8281966a43891d0263d04819"
+  },
+  "findings": [
+    {
+      "id": "P1-redacted-parent-provider-id",
+      "status": "ADDRESSED_AND_REGRESSION_GREEN",
+      "evidence": [
+        "tests/screen-tree.test.ts: redacted UIA parent ID absent from derived JSON through an unredacted child",
+        "tests/screen-tree.test.ts: duplicate raw IDs suppressed when one candidate is redacted",
+        "tests/screen-tree.test.ts: redacted parent ID stays private when byte truncation omits that parent",
+        "tests/mcp-screen-tree.test.ts: SDK projection preserves linked ephemeral parent semantics and omits the raw ID from the derived tree"
+      ],
+      "native_receipt_boundary": "Raw native nodes remain unchanged and are not sanitized; the SDK regression asserts the original native child parent_id is retained."
+    },
+    {
+      "id": "P2-source-partial-vs-projection-truncation",
+      "status": "ADDRESSED_AND_REGRESSION_GREEN",
+      "evidence": [
+        "tests/mcp-screen-tree.test.ts: SDK source partial/truncation case yields PARTIAL while tree.truncated=false and absence_is_proven=false",
+        "The same case preserves cv.truncated=true, uia.partial=true, and ocr.status=UNAVAILABLE in tree.sources."
+      ]
+    }
+  ],
+  "review_fix": "output/day10-screen-tree-fix-complete.json",
+  "main_current_focused": {
+    "log": "output/day10-screen-tree-main-final-focused.log",
+    "pass": 22,
+    "fail": 0,
+    "assertions": 155,
+    "exit_code": 0
+  },
+  "main_current_typecheck": {
+    "log": "output/day10-screen-tree-main-final-current-typecheck.log",
+    "exit_code": 0
+  },
+  "model_receipt": "docs/superpowers/day10-screen-tree-final-model-receipt.json",
+  "scope": [
+    "Optional compact/json/both added only after existing observer authorization/native validation; default response unchanged",
+    "16KiB whole added-tree UTF8 budget,200node ceiling,depth8,source-tagged groups,explicit genuine UIA parent links,ephemeral IDs",
+    "Unresolved/missing/duplicate parent relations,cycles fail boundedly,normalized viewport bounds,quoted control/Unicode labels",
+    "Derived UIA identity redaction includes references,duplicates and omitted-parent cases; native legacy nodes remain unchanged",
+    "Source partial/truncation remains separate from projection truncation; absence is never proven",
+    "Formatting adds no native request or capture and never enables image mode"
+  ],
+  "preserved_failures": {
+    "integration_red": "output/day10-screen-tree-main-integration-red.log",
+    "privacy_red": "output/day10-screen-tree-main-redacted-parent-red.log",
+    "pure_privacy_red": "output/day10-screen-tree-fix-red.log",
+    "typecheck_red": {
+      "log": "output/day10-screen-tree-main-after-review-typecheck.log",
+      "exit_code": 2,
+      "cause": "New regression optional expected parent ID inferred as string|undefined; main changed only the assertion after actual child completion/gate retirement"
+    },
+    "initial_gate_handoff": "output/day10-screen-tree-implementation-rebind-proof-20261016.json"
+  },
+  "prior_actual_native_fixture": "docs/superpowers/day10-observer-launch-wiring-receipt.json",
+  "prior_fixture_scope": "One genuine generated-startup semantic call READY617.9516ms; executed before this new formatter and NOT replayed. This phase contains synthetic-provider SDK and serialization fixtures only.",
+  "limits": [
+    "No actual Web-model semantic/pixel proof or current DEV deployment test",
+    "No new native capture/benchmark; no fresh C++ build in this phase",
+    "No semantic mutation or cross-frame diff/ACK acceptance",
+    "External-service test skipped; actual parallel2–8 remains policy-blocked, CPU scaling/load/FPS and effective272K/archive recall remain open"
+  ],
+  "safety": {
+    "ledger": "docs/superpowers/day10-safety-blockers.json",
+    "pending_records": 4,
+    "scope_deviation": "Distinct excluded skill read requested by implementer during ad hoc typecheck; current call/receipt logged as scope deviation, not historical refusal reconciliation.",
+    "original_paired_read_or_full_verify_replayed": false,
+    "denied_native_hash_retried": false
+  },
+  "observer_image_mode": "DISABLED",
+  "actual_native_ui_model_calls_this_phase": 0,
+  "composer_attachments": 0,
+  "input_sequences": 0,
+  "production_config_or_installed_profile_changed": false,
+  "git_refs_changed": false
+}

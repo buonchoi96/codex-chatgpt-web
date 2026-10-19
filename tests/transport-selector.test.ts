@@ -158,9 +158,25 @@ test("selector blocks twelve-image ZIP when canonical history exceeds the accoun
   expect(decision.reason).toContain("exceeding the measured account budget");
 });
 
+test("ZIP selection refuses incomplete archive asset inventory even if marked eligible", () => {
+  const original = selectorInput();
+  const images = Array(12).fill("image/png");
+  const base = {
+    ...original, composerChars: 2_000, attachmentCount: 12, attachmentTypes: images,
+    archive: { eligible: true, mediaType: "application/zip" as const, imageCount: 11,
+      skillCount: 0, promptChars: 300, promptTokens: 60, bytes: 2_000, maxBytes: 50_000_000 },
+  };
+  expect(selectChatGptWebTransport(base).choice).toBe("BLOCK");
+  expect(selectChatGptWebTransport({ ...base, archive: { ...base.archive, imageCount: 12 } }).choice)
+    .toBe("ZIP_SINGLE_MESSAGE");
+  const mixed = { ...base, attachmentTypes: [...images.slice(0, 11), "text/plain"],
+    archive: { ...base.archive, imageCount: 12, skillCount: 0 } };
+  expect(selectChatGptWebTransport(mixed).choice).toBe("BLOCK");
+});
+
 test("explicit inline rejection permits ZIP while a failed ZIP is never retried silently", () => {
   const inline = selectorInput();
-  const archive = { eligible: true, mediaType: "application/zip" as const, imageCount: 0, skillCount: 0, promptChars: 200, promptTokens: 50, bytes: 1_000, maxBytes: 50_000_000 };
+  const archive = { eligible: true, mediaType: "application/zip" as const, imageCount: 4, skillCount: 0, promptChars: 200, promptTokens: 50, bytes: 1_000, maxBytes: 50_000_000 };
   expect(selectChatGptWebTransport({ ...inline, composerChars: 2_000, archive }))
     .toMatchObject({ choice: "ZIP_SINGLE_MESSAGE", measurements: { canonicalTokens: 16_484, accountCanonicalTokenLimit: 80_000 } });
   expect(selectChatGptWebTransport({

@@ -1,0 +1,74 @@
+{
+  "at": "2026-10-16T16:59:00.204Z",
+  "status": "EXACTLY_TWO_NEW_LUNA_HIGH_NATIVE_VERIFIED_BEFORE_TASK_RELEASE",
+  "authorization": "User call_cc6cfc8a77594ce1a95f1bf51f6f7bc3: Cho phép thay đúng2 Luna High mới",
+  "old_pair_terminal": "native wait not_found for both; explicit app followup to prior supervisor thread not found",
+  "schema_note": "Live spawn schema represents no-history as fork_context:false and task_name in message; actual child metadata verifies model/effort, not payload alone.",
+  "proof": [
+    {
+      "id": "01a145a6-55cd-7691-834b-2bcb26869893",
+      "nickname": "Plato",
+      "role": "Coding / implementation",
+      "gate_role": "implementation",
+      "agent_id": "01a145a6-55cd-7691-834b-2bcb26869893",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-11-01a145a6-55cd-7691-834b-2bcb26869893.jsonl",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "session_meta": {
+        "line": 1,
+        "id": "01a145a6-55cd-7691-834b-2bcb26869893",
+        "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+        "model": null
+      },
+      "first_context": {
+        "line": 8,
+        "turn_id": "01a145a6-57d9-75c2-886a-b0c408044dd3",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      }
+    },
+    {
+      "id": "01a145a6-58d8-71a0-8611-5701663b2284",
+      "nickname": "Popper",
+      "role": "UI / research / test supervisor",
+      "gate_role": "supervisor",
+      "agent_id": "01a145a6-58d8-71a0-8611-5701663b2284",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-12-01a145a6-58d8-71a0-8611-5701663b2284.jsonl",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "session_meta": {
+        "line": 1,
+        "id": "01a145a6-58d8-71a0-8611-5701663b2284",
+        "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+        "model": null
+      },
+      "first_context": {
+        "line": 8,
+        "turn_id": "01a145a6-5c04-7852-89c7-4d04358aeeb1",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      }
+    }
+  ],
+  "active_owned_agents": 2,
+  "nested_agents": 0,
+  "bare_resume": false
+}

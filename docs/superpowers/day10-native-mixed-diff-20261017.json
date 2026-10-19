@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-17",
+  "kind": "real-native-isolated-mixed-semantic-ack-chain",
+  "classification": "PASS_PRIVATE_NATIVE_SWIFT_MCP_NATIVE2_STDIO",
+  "raw_receipt": "output/day10-reader-mixed-chain-1792216765981/results.json",
+  "raw_receipt_sha256": "0da28da056f9106fe3dda958cfae033047011b856124476522b5c3b75fed62c6",
+  "harness": "output/day10-reader-mixed-ack-chain-20261017.mjs",
+  "harness_sha256": "966317ece883f84c558d69e0f3e0f70782d8469deacb7b701fbd4f86ede0b667",
+  "native2_observe_calls": 5,
+  "json_chain": {
+    "frames": [2, 3, 4, 5],
+    "generations": [1, 1, 1, 1],
+    "full_snapshots": 2,
+    "mixed_diffs": 2,
+    "explicit_ack_chaining": true,
+    "stale_ack_fell_back_to_full": true,
+    "uia_provider_stable_runtime_id": true,
+    "transient_ocr_cv_replaced_by_current_frame": true,
+    "raw_nodes_exposed_in_explicit_json": false,
+    "source_counts_per_frame": {"cv": 15, "ocr": 1, "uia": 1}
+  },
+  "compute": {
+    "actual_worker_count": 1,
+    "allocation_status": "uncertain",
+    "governor_reason": "pressure_unknown_safe_one"
+  },
+  "cleanup": "all four isolated owned processes and input state cleaned",
+  "native_input_sequences": 0,
+  "image_encodes": 0,
+  "model_pixel_receipt": "NOT_RUN",
+  "authenticated_web_model_semantic_e2e": "NOT_RUN",
+  "native_uia_only_delta": "NOT_RUN",
+  "observer_image_mode": "DISABLED",
+  "verified_web_head_at_current_review": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+  "verified_swift_head_at_current_review": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "matrix_status_upgrades": 0,
+  "limitations": [
+    "Results predate the separately tested final-publication cancellation fix.",
+    "Private stdio evidence does not establish authenticated Web-model tool delivery.",
+    "Current outer Codex tool inventory did not advertise codex_screen_observe."
+  ]
+}

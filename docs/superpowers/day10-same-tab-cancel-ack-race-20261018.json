@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-E: cancellation-versus-accepted-Send receipt race in same-tab recovery",
+  "goal_status": "ACTIVE",
+  "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "workspace": {
+    "web_branch": "main",
+    "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+    "web_preexisting_dirty_entries": 152,
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "swift_preexisting_dirty_entries": 66,
+    "git_reference_mutations": 0,
+    "production_or_global_config_mutations": 0,
+    "subagents_spawned": 0
+  },
+  "defect": "An accepted same-tab or fallback Send could be reported as cancelled if cancel() raced the delayed accepted acknowledgement. The cancellation result hid an already committed send receipt; a later recovery must still be forbidden.",
+  "changes": {
+    "source": "src/adapters/chatgpt-web/same-tab-recovery.ts",
+    "test": "tests/same-tab-recovery.test.ts",
+    "preexisting_dirty_files_preserved": true,
+    "accepted_delta": "Return resumed and restore RESUMED even if cancellation was requested while submit() awaited acknowledgement.",
+    "accepted_fallback": "Return fallback and restore FALLBACK_SUBMITTED when accepted acknowledgement races cancellation.",
+    "unknown_receipt": "Keep UNKNOWN_STOP_OR_SEND unsafe; never infer acceptance from cancellation.",
+    "no_replay": "Sticky cancelled flag rejects all later recover() attempts, including after accepted receipts.",
+    "source_sha256": "31EA2A5AA7D6F8230CE98B5FE8B831E02A57791A3FF8AFD31D671FD96AA19CC6",
+    "test_sha256": "27FE8BC6551DAAEDBDD8878E495D5E43670C68847AA97D43BEF56942EE4321F8"
+  },
+  "red": {
+    "command": "bun test tests/same-tab-recovery.test.ts",
+    "result": "16 PASS / 2 FAIL / 87 assertions",
+    "failure": "Both accepted-after-cancellation tests expected resumed/fallback but received cancelled."
+  },
+  "green": {
+    "command": "bun test tests/same-tab-recovery.test.ts tests/recovery-watchdog.test.ts tests/same-tab-recovery-integration.test.ts tests/same-tab-recovery-dom.test.ts",
+    "result": "36 PASS / 0 FAIL / 3 SKIP / 172 assertions",
+    "new_regressions": 3,
+    "typecheck": "PASS: bun run typecheck",
+    "diff_check": "PASS: git diff --check",
+    "environment": "Bun 1.4.0 on Windows, local deterministic fixtures"
+  },
+  "acceptance_limits": {
+    "actual_owned_browser_recovery": "NOT RUN: no live browser Send or Stop performed",
+    "dom_tests": "3 SKIP: headless / real owned DOM gates remain unverified",
+    "native_web_accepted_receipt": "NOT RUN: mocked action acknowledgements only",
+    "full_goal": "PARTIAL: broader ENV/REPLAY/COMPACT and all other GOAL requirements still require independent acceptance"
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "advisory_snapshot_sha256": "d15e25fd28e099989f33a0af7d837e54d3455341a5e51a10b8f3d62018f1629f",
+    "advisory_unresolved_count": 23,
+    "listed_entries": 20,
+    "complete": false,
+    "next_offset": 20,
+    "status": "PENDING_SAFETY_REVIEW",
+    "native_review_tool": "NOT ADVERTISED",
+    "additional_pages_read": false,
+    "original_operations_retried": 0,
+    "scope_review_complete": false
+  },
+  "matrix": { "total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0 },
+  "agents": { "spawned": 0, "actual_main_model_and_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR" }
+}

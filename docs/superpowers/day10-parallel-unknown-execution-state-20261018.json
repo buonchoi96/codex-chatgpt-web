@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C retain uncertain native dispatch when an error reports unknown execution state",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "source_files": [
+    "src/adapters/chatgpt-web/parallel-native-commands.ts",
+    "tests/parallel-native-capacity.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/parallel-native-commands.ts": "DD204D948C10209EF60EAA6820DC8F04E0FA0B7631A32A732503C1D84B95D1EC",
+    "tests/parallel-native-capacity.test.ts": "BD83690F9FEC31697AFA46A2F2DDEFD211CAA49298BAE3057D5F1C8CC85212D4"
+  },
+  "failure_mode": "A native child error with an unfamiliar code but explicit execution_state=unknown was treated as a completed failure, releasing its reserved slot despite unverified execution.",
+  "fix": "Treat explicit execution_state=unknown or dispatch_state=unknown as uncertain for error results regardless of error code, retaining capacity and the exact result receipt. Keep known terminal failures classified as failed and allow their slot to be released.",
+  "test_evidence": {
+    "red": "1 PASS / 1 FAIL: an explicit unknown native error code was wrongly marked failed",
+    "green": "99 PASS / 0 FAIL / 360 assertions across parallel-native-capacity and parallel-native-commands suites",
+    "typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "real_native_parallel_e2e": "NOT_RUN"
+  },
+  "limitations": {
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "native_parallel_exec_advertised": false,
+    "real_native_parallel_overlap": "NOT_RUN"
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

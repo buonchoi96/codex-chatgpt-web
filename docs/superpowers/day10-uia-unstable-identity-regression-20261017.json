@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-17",
+  "phase": "P0-A4 verified UIA provider identity safeguard",
+  "status": "RED_REPRODUCED_GREEN_VERIFIED; ACTUAL_WEB_MODEL_UNVERIFIED",
+  "repo": "F:/Source Projects/codex-chatgpt-web",
+  "head": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+  "source": "src/adapters/chatgpt-web/screen-tree-diff.ts",
+  "source_sha256": "88df56e7cdd338e4a4a8d58c731099441469fbad85c32f2d7c810c35c1349e9a",
+  "test": "tests/screen-tree-diff.test.ts",
+  "test_sha256": "8c76b28e3180bd53862ec1471c55424731db1c477322f1d11eb9ba30ebc4da63",
+  "native_source_evidence": "ComputerUseSwift-MCP/native/src/uia_observe.cpp runtime_id(): fallback.<traversal-index> on missing GetRuntimeId; clips runtime ID to 120 bytes",
+  "reproduction": "Before patch: bun test tests/screen-tree-diff.test.ts => 2 PASS, 1 FAIL; falsely returns updated for fallback.0 across different UIA elements",
+  "fix": "Reject fallback.<digits> provider identities and native IDs of 120 or more UTF-8 bytes from incremental delta, including provider-parent identities. Fallback to full JSON snapshot; real stable identities remain diff-eligible.",
+  "verification": {
+    "command": "bun test tests/screen-tree-diff.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "passed": 40,
+    "failed": 0,
+    "assertions": 239,
+    "log": "output/day10-frame-ack-and-native-id-regression-20261017.log",
+    "log_sha256": "2a7aefb1acf0c0b5f98591aa5b725921a67cdbe08ca1df6278ebdbf60a63a500",
+    "typecheck": "bun run typecheck exit0",
+    "typecheck_log": "output/day10-native-id-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689",
+    "git_diff_check": "exit0",
+    "further_mcp_contract_regression": {
+      "test": "tests/mcp-screen-tree.test.ts",
+      "test_sha256": "8aa6d19c2cb05de4ce0512fac2c1cf67145acc64382fbd3793720712adcf31ee",
+      "scope": "One real MCP SDK full/ACK turn with synthesized native fallback.0 identity, verifies full fallback and no incremental response, without relying only on pure formatter",
+      "combined_passed": 41,
+      "combined_failed": 0,
+      "combined_assertions": 247,
+      "log": "output/day10-frame-ack-and-native-id-regression-20261017-mcp.log",
+      "log_sha256": "09f9f5116841727b6a66df779ac91c70ac527ec5557aaf24d4f206efbd36c0f9",
+      "typecheck": "bun run typecheck exit0",
+      "diff_check": "git diff --check exit0"
+    }
+  },
+  "limitations": [
+    "Native C++ emitter is unchanged; real fallback input is deliberately not treated as a stable delta identity.",
+    "The red-to-green check uses a controlled UIA runtime-ID failure fixture; actual Windows failure to retrieve GetRuntimeId was not induced.",
+    "Full browser Web-model receipt, true native UIA-only diff, reconnect and cancellation integration remain unverified."
+  ],
+  "execution": {"subagents_spawned": 0, "production_changes": 0, "git_reference_changes": 0},
+  "matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0}
+}

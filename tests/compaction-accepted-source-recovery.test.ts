@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import type { CodexParsedRequest } from "../src/types";
 import { extractChatGptCompactionSourceRevision } from "../src/adapters/chatgpt-web/environment";
 import {
@@ -80,4 +81,49 @@ test("a real user message in compaction input wins over a retained source", () =
     { type: "input_text", text: "New genuine user instruction." },
   ]);
   expect(compact._trustedCompactionSource).toBeUndefined();
+});
+
+test("a native-shaped standalone compact refuses an unrelated prior human source", () => {
+  const thread = randomUUID(), turn = randomUUID(), foreign = randomUUID();
+  const compact = request(thread, turn, true);
+  const body = compact._rawBody as {
+    model?: string;
+    client_metadata: Record<string, string>;
+    input: Record<string, unknown>[];
+  };
+  body.model = "chatgpt-web/high";
+  body.client_metadata["x-codex-turn-metadata"] = JSON.stringify({
+    request_kind: "compaction", thread_id: thread, turn_id: turn, sandbox_mode: "danger-full-access",
+    workspaces: { [process.cwd()]: { has_changes: false } },
+  });
+  body.input = [{
+    type: "message", role: "user", id: "msg_fake_foreign",
+    content: [{ type: "input_text", text: "Old unrelated user task" }],
+    internal_chat_message_metadata_passthrough: { turn_id: foreign, content_item_kinds: ["user.text"] },
+  }];
+  expect(() => extractChatGptCompactionSourceRevision(compact)).toThrow(
+    expect.objectContaining({ code: "REPLAY_PROVENANCE_UNVERIFIED" }),
+  );
+});
+
+test("a native-shaped standalone compact accepts its current-turn human source", () => {
+  const thread = randomUUID(), turn = randomUUID();
+  const compact = request(thread, turn, true);
+  const body = compact._rawBody as {
+    model?: string;
+    client_metadata: Record<string, string>;
+    input: Record<string, unknown>[];
+  };
+  body.model = "chatgpt-web/high";
+  body.client_metadata["x-codex-turn-metadata"] = JSON.stringify({
+    request_kind: "compaction", thread_id: thread, turn_id: turn,
+  });
+  const content = [{ type: "input_text", text: "Current authorized instruction" }];
+  body.input = [{
+    type: "message", role: "user", id: "msg_current_user", content,
+    internal_chat_message_metadata_passthrough: { turn_id: turn, content_item_kinds: ["user.text"] },
+  }];
+  expect(extractChatGptCompactionSourceRevision(compact)).toEqual({
+    itemId: "msg_current_user", turnId: turn, content,
+  });
 });

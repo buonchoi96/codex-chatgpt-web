@@ -83,11 +83,39 @@ export function validateContextArchive(bytes:Uint8Array,expectedSha256?:string):
   const manifest=JSON.parse(manifestText);
   if(manifest.version!==1||!Array.isArray(manifest.files)||manifest.files.length!==paths.size-1)throw new Error('Invalid archive manifest');
   const declared=new Set<string>();
+  const entriesByPath=new Map<string,FileEntry>();
   for(const entry of manifest.files){
     if(!entry||typeof entry.path!=='string'||entry.path==='manifest.json'||!safeName(entry.path)||declared.has(entry.path))throw new Error('Invalid archive manifest path');
     declared.add(entry.path);const content=files[entry.path];
     if(!content||content.length!==entry.bytes||sha(content)!==entry.sha256)throw new Error('Archive content hash mismatch');
+    entriesByPath.set(entry.path,entry);
   }
+  // File hashes alone do not establish which historical images and skills a
+  // model should read. Check that every asset has one matching manifest mapping.
+  if(!manifest.context||manifest.context.path!=='context.txt'||manifest.context.mime_type!=='text/plain; charset=utf-8'
+    ||!Array.isArray(manifest.images)||!Array.isArray(manifest.skills)
+    ||manifest.images.length+manifest.skills.length+1!==declared.size)
+    throw new Error('Invalid archive manifest asset inventory');
+  const mapped=new Set<string>(['context.txt']);
+  for(const image of manifest.images){
+    if(!image||typeof image.path!=='string'||!image.path.startsWith('images/')||mapped.has(image.path)
+      ||typeof image.attachment_ref!=='string'||!['image/png','image/jpeg','image/webp','image/gif'].includes(image.mime_type)
+      ||!image.path.endsWith(`.${image.mime_type.split('/')[1]}`)
+      ||image.detail!==undefined&&typeof image.detail!=='string')
+      throw new Error('Invalid archive manifest image mapping');
+    const file=entriesByPath.get(image.path);
+    if(!file||file.ref!==image.attachment_ref||file.mediaType!==image.mime_type||file.detail!==image.detail)
+      throw new Error('Invalid archive manifest image metadata');
+    mapped.add(image.path);
+  }
+  for(const skill of manifest.skills){
+    if(!skill||typeof skill.filename!=='string'||typeof skill.path!=='string'
+      ||skill.path!==`skills/${skill.filename}`||mapped.has(skill.path)
+      ||skill.mime_type!=='text/plain; charset=utf-8'||!entriesByPath.has(skill.path))
+      throw new Error('Invalid archive manifest skill mapping');
+    mapped.add(skill.path);
+  }
+  if([...declared].some(path=>!mapped.has(path)))throw new Error('Invalid archive manifest unreferenced asset');
   if(liveHandle.test(manifestText)||[...paths].some(path=>liveHandle.test(path))
     ||Object.entries(files).some(([path,content])=>(path==='context.txt'||path.startsWith('skills/'))&&liveHandle.test(strFromU8(content))))
     throw new Error('Archive contains a live capability');

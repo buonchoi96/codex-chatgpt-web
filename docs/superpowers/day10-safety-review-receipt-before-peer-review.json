@@ -1,0 +1,115 @@
+{
+  "recorded_at": "2026-10-15T19:16:02.911Z",
+  "goal_status": "ACTIVE",
+  "actor": {
+    "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+    "line": 13222,
+    "model": "gpt-6.1-sol",
+    "effort": "high"
+  },
+  "owned_child_status": "Maxwell/Pascal completed and closed; no lifecycle mutation this phase; sole Luna/high context each",
+  "source_scope": "Web local uncommitted review snapshot/MCP/adapter/prompt; no production deployment",
+  "tests": {
+    "regression": {
+      "pass": 193,
+      "fail": 0,
+      "assertions": 1017,
+      "files": 16,
+      "seconds": 25.33,
+      "exec_handle": 54209,
+      "collected_exit_code": 0
+    },
+    "typecheck": {
+      "exec_handle": 78694,
+      "collected_exit_code": 0
+    },
+    "stdio_restart": "5 tests40 assertions PASS; two actual fresh MCP processes read23 fixture records over two pages, file unchanged, transport PID null after owned close",
+    "earlier_failures": "Initial manual fixture timeout lacked simulated Send receipt; initial exact-ABI list lacked new read tool; metadata ordering RED and initial live Markdown JSON-parser FAIL are retained in separate logs"
+  },
+  "live": {
+    "outcome": "PASS_FOR_DEV_REVIEW_NOTICE_ONLY",
+    "exec_handle": 61937,
+    "collected_exit_code": 0,
+    "launcher_pid": 5636,
+    "synthetic_ledger": true,
+    "stages": [
+      {
+        "stage": "initial_review",
+        "started_at": "2026-10-15T19:11:15.804Z",
+        "expected_ids_sha256": "b90940ed3c90fcb8994ea678d169266409d25f3afc9458d1f107dc25ae0ed909",
+        "response_sha256": "14b5a028b50492468b456ee9b55d1776063ffc65194b970788fd7f30c62ef772",
+        "tool_calls": 0,
+        "markdown_literal_decoded": true,
+        "matched": true,
+        "finished_at": "2026-10-15T19:13:01.991Z"
+      },
+      {
+        "stage": "retained_new_review",
+        "started_at": "2026-10-15T19:13:01.993Z",
+        "expected_ids_sha256": "8cc057af15fd927425a8d53bb8bd445172ba90d86f0cb149850bb77338452466",
+        "response_sha256": "4678bffda4935c3624766dabe71e5d8cb45cb2e32ffd19f22dcf89b98f5dbe6e",
+        "tool_calls": 0,
+        "markdown_literal_decoded": true,
+        "matched": true,
+        "finished_at": "2026-10-15T19:14:45.445Z"
+      }
+    ],
+    "cleanup": [
+      "completed",
+      "completed"
+    ],
+    "new_mcp_review_tool_web_model_route": "NOT TESTED",
+    "native_installation_ack": "NOT TESTED"
+  },
+  "artifacts": [
+    {
+      "path": "output/day10-safety-review-final-v3-regression-20261016.log",
+      "sha256": "1fa7c2b859c178a9bb4baf321a36fe1f540e51ad94121c4fc06b4efa0d3e471f"
+    },
+    {
+      "path": "output/day10-safety-review-final-v3-typecheck-20261016.log",
+      "sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689"
+    },
+    {
+      "path": "output/day10-safety-review-stdio-20261016.log",
+      "sha256": "e03596d30a2c1cad2abccd8ea39a57e9fc6e0f00a9573284b8221a636ac270b1"
+    },
+    {
+      "path": "output/day10-safety-review-live-v2-20261016.json",
+      "sha256": "f81fa444f6781febea64c6f943e6bc9a048f531a9eab5445c4d2a2197b3c3254"
+    },
+    {
+      "path": "output/day10-safety-review-live-v2-20261016.log",
+      "sha256": "d4a53a1ce6726135c50360c89210f2826bdd1e2d7a8b984947b05ad3a0f9a241"
+    },
+    {
+      "path": "output/day10-safety-review-live-20261016.json",
+      "sha256": "d4aba89f191624a7b35ee54bd6400607eb2f292f247765d182fb68623421a710"
+    },
+    {
+      "path": "output/day10-safety-review-model-proof-20261016.json",
+      "sha256": "d0cec33c5cffb7f69f0a07d3c0931d4aee8a07a650dc1a56707379e68e3af737"
+    }
+  ],
+  "source_sha256": [
+    {
+      "path": "src/adapters/chatgpt-web/index.ts",
+      "sha256": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/prompt.ts",
+      "sha256": "d30483b02913f8331e0c940aa7f4860864626828f9826d9e1b9e29ce0c66bc04"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-review.ts",
+      "sha256": "c7ff9d0e0c0967469ab48cc1d60ca61f33fbf745ab9ce3e37528ac24d290fabd"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/mcp-server.ts",
+      "sha256": "e599c840044af5bb2662cafff6a1963a5023acf3e5e2369f8bfd847d633f4760"
+    }
+  ],
+  "observer_image_mode": "disabled",
+  "production_changed": false,
+  "historical_original_operations_retried": 0
+}

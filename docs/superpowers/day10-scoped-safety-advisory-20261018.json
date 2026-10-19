@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-18",
+  "provenance": "Current turn scoped unresolved-operation advisory; local bookkeeping only",
+  "advisory_only": true,
+  "independent_native_safety_review": "NOT_ADVERTISED_BY_CURRENT_CONNECTOR",
+  "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578",
+  "page": {"offset": 0, "limit": 20, "complete_as_advertised": true},
+  "unresolved_count_advertised": 10,
+  "other_scope_unresolved_count_advertised": 0,
+  "entries": [
+    {"blocker_id":"blocked_6c8834d2-a5d0-4d34-a124-e2838fa82e95","at":"2026-10-15T07:23:00.117Z"},
+    {"blocker_id":"blocked_6eb314a2-9b7e-43ac-b6bf-4386ece0eb2f","at":"2026-10-15T08:05:09.004Z"},
+    {"blocker_id":"blocked_ac3166d4-4dd0-4bd1-bf95-82b4430b909b","at":"2026-10-15T08:25:47.927Z"},
+    {"blocker_id":"blocked_3e05be46-4e38-446f-9021-ea365d49642c","at":"2026-10-15T08:30:37.770Z"},
+    {"blocker_id":"blocked_8c2e193e-fb90-4ce3-8a2f-6d32877517d3","at":"2026-10-15T08:32:50.279Z"},
+    {"blocker_id":"blocked_b5761f43-8204-4c6c-95e1-6d2a216cbc6a","at":"2026-10-16T06:32:24.752Z"},
+    {"blocker_id":"blocked_1bbcf647-0f4a-4b3e-b851-8f4486a6ac14","at":"2026-10-17T20:39:28.189Z"},
+    {"blocker_id":"blocked_6cba6bf4-dc95-4f6f-b1f2-b22b741181ff","at":"2026-10-18T01:24:23.540Z"},
+    {"blocker_id":"blocked_523c55f1-87ee-44b5-9d37-c58aaf4c4a35","at":"2026-10-18T03:45:18.778Z"},
+    {"blocker_id":"blocked_a1ca2a0f-d588-46f4-81d3-92ff6c143577","at":"2026-10-18T06:17:16.912Z"}
+  ],
+  "shared_classification": {
+    "requirement": "UNMAPPED_GOAL_PREREQUISITE_REVIEW_REQUIRED",
+    "requirement_sha256": "6c00e5709dddfa728b868115ca14366d6ea79affd9694dc97aece9d845eb8755",
+    "original_tool": "mcp__computer_use_swift__desktop_observe",
+    "classification": "SAFETY_STATUS_UNDETERMINED",
+    "dispatch_state": "unknown",
+    "execution_receipt": "refusal_returned",
+    "resolution": "PENDING_SAFETY_REVIEW",
+    "attempts_per_record": 1,
+    "retry_allowed": false
+  },
+  "historical_comparison": "The immediately preceding scoped advisory listed nine unresolved records. The current advisory adds a tenth record and has a new snapshot hash. All ten remain pending; no independent native review, original dispatch proof, or original execution has been established.",
+  "requirement_status_upgrades": 0,
+  "original_operations_retried": 0,
+  "next_safe_step": "Obtain independent read-only native review on the original interface if advertised in a future turn; do not substitute a controller or replay the refusal."
+}

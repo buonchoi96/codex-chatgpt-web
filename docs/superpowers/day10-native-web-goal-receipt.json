@@ -1,0 +1,124 @@
+{
+  "recorded_at": "2026-10-16T00:59:33.998Z",
+  "classification": "ACTUAL_NATIVE_WEB_COMPACTION_AND_SYNTHETIC_ONLY_GOAL_CONTINUATION",
+  "status": "PASS_FOR_NAMED_SCENARIO",
+  "raw_receipt": "output/day10-native-web-goal-1792111981912.json",
+  "raw_sha256": "27a95561fb80c07ebfba8a574c8e8ba8173ab5f2f7e0e33ae32b993fb3e24d16",
+  "log": "output/day10-native-web-goal-live-20261016.log",
+  "log_sha256": "bb252ec3f2f67082199554288f82bbaf1edca89059720f3823719874feed31b9",
+  "thread_id": "01a14232-d849-7411-aedc-bcf5cdde21da",
+  "goal_turn_id": "01a14235-f112-7520-abb7-97df1e86c855",
+  "native_turn_trigger": "goal",
+  "native_rollout": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-web-goal-ONw5eB\\profile\\sessions\\2026\\10\\16\\rollout-2026-10-16T07-53-10-01a14232-d849-7411-aedc-bcf5cdde21da.jsonl",
+  "native_context_line": 27,
+  "native_context": {
+    "model": "chatgpt-web/gpt-6-sol",
+    "effort": "high",
+    "sandbox": {
+      "type": "read-only"
+    },
+    "approval_policy": "never"
+  },
+  "current_native_user_kinds": [
+    "goal.internal_context"
+  ],
+  "new_human_message_after_compact": false,
+  "goal_message_fabricated": false,
+  "native_goal_created_via": "thread/goal/set with origin=user for authorized isolated test objective only",
+  "goal_pause": "one-reply fixture cap; paused owned test goal at first goal dispatch, campaign goal unchanged",
+  "installed_sha256": "74ab221577a2380920f62ad8f789eb42d30fc54b78884e8e8e1c7ad079af0a03",
+  "compaction_response_id": "resp_a992f99b38f749aab7726a6c0eaf9e85",
+  "actual_source_recovery": {
+    "source_id": "msg_01a14232-d95c-71d1-84ab-47dccff9f378",
+    "source_turn_id": "01a14232-d88f-71e2-ae30-62d1191effd2",
+    "summary_index": 5,
+    "provenance": {
+      "kind": "native_compacted",
+      "checkpoint_sha256": "f22a8865cdeedcdea0ccd0401c4440cea2578ed10fb6269b6c53e0d8099174e2",
+      "source_id": "msg_01a14232-d95c-71d1-84ab-47dccff9f378",
+      "source_revision": "retained_01a14232-d95c-71d1-84ab-47febd4ad8f6"
+    }
+  },
+  "stages": [
+    {
+      "kind": "initial",
+      "started_at": "2026-10-16T00:53:11.236Z",
+      "input_messages": 4,
+      "finished_at": "2026-10-16T00:55:00.574Z",
+      "answer_sha256": "1afc73e07986a0444e7c0c6597933b433f4ecd86863ae4754be1cbadbdbc4a53",
+      "answer_length": 6,
+      "matched": true
+    },
+    {
+      "kind": "compact",
+      "started_at": "2026-10-16T00:55:00.886Z",
+      "input_messages": 6,
+      "finished_at": "2026-10-16T00:56:33.605Z",
+      "answer_sha256": "1695774f8a131fa33c51dbe80cface8fec5b7417fa38a9a0dbe7e65d343a347c",
+      "answer_length": 922,
+      "matched": true
+    },
+    {
+      "kind": "continuation",
+      "started_at": "2026-10-16T00:56:34.083Z",
+      "input_messages": 7,
+      "finished_at": "2026-10-16T00:58:17.844Z",
+      "answer_sha256": "754f1af63351fb3c2ecb7079159a25ab00e864e7fd06afcb2c013ee52eb0bb1e",
+      "answer_length": 40,
+      "matched": true
+    }
+  ],
+  "physical_sends": [
+    {
+      "traceId": "274dbe9a54a9",
+      "receiptId": "f4ce0687-615f-4a2d-aa80-c59e21b0e4bf",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "66a3e8db4bc9",
+      "receiptId": "db928f8b-3f45-42f5-8440-6a0527b9c97d",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "1bc767c61471",
+      "receiptId": "c2024ea7-749d-4fa1-b337-11caf27d2066",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    }
+  ],
+  "native_tool_actions": 0,
+  "source_sha256": {
+    "src/server.ts": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257",
+    "src/adapters/chatgpt-web/index.ts": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6",
+    "src/adapters/chatgpt-web/native-compaction-provenance.ts": "4e052c82c12dbc46d7f163152c7d4b262c8d7ee1fb0bec16b3696d9b188c88e2",
+    "src/adapters/chatgpt-web/browser-worker.ts": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e",
+    "src/adapters/chatgpt-web/prompt.ts": "a3cf78428d53f04c89af6fc3e7a2d51d8fd7b80a38b178749513fe7c266aeb26"
+  },
+  "cleanup": {
+    "native_exit": 0,
+    "complete": true,
+    "web": [
+      "completed",
+      "completed"
+    ]
+  },
+  "production_changed": false,
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "limits": [
+    "Actual Web Sol/high only; not effective272K recall",
+    "No pending tool/approval race, restart-plus-goal, missing checkpoint negative or multi-tool workload acceptance",
+    "Some local diagnostic screenshots failed; strict whole-message DOM binding and model answer completed; no pixel-delivery claim"
+  ]
+}

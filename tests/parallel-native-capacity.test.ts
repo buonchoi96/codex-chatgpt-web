@@ -59,6 +59,32 @@ test('numeric terminal text receipts settle sessions while non-JSON stdout retai
  const release=capacity.acquire('owner',1);release();
 });
 
+test('JSON stdout cannot override authoritative structured ongoing poll receipt',()=>{
+ const capacity=new NativeCommandCapacity();live(capacity,'owner');
+ // A command may print JSON that resembles a tool response while still running.
+ capacity.observeResult('owner',{
+  structuredContent:{session_id:100,output:'{"exit_code":0}'},
+  content:[{type:'text',text:'{"exit_code":0}'}]
+ },100);
+ expect(()=>capacity.acquire('owner',1)).toThrow();
+ capacity.observeResult('owner',receipt({session_id:100,exit_code:0}),100);
+ const free=capacity.acquire('owner',1);free();
+});
+
+test('JSON stdout cannot forge a terminal receipt for an ongoing newly dispatched session',()=>{
+ const capacity=new NativeCommandCapacity();
+ const release=capacity.acquire('owner',1);
+ release.observeResult({
+  structuredContent:{session_id:100},
+  content:[{type:'text',text:'{"session_id":100,"exit_code":0}'}]
+ });
+ release();
+ expect(()=>capacity.acquire('owner',8)).toThrow();
+ const remaining=capacity.acquire('owner',7);remaining();
+ capacity.observeResult('owner',receipt({session_id:100,exit_code:0}),100);
+ const full=capacity.acquire('owner',8);full();
+});
+
 test('mutable or opaque reservations are exclusive and cannot admit multiple commands',()=>{
  const capacity=new NativeCommandCapacity();
  expect(()=>capacity.acquire('owner',2,'exclusive')).toThrow();
@@ -119,6 +145,75 @@ test('dispatch exceptions retain uncertain capacity instead of automatically for
  expect(()=>capacity.acquire('owner',1)).toThrow();
 });
 
+test('cancelling a dispatched native batch does not await an unresponsive child or release its capacity',async()=>{
+ const capacity=new NativeCommandCapacity(),controller=new AbortController();
+ let finishChild!: (result:BrokerToolResult)=>void;
+ const hanging=new Promise<BrokerToolResult>(resolve=>{finishChild=resolve;});
+ let dispatched=0;
+ const running=runParallelNativeCommands({owner:'cancel-owner',commands:reads(2),capacity,signal:controller.signal,
+  invoke:async(_command,index)=>{dispatched++;return index===0?hanging:receipt({exit_code:0});}});
+ controller.abort();
+ try{
+  const outcome=await Promise.race([
+   running.then(()=> 'settled' as const),
+   new Promise<'still_pending'>(resolve=>setTimeout(()=>resolve('still_pending'),75))
+  ]);
+  expect(outcome).toBe('settled');
+  const result=await running;
+  expect(result.isError).toBe(true);
+  const children=(result.structuredContent as any).commands;
+  expect(children[0]).toMatchObject({index:0,status:'uncertain',execution:'unknown',retryable:false});
+  expect(children[1]).toMatchObject({index:1,status:'succeeded'});
+  expect(dispatched).toBe(2);
+  const free=capacity.acquire('cancel-owner',7);
+  expect(()=>capacity.acquire('cancel-owner',1)).toThrow();free();
+ }finally{
+  finishChild(receipt({exit_code:0}));
+  await running;
+ }
+});
+
+test.each(['codex_tool_timeout','safety_status_unknown_or_blocked'])(
+ 'explicit %s result retains uncertain native dispatch capacity and receipt',async code=>{
+  const capacity=new NativeCommandCapacity();
+  const nativeFailure:BrokerToolResult={isError:true,
+   structuredContent:{code,retryable:false,execution_state:'unknown'},
+   content:[{type:'text',text:JSON.stringify({code,retryable:false,execution_state:'unknown'})}]};
+  const response=await runParallelNativeCommands({owner:'owner',commands:reads(2),capacity,
+   invoke:async(_command,index)=>index===0?nativeFailure:receipt({exit_code:0})});
+  const child=(response.structuredContent as any).commands[0];
+  expect(response.isError).toBe(true);
+  expect(child.status).toBe('uncertain');
+  expect(child.execution).toBe('unknown');
+  expect(child.retryable).toBe(false);
+  expect(child.result).toEqual(nativeFailure);
+  const remaining=capacity.acquire('owner',7);
+  expect(()=>capacity.acquire('owner',1)).toThrow();remaining();
+ });
+
+test('an explicit unknown execution receipt retains native capacity even for a new error code',async()=>{
+ const capacity=new NativeCommandCapacity();
+ const unknown:BrokerToolResult={isError:true,
+  structuredContent:{code:'safety_blocker_persistence_failed',execution_state:'unknown',retryable:false},
+  content:[{type:'text',text:'Execution and approval remain unverified'}]};
+ const response=await runParallelNativeCommands({owner:'unknown-state',commands:reads(2),capacity,
+  invoke:async(_command,index)=>index===0?unknown:receipt({exit_code:0})});
+ const child=(response.structuredContent as any).commands[0];
+ expect(child).toMatchObject({status:'uncertain',execution:'unknown',retryable:false,result:unknown});
+ const free=capacity.acquire('unknown-state',7);
+ expect(()=>capacity.acquire('unknown-state',1)).toThrow();free();
+});
+
+test('a confirmed failed command without unknown execution evidence releases its reserved slot',async()=>{
+ const capacity=new NativeCommandCapacity();
+ const knownFailure:BrokerToolResult={isError:true,
+  structuredContent:{code:'native_exit_nonzero',execution_state:'completed',exit_code:9},content:[]};
+ const response=await runParallelNativeCommands({owner:'terminal-error',commands:reads(2),capacity,
+  invoke:async(_command,index)=>index===0?knownFailure:receipt({exit_code:0})});
+ expect((response.structuredContent as any).commands[0].status).toBe('failed');
+ const free=capacity.acquire('terminal-error',8);free();
+});
+
 test('a completed sibling cannot reconcile another command whose dispatch receipt was lost',async()=>{
  const capacity=new NativeCommandCapacity();
  await runParallelNativeCommands({owner:'owner',commands:reads(2),capacity,invoke:async(_command,index)=>{
@@ -126,6 +221,38 @@ test('a completed sibling cannot reconcile another command whose dispatch receip
  }});
  const rest=capacity.acquire('owner',7);
  expect(()=>capacity.acquire('owner',1)).toThrow();rest();
+});
+
+test('overlapping batches retain lost dispatches after the other batch reports live sessions',async()=>{
+ const capacity=new NativeCommandCapacity(),owner='same-native-turn';
+ let loseDispatch!: (reason:Error)=>void;
+ const pending=new Promise<BrokerToolResult>((_resolve,reject)=>{loseDispatch=reject;});
+ // The first batch still owns two unresolved command reservations.
+ const first=runParallelNativeCommands({owner,commands:reads(2),capacity,invoke:async()=>pending});
+ // A second batch on that owner reports two actual live sessions first.
+ const second=await runParallelNativeCommands({owner,commands:reads(2),capacity,
+  invoke:async(_command,index)=>receipt({session_id:200+index})});
+ expect(second.isError).toBe(false);
+ loseDispatch(new Error('native dispatch receipt lost'));
+ const lost=await first;
+ expect(lost.isError).toBe(true);
+ // Both live sessions AND both uncertain first-batch commands must remain charged.
+ expect(()=>capacity.acquire(owner,5)).toThrow();
+ const remaining=capacity.acquire(owner,4);remaining();
+});
+
+test('a second batch cannot claim an active native session belonging to a different lease',async()=>{
+ const capacity=new NativeCommandCapacity(),owner='same-native-turn';
+ const first=await runParallelNativeCommands({owner,commands:reads(2),capacity,
+  invoke:async(_command,index)=>receipt({session_id:300+index})});
+ expect(first.isError).toBe(false);
+ const second=await runParallelNativeCommands({owner,commands:reads(2),capacity,
+  invoke:async(_command,index)=>receipt({session_id:index===0?300:302})});
+ // A reused, still-active session ID cannot prove that another command began.
+ expect(second.isError).toBe(true);
+ // The real three sessions and the unresolved second-batch command hold four slots.
+ expect(()=>capacity.acquire(owner,5)).toThrow();
+ const rest=capacity.acquire(owner,4);rest();
 });
 
 test('new live reads cannot consume a previously released uncertain lease',()=>{

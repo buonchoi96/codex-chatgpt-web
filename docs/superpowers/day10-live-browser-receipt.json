@@ -1,0 +1,154 @@
+{
+  "recorded_at": "2026-10-15T15:08:39.199Z",
+  "actor": "main gpt-6.1-sol/high",
+  "goal_status": "ACTIVE",
+  "scope": "Isolated DEV harness protocol; no actual native Codex installation ACK or272K recall",
+  "outcome": "PASS_FOR_DEV_PROTOCOL_ONLY",
+  "exec_handle": 45642,
+  "exec_exit_code": 0,
+  "source_sha256": {
+    "browser_worker": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e",
+    "projection": "9340c1f93f8617a601238a4b0d5a0785dc42c5afd8ec247b9216b5397fa13828",
+    "prompt": "70910f58761bd412fe5218fddbe95a5dac6228cc5459fe1c61c7cba74415993b"
+  },
+  "stages": [
+    {
+      "stage": "initial",
+      "started_at": "2026-10-15T15:01:14.926Z",
+      "finished_at": "2026-10-15T15:03:05.467Z",
+      "matched": true,
+      "tool_calls": 0,
+      "usage": {
+        "inputTokens": 17998,
+        "outputTokens": 11,
+        "totalTokens": 18009
+      },
+      "status": {
+        "model": "chatgpt-web/gpt-6-sol",
+        "inputTokens": 18238,
+        "autoCompactTokenLimit": 258400,
+        "contextWindow": 272000,
+        "percent": 7.1,
+        "inputItems": 303
+      }
+    },
+    {
+      "stage": "retained_followup",
+      "started_at": "2026-10-15T15:03:05.469Z",
+      "finished_at": "2026-10-15T15:04:42.046Z",
+      "matched": true,
+      "tool_calls": 0,
+      "usage": {
+        "inputTokens": 18255,
+        "outputTokens": 18,
+        "totalTokens": 18273
+      },
+      "status": {
+        "model": "chatgpt-web/gpt-6-sol",
+        "inputTokens": 18502,
+        "autoCompactTokenLimit": 258400,
+        "contextWindow": 272000,
+        "percent": 7.2,
+        "inputItems": 306
+      }
+    },
+    {
+      "stage": "compact",
+      "started_at": "2026-10-15T15:04:42.048Z",
+      "status": {
+        "model": "chatgpt-web/gpt-6-sol",
+        "inputTokens": 10407,
+        "autoCompactTokenLimit": 258400,
+        "contextWindow": 272000,
+        "percent": 4,
+        "inputItems": 5
+      },
+      "finished_at": "2026-10-15T15:06:25.561Z",
+      "replacement_items": 5,
+      "protocol_ack": "Harness accepted canonical replacement history; native app-server installation NOT TESTED"
+    },
+    {
+      "stage": "post_compact_followup",
+      "started_at": "2026-10-15T15:06:25.562Z",
+      "finished_at": "2026-10-15T15:08:14.559Z",
+      "matched": true,
+      "tool_calls": 0,
+      "usage": {
+        "inputTokens": 10423,
+        "outputTokens": 18,
+        "totalTokens": 10441
+      },
+      "status": {
+        "model": "chatgpt-web/gpt-6-sol",
+        "inputTokens": 10670,
+        "autoCompactTokenLimit": 258400,
+        "contextWindow": 272000,
+        "percent": 4.1,
+        "inputItems": 8
+      }
+    }
+  ],
+  "submissions": [
+    {
+      "traceId": "445ed99adcce",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "71c38cb5d06f",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "RETAINED_DELTA"
+    },
+    {
+      "traceId": "ab75720f9073",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    },
+    {
+      "traceId": "73cdee5bcc72",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    }
+  ],
+  "cleanup": [
+    "completed",
+    "completed"
+  ],
+  "artifacts": [
+    {
+      "path": "output/day10-live-chain-v4-20261015.json",
+      "sha256": "9006de74372d03f21d58ab6110325111ee93b39b9e90afb6e232f6c9cae3f2d2"
+    },
+    {
+      "path": "output/day10-live-chain-v4-20261015.log",
+      "sha256": "153378459138943f543c1535a93b6dcf89bfd26b8e786059da85e7447ca72120"
+    },
+    {
+      "path": "output/day10-json-final-regression-20261015.log",
+      "sha256": "902b8deff6cf232989dd73981b3b9e1305bbcffbeb9a1d2aff3f2d375a8629c1"
+    },
+    {
+      "path": "output/day10-json-final-typecheck-20261015.log",
+      "sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689"
+    },
+    {
+      "path": "output/day10-binding-final-v4-regression-20261015.log",
+      "sha256": "126c03409a658fbaabf1590d4a15d16ab1c819497c4368be9ebd91cf5f3b0443"
+    }
+  ],
+  "native_app_server_ack": "NOT TESTED",
+  "observer_image_mode": "disabled",
+  "production_changed": false
+}

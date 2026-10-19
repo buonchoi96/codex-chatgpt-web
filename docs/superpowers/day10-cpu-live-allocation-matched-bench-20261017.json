@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-17",
+  "kind": "native_cpu_current_allocation_and_alternating_order_cv_benchmark",
+  "classification": "PASS_READ_ONLY_TOPOLOGY_AND_SYNTHETIC_CPU_TESTS; MULTIWORKER_AUTO_UNVERIFIED",
+  "repositories": {
+    "web_head": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574"
+  },
+  "source": {
+    "cpu_read_only_probe": "F:/Source Projects/ComputerUseSwift-MCP/native/tests/observer_cpu_tests.cpp",
+    "cpu_probe_sha256": "22967b763401cddc6a3acdbdd73e1e2b297d89f0d1229c1686179f9539f5ec6b",
+    "bench_order_control": "F:/Source Projects/ComputerUseSwift-MCP/native/tests/observer_analysis_bench.cpp",
+    "bench_sha256": "161f62e7a4eef99da9f35a85a2680e60194039b4065becabae2d1bf050c70dc5",
+    "changes": [
+      "Added --topology-only read-only JSON output for the existing CPU policy test executable.",
+      "Added --reverse alternating order to the already-defined analysis benchmark target. No runtime production engine changes."
+    ]
+  },
+  "live_windows_cpu_allocation": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-live-topology-20261017.json",
+    "receipt_sha256": "13dfa67c8d4b2f3fec3893ba2d32019507ce261fa0bb4c0c7d55411249d5b7d5",
+    "system_logical": 12,
+    "group_logical": 12,
+    "affinity_logical": 12,
+    "cpu_set_logical": 6,
+    "job_affinity_logical": null,
+    "job_rate_permyriad": null,
+    "limits_verified": false,
+    "allocation_uncertain": true,
+    "effective_logical": 1,
+    "foreground_reserved": 0,
+    "bootstrap_workers": 1,
+    "uncertainty_reasons": ["job_ancestor_limits_unverified", "unresolved_allocation_safe_one_worker"]
+  },
+  "verification": {
+    "cpu_policy_tests": {"passed": 5, "failed": 0,
+      "log": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-policy-check-20261017.log",
+      "sha256": "cfc6aad0a8416ede0a48a729c2cb1cc6cc8172844f3cac07223f7e6eb538b710"},
+    "cpu_full_tests": {"passed": 13, "failed": 0,
+      "log": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-full-tests-20261017.log",
+      "sha256": "33da2b23903820dda6ce0c84c97b9d457c564f96c0f4ce2d27eb25b10af9dd99"},
+    "benchmark_target_built": true,
+    "cpp_benchmark_uses_existing_explicit_target": true,
+    "windows_controller_activated": false,
+    "native_input_sequences": 0,
+    "screenshots": 0
+  },
+  "matched_synthetic_cv_benchmark": {
+    "raw_pairs": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-six-paired-benchmarks-20261017.json",
+    "raw_pairs_sha256": "aecc6daa238c44fc92f63eed966b4ce1a3ac5b1916a1fd983b95264782a47de7",
+    "pair_count": 6,
+    "orders": {"single_first": 3, "auto_first": 3},
+    "per_mode_measured_frames_per_pair": 100,
+    "per_mode_warmup_frames_per_pair": 10,
+    "frame_dimensions": [1024, 768],
+    "cv_roi_count": 4,
+    "single_worker_actual_workers": 1,
+    "auto_actual_workers": 1,
+    "single_worker_peak_active": 1,
+    "auto_peak_active": 1,
+    "single_p95_cv_join_ms_median_across_pairs": 4.2625,
+    "auto_p95_cv_join_ms_median_across_pairs": 4.4442,
+    "single_wall_ms_median_across_pairs": 620.8465,
+    "auto_wall_ms_median_across_pairs": 626.042,
+    "worker_scaling_proven": false,
+    "speedup_proven": false,
+    "game_foreground_load": "NOT_RUN",
+    "ocr_or_uia_parallelism": "NOT_RUN",
+    "job_ancestor_quota_validation": "UNRESOLVED",
+    "interpretation": "Both modes ran one actual worker; variation between six pairs cannot establish a multiworker AUTO speedup. Synthetic CV results cannot be generalized to game foreground load."
+  },
+  "next_safe_step": "Keep one worker while ancestor Job Object constraints remain unverified. Investigate ancestor-cap evidence and measured pressure/throughput feedback in a private read-only fixture before any production AUTO enlargement.",
+  "required_main_agent_model_and_effort": "UNVERIFIED",
+  "safety_prerequisites_pending": 6,
+  "blocked_observation_replayed": false,
+  "subagents_spawned": 0,
+  "production_config_mutations": 0,
+  "git_reference_mutations": 0,
+  "full_scope": 175,
+  "matrix_status_upgrades": 0
+}

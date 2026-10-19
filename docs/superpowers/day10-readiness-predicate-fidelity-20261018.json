@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-A2/A3 exact UTF-8 OCR predicate receipt binding and pre-dispatch validation",
+  "goal_status": "ACTIVE",
+  "model_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR",
+  "subagents_created": 0,
+  "baseline": {
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+    "web": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "preexisting_dirty_worktrees_preserved": true,
+    "git_reference_changes": 0,
+    "production_or_config_changes": 0
+  },
+  "implemented": [
+    "The native WinRT readiness receipt now carries SHA-256 of the exact predicate's UTF-8 bytes for both READY and NOT_READY.",
+    "Web validates this digest against the requested contains string, native readiness frame/generation, source and ROI before accepting READY or caching a snapshot.",
+    "A 128-character Unicode string whose UTF-8 representation exceeds the native 128-byte contract is rejected before native dispatch and before the dispatched callback."
+  ],
+  "web_source_files": [
+    "src/adapters/chatgpt-web/screen-observation.ts",
+    "tests/screen-observation.test.ts",
+    "tests/mcp-screen-tree.test.ts",
+    "tests/screen-observation-ordering.test.ts",
+    "tests/screen-observation-publication.test.ts"
+  ],
+  "swift_source_files": [
+    "native/include/observer_readiness.hpp",
+    "native/src/observer_readiness.cpp",
+    "native/src/swift.cpp",
+    "native/tests/observer_readiness_tests.cpp"
+  ],
+  "red": {
+    "wrong_predicate_hash": "Original Web contract rejected the new proof field as undeclared rather than binding the request to its digest; 11 PASS / 1 FAIL before implementation.",
+    "pre_dispatch": "12 PASS / 1 FAIL; dispatched callback received 1 for a rejected 129-byte UTF-8 predicate while actual provider calls stayed 0.",
+    "pre_dispatch_log": "output/day10-readiness-dispatch-red-20261018.log"
+  },
+  "green": {
+    "targeted_tests": "89 PASS / 0 FAIL / 475 assertions across 9 files",
+    "targeted_log": "output/day10-readiness-predicate-final-targeted-20261018.log",
+    "root_typecheck": "PASS",
+    "typecheck_log": "output/day10-readiness-predicate-final-typecheck-20261018.log",
+    "native_build": "PASS",
+    "native_build_log": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/artifacts/native-ocr-build-20261018/predicate-sha256-native-build.log",
+    "native_ctest": "6 PASS / 0 FAIL (CPU, frame, readiness, reader, engine, OCR)",
+    "sha256_vectors": {
+      "HUD": "c40c747ee79e90e16e46d58fa8ba3a289bb9fc8042af339561d423d71a7671c5",
+      "Chào 世界": "c573039e9ee1c5da8c046be7e82da67f5d9446d50f4d28935cb2579830cbafc9"
+    },
+    "isolated_native_executable_sha256": "5CBBE73FD82688AF71B137492E166C73654A661DEB232F6BB8D43A3759EC7755",
+    "web_git_diff_check": "PASS",
+    "swift_git_diff_check": "PASS"
+  },
+  "full_web_suite": {
+    "command": "bun run test",
+    "result": "FAIL",
+    "pass": 1637,
+    "skip": 93,
+    "fail": 2,
+    "assertions": 11426,
+    "tests": 1732,
+    "files": 141,
+    "elapsed_seconds": 232.67,
+    "log": "output/day10-readiness-predicate-full-suite-20261018.log",
+    "note": "Run before the final pre-dispatch patch; the changed observer cases were subsequently rechecked in the 89-test focused run.",
+    "failures": [
+      "tests/codex-integration.test.ts:114 symlinkSync relative shared config failed with Windows EPERM",
+      "tests/codex-integration.test.ts:149 symlinkSync absolute shared config failed with Windows EPERM"
+    ],
+    "classification": "WINDOWS_TEST_FIXTURE_SYMLINK_PERMISSION; a similar failure was historically observed before this phase; full suite cannot be reported green"
+  },
+  "e2e_limitations": {
+    "native_owned_desktop_fixture": "NOT_RETESTED; previous FOCUS_FAILED and LockApp foreground remain",
+    "authenticated_web_model": "NOT_RUN",
+    "model_visible_pixels": "UNVERIFIED",
+    "cpu_auto_multiworker": "UNVERIFIED",
+    "cryptographic_binding": "Digest matches predicate bytes but does not independently prove screen pixels or OCR recognition quality"
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "ea4b10148b49a396b4e2e91c420131c88284d955e893b9cbe31406c507fb9dd6",
+    "unresolved": 9,
+    "status": "PENDING_SAFETY_REVIEW",
+    "native_review_tool_advertised": false,
+    "original_refused_operations_retried": 0
+  },
+  "requirement_matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0},
+  "next_safe_step": "After Windows is unlocked, run owned native WinRT semantic OCR E2E and compare real model-facing receipts; independently resolve full-suite symlink fixture permission if possible without altering production/system policy."
+}

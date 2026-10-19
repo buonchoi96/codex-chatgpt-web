@@ -1,0 +1,57 @@
+{
+  "at": "2026-10-16T05:41:37.810Z",
+  "status": "RED_TO_GREEN_MAIN_REVIEW_AND_RAW_PEER_TEST_PASS",
+  "problem": "Proven retained current delta previously bypassed measured account canonical-token budget",
+  "change": "Block retained delta over account cap before inline/archive/multipart alternatives. Preserve in-budget delta and requiredMultipart behavior.",
+  "source_sha256": {
+    "src/adapters/chatgpt-web/transport-selector.ts": "c31b5325e110af3f40e02defaa0eb88971946d0a5600ac4ef76fe0573b596593",
+    "tests/transport-selector.test.ts": "4ad6e2f230a223b9f28d83ca88b8ad91abd17eff92df2d236959eb304be0f195",
+    "tests/archive-cache.test.ts": "a1f2b845a8af68267b77eb3d1cbad547fdb94203bf28a9b4ac54bc77ad3ad8b3"
+  },
+  "red": {
+    "log": "output/day10-p0-implementation-round6-red.log",
+    "pass": 10,
+    "fail": 2,
+    "assertions": 47
+  },
+  "final_fixtures": {
+    "log": "output/day10-p0-implementation-round7-selector.log",
+    "pass": 12,
+    "fail": 0,
+    "assertions": 85,
+    "measurement_invariant": "canonicalTokens=messageTokens+attachmentReserve; message/composer/attachment limits independently fit"
+  },
+  "main_integration": {
+    "log": "output/day10-retained-cap-integration-regression-20261016.log",
+    "pass": 73,
+    "fail": 0,
+    "assertions": 671,
+    "files": 8,
+    "exec_session": 99633,
+    "terminal_exit": 0
+  },
+  "main_typecheck": {
+    "log": "output/day10-retained-cap-typecheck-20261016.log",
+    "exec_session": 98306,
+    "terminal_exit": 0
+  },
+  "supervisor": {
+    "actor": "01a1424c-d494-7fa2-922d-a8bd303cee76",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "raw_log": "output/day10-p0-supervisor-round7-tests.log",
+    "pass": 21,
+    "fail": 0,
+    "assertions": 215,
+    "exit": 0,
+    "review_report": "NOT_WRITTEN_BEFORE_USAGE_LIMIT; do not infer a completed peer review report"
+  },
+  "implementation_receipts": [
+    "output/day10-p0-implementation-round6-complete.json",
+    "output/day10-p0-implementation-round7-complete.json"
+  ],
+  "limits": [
+    "Transport decision/compiler regression only; not real account272Krecall or actual ZIP ingestion in a Web model",
+    "No production/config/branch edits or blocked-operation retry"
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "recorded_at": "2026-10-15T08:37:22.460Z",
+  "repository": "F:\\Source Projects\\codex-chatgpt-web",
+  "branch": "main",
+  "head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+  "tracked_diff_sha256": "688a29e590192bea23d7cba6b7d801a0f7ac303b924315568b4c584d0292a0b6",
+  "files": [
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-ledger.ts",
+      "sha256": "83cee628af26f5c3c29268084c156929da4934bdb1f9bc4f24e52ffe6cc5427f"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/codex-rollout-environment.ts",
+      "sha256": "95668c0073e47f755657575a886391edef31e65b9356a061459cd95d4eee5b13"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/compaction-continuation.ts",
+      "sha256": "b980a0c86330a11deebecf974d89e47c1f68f135982e36cd01dad1dd61f46e88"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/environment.ts",
+      "sha256": "8f6d3a705ff3e77233c5c0be41b37f9f3a5190305897ddb91f23420d4a2b5cc0"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/mcp-server.ts",
+      "sha256": "96ac02999d7c30783e25244d609140bb4d81497df71008fa96f100d4d9a482cd"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/native-compaction-provenance.ts",
+      "sha256": "2e8268ecdb00201c22e82775b235ba322621d0b08cb67eb5f87b630e12116893"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/prompt.ts",
+      "sha256": "146553d6ffff56f23a202cee1a0fca7c603d771e1a866c9ce4893ec783ff03bd"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/thread-environment.ts",
+      "sha256": "67a1c3ec18610abb89b289cf2ba8f5f83bf12534a5b37e6bb61d42bfaee3490a"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/turn-execution.ts",
+      "sha256": "7f122b54380f6d792ec8f5127f98182cf01ad183244c069f2773730466868c99"
+    },
+    {
+      "path": "src/responses/parser.ts",
+      "sha256": "c251689d05e81181d646e5c23f11d510fd335175d0c0fd8b98b87d64069196b4"
+    },
+    {
+      "path": "src/server.ts",
+      "sha256": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257"
+    },
+    {
+      "path": "tests/blocked-operation-ledger.test.ts",
+      "sha256": "ddf9d3a2142241930b017c88f1ebc4ac338fdb74bee17c0055d1e2fe603313ab"
+    },
+    {
+      "path": "tests/environment.test.ts",
+      "sha256": "eaa059d86bb3b4843ea699a63b27597d64f30d1f4ee6862bf245344e0154efd4"
+    },
+    {
+      "path": "tests/native-compaction-provenance.test.ts",
+      "sha256": "d4ce39c9469154362758ad48310cf18ba9a08ca8f58da7fc7b2d4fbd1d8e0e3e"
+    },
+    {
+      "path": "tests/provenance-errors.test.ts",
+      "sha256": "90e3e356ede2b669d13f2ccc9c8676cc7ec4db7d52f8be75c8573243722c41ee"
+    },
+    {
+      "path": "tests/responses-lite-tools.test.ts",
+      "sha256": "c916422499fd1766144a2b63027f19aaf1e6ff01d0266bcb0ea6ef6a8eda17ab"
+    },
+    {
+      "path": "tests/retained-compaction.test.ts",
+      "sha256": "6cbd3acfe20a050272ba4ecd3389cbf7016e1b727ffdd2e0cabe0e71ba7ad991"
+    },
+    {
+      "path": "tests/safety-tool-retirement.test.ts",
+      "sha256": "d9174c09adc1c31af80d63e84f6bffe26981a112f7c1bee073dd26bf032b2cd2"
+    },
+    {
+      "path": "tests/server-compaction.test.ts",
+      "sha256": "2d9556f15bcbcb64f551a0f56e47c98e9b826caad07b72ccff7abaabefead418"
+    },
+    {
+      "path": "tests/server-lifecycle.test.ts",
+      "sha256": "41675c4899d42e94b74dc37dc900b57ac4eff3b2f0800959f9234bdaa7b3b08f"
+    },
+    {
+      "path": "tests/server-predictions.test.ts",
+      "sha256": "d33595adccd18f19fbe5fd68b37fddc004362d620b149f1a149e05e5e5d91928"
+    },
+    {
+      "path": "tests/turn-broker-lifecycle.test.ts",
+      "sha256": "0fecffad1cb7c62777d022c341b6bd179c31eee2fcf6421bf45ee6b9eb361ac5"
+    }
+  ],
+  "test_logs": [
+    {
+      "path": "output/day10-final-source-typecheck-20261015.log",
+      "sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689"
+    },
+    {
+      "path": "output/day10-native-safety-final-20261015.log",
+      "sha256": "86f161164d48ae3f0bd41baf2354c55c10edfce0315dad805a3d9d2b347940ef"
+    },
+    {
+      "path": "output/day10-ledger-mcp-accepted-20261015.log",
+      "sha256": "36165eae888b240d16d31e9879004e606c061459b04c67d5f05fbfdc9a31b764"
+    },
+    {
+      "path": "output/day10-maxwell-ledger-20261015.log",
+      "sha256": "6a713251bc3e91e761526fe7b1d17fde5360791887932669c23555daf13780db"
+    },
+    {
+      "path": "output/day10-pascal-provenance-20261015.log",
+      "sha256": "77b08e5f96ab5540eccc9579675334bd6a7cc5c7536eae0574e5cee67df99715"
+    }
+  ],
+  "private_pre_safety_bundle_manifest_sha256": "cb2032bc74f54a75a59821197876bb60d682573a732d74b2b222bde989adadcb",
+  "uncommitted": true,
+  "production_deployed": false
+}

@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-16T00:57:36.624Z",
+  "classification": "COMPLETED_FRAME_PUBLICATION_RACE_RED_TO_GREEN",
+  "status": "PASS_FOR_NAMED_PURE_NATIVE_SCENARIOS",
+  "repository": "F:/Source Projects/ComputerUseSwift-MCP",
+  "defect": "All old ROI futures can finish before a newer frame is admitted at final validation; old completed receipts alone do not signal supersession.",
+  "fix": "Check pool current-frame identity under its admission mutex at final publication; suppress stale CV and completed additional-work publication.",
+  "changed_files": [
+    "native/include/observer_cpu.hpp",
+    "native/src/observer_cpu.cpp",
+    "native/src/observer_engine.cpp",
+    "native/tests/observer_engine_tests.cpp"
+  ],
+  "source_sha256": {
+    "native/include/observer_cpu.hpp": "70d3a54bfcc462c854d76357cff16b366024e7f31e1bdebc8516c2ef099a9597",
+    "native/src/observer_cpu.cpp": "c996a18eb1553624087da01421e47042808f4dee166d5a6bbda3032bed54f209",
+    "native/src/observer_engine.cpp": "abd46a65aa1922ad1fb05d5c4321239c859b9e7a72f75fd00293cc400581a497",
+    "native/tests/observer_engine_tests.cpp": "56de539c2eff9d0743abd9ba5bf9eec84bccfc621b1eb87be2ea9db0d656f074"
+  },
+  "tests": {
+    "red": {
+      "log": "output/day10-frame-publication-red-20261016.log",
+      "exit": -1073740791,
+      "message": "completed obsolete frame escaped publication after newer admission"
+    },
+    "engine": {
+      "log": "output/day10-frame-publication-green-20261016.log",
+      "exit": 0,
+      "new_scenarios": [
+        "All completed old CV jobs superseded at final validation",
+        "Completed additional-work result superseded at final validation"
+      ]
+    },
+    "cpu": {
+      "log": "output/day10-frame-publication-cpu-green-20261016.log",
+      "exit": 0,
+      "pass": 13,
+      "fail": 0
+    }
+  },
+  "compiler": "E:/CodeBlocks/MinGW/bin/g++.exe",
+  "compiler_flags": [
+    "-std=c++20",
+    "-O2",
+    "-D_WIN32_WINNT=0x0A00",
+    "-DNOMINMAX",
+    "-Inative/include"
+  ],
+  "owned_build_root": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-frame-publication-33e2e06f779742fc9b238dd962fe25f3",
+  "scope": "Standalone CPU/engine builds only; no production build/install, no capture/UI/OCR execution or UIA acceptance. Publication linearizes at the locked current-frame check; a later frame may be admitted afterwards.",
+  "historical_short_deadline_regression": "NOT RETRIED; this task reproduces completed-frame publication with a two-second deadline, not the old pending short-deadline task",
+  "live_ui": false,
+  "production_changed": false,
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "peer_review": "No fresh Luna review of main race patch; completed pair closed before this defect was found"
+}

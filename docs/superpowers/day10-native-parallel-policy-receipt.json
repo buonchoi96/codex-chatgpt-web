@@ -1,0 +1,43 @@
+{
+  "recorded_at": "2026-10-16T01:16:08.235Z",
+  "classification": "NATIVE_POLICY_BLOCKED",
+  "status": "PENDING_POLICY_REVIEW_NO_RETRY",
+  "raw_receipt": "output/day10-native-parallel-2-1792113203078.json",
+  "raw_sha256": "2358175b994abb87fec8097ca36cf6111dbbf67d2521fd19453f9681933b633a",
+  "raw_request": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-parallel-y0tdpa/request-2.json",
+  "raw_request_sha256": "da70fa41ecca68c800d182ff97442e6143aa6c82358a38d3eed2a96cf78b1dd3",
+  "thread_id": "01a14245-59b3-7d43-8d62-67670b5668e6",
+  "native_pid": 14960,
+  "tool": "exec_command",
+  "call_ids": [
+    "call_9ol-mJGBRmdgUUqBLnhZnoK6nMawysqI",
+    "call_rptSp2t9BW7210DLTaYtq1Rs8shDVWdE"
+  ],
+  "native_turn_ids": [
+    "01a14245-59d7-7503-8187-3a0d3c7be52d"
+  ],
+  "receipts": [
+    {
+      "call_id": "call_9ol-mJGBRmdgUUqBLnhZnoK6nMawysqI",
+      "output_sha256": "f2c5251822f2e467d6c95c84b1026b0183aec6da3ecc32e50f04550550f0966a",
+      "native_result": "exec_command failed: CreateProcess Rejected; rejected: blocked by policy"
+    },
+    {
+      "call_id": "call_rptSp2t9BW7210DLTaYtq1Rs8shDVWdE",
+      "output_sha256": "f2c5251822f2e467d6c95c84b1026b0183aec6da3ecc32e50f04550550f0966a",
+      "native_result": "exec_command failed: CreateProcess Rejected; rejected: blocked by policy"
+    }
+  ],
+  "scope": "Two independent SHA256 reads of the owned64MiB fixture in the private native project; read-only/never native scope",
+  "process_creation": "REJECTED_BY_NATIVE_POLICY; no successful execution/hash/OS-overlap receipt",
+  "batch_dispatches": 1,
+  "child_attempts": 2,
+  "child_retries": 0,
+  "subsequent_requests": "Native provider-stream reconnections replayed the same existing call results; no additional command batch emitted",
+  "case8": "NOT_ATTEMPTED",
+  "cleanup": {
+    "native_exit": 0,
+    "complete": true
+  },
+  "allowed_next_step": "Review original native policy receipt and obtain explicit scoped authorization through its supported interface; no automatic retry, sandbox change, alternate tool or route"
+}

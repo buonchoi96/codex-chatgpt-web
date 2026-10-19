@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-17",
+  "goal_status": "ACTIVE",
+  "scope": "P0-E: standalone native /compact historical human source provenance",
+  "classification": "RED_GREEN_LOCAL_PROVENANCE_GUARD; AUTHENTICATED_LIVE_WEB_COMPACTION_E2E_UNVERIFIED",
+  "observed_regression": "A standalone native-shaped compact could select a foreign-turn human message supplied in its raw input without an independently authenticated native rollout or accepted continuation.",
+  "implementation": "For UUID-shaped native thread/turn metadata, compaction request kind and explicit raw model, a historical source item that appears in raw input now requires authenticated native compaction evidence or an accepted native continuation. Current-turn human instructions and legacy SDK cases retain their existing behavior.",
+  "changed_source": [
+    "src/adapters/chatgpt-web/environment.ts",
+    "tests/compaction-accepted-source-recovery.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/environment.ts": "69519EC6C320F63A86A402308A6B8E5BC7AD93D005D17FF1D23A7484A5EBA038",
+    "tests/compaction-accepted-source-recovery.test.ts": "4E4BEF1193967EB1D46EE30288FF85C67114517E2CBEBA2BADE96447A1A74987"
+  },
+  "verification": {
+    "initial_red": "Foreign human compact fixture reproduced an unverified-source acceptance in preceding local step; no independently preserved RED log for the exact final test",
+    "prior_broad_failure": "Initial universal guard caused 30 failures across six suites; narrowed before final verification. Old failures are not current-patch failures.",
+    "final_focused": "199 PASS, 0 FAIL, 636 assertions, 3 test files",
+    "focused_log": "docs/superpowers/day10-e-native-compaction-auth-20261017-focused.log",
+    "focused_log_sha256": "A5F2FEF68A6E5F5E1873EF3AFC1C86AAA625D5E9937A9A4E1CB27C24A6200501",
+    "final_broad": "377 PASS, 0 FAIL, 1939 assertions, 6 test files",
+    "broad_command": "bun test tests/compaction-accepted-source-recovery.test.ts tests/native-compaction-provenance.test.ts tests/environment.test.ts tests/server-compaction.test.ts tests/retained-compaction.test.ts tests/chatgpt-web-harness.test.ts",
+    "broad_log": "docs/superpowers/day10-e-native-compaction-auth-20261017-tests.log",
+    "broad_log_sha256": "33CC5388C94E2D9834A3471CE5CD6A328291C308D179E8FB925F206DA2A7C120",
+    "typecheck": "PASS: bun run typecheck",
+    "typecheck_log_sha256": "8670E722A80795C2DE9002BDB4D7040F339E9BB333122E4A9F9FDC1F36BAF689",
+    "git_diff_check": "PASS",
+    "runner": "Windows native Codex command, Bun"
+  },
+  "acceptance_limitations": [
+    "No live native standalone compact plus authenticated Web-model receipt was executed in this phase.",
+    "UUID-shaped identity and raw-model gating preserves historical SDK fixtures; native request identity coverage requires future integration evidence.",
+    "Remaining P0-E races, steering and same-tab watchdog acceptance are not established by the 377 tests.",
+    "No newer safety review was available; six desktop_observe records remain PENDING_SAFETY_REVIEW, with retry_allowed=false.",
+    "Actual GPT-6 Sol (Web) High route and effort were not independently exposed in the native connection."
+  ],
+  "worktree": {
+    "web_branch": "main",
+    "web_head": "e530f5b3c62d1d8a563266c75b6d424aaca0de64",
+    "swift_branch": "main",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C"
+  },
+  "requirement_count": 175,
+  "counts": { "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21 },
+  "status_upgrades": 0,
+  "pending_safety_review": 6,
+  "safety_scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "safety_snapshot_sha256": "9158a6a76321cf6cad2cd0ec8342653a12fb08eac46541e804297ff01449c39e",
+  "safety_retry_allowed": false,
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0,
+  "next_safe_step": "Verify native standalone compaction with authenticated rollout/Web-model receipt when a permitted original route becomes available; independently pursue remaining P0-E source settlement and steering race regressions."
+}

@@ -112,6 +112,32 @@ test.each([false,true])('eight separate broker invocations overlap before any co
  }finally{await f.close();}
 });
 
+test('overlapping native parallel batches attribute later batch sessions to their own lease',async()=>{
+ const f=await connected();try{
+  const first=call(f,false,commands(2));
+  const laterCommands=[{cmd:'Get-Content -LiteralPath later-a.txt -Raw'},{cmd:'Get-Content -LiteralPath later-b.txt -Raw'}];
+  const second=call(f,true,laterCommands);
+  // Both batches must reach the broker before its first owner delivery, which
+  // otherwise replays an uncompleted earlier batch ahead of newly queued calls.
+  await new Promise(resolve=>setTimeout(resolve,100));
+  const requests=await f.broker.nextToolBatch(f.token);
+  expect(requests).toHaveLength(4);
+  const firstRequests=requests.filter(request=>(request.arguments?.cmd as string).includes('fixture-'));
+  const secondRequests=requests.filter(request=>(request.arguments?.cmd as string).includes('later-'));
+  expect(firstRequests).toHaveLength(2);expect(secondRequests).toHaveLength(2);
+  for(const [index,request] of secondRequests.entries())await f.broker.completeTool(f.token,request.callId,{
+   content:[{type:'text',text:'later'}],structuredContent:{session_id:700+index}});
+  const secondResult=await second;
+  expect(secondResult.isError).toBe(false);
+  expect((secondResult.structuredContent as any).commands.every((child:any)=>child.status==='succeeded')).toBe(true);
+  for(const [index,request] of firstRequests.entries())await f.broker.completeTool(f.token,request.callId,{
+   content:[{type:'text',text:'earlier'}],structuredContent:{session_id:800+index}});
+  expect((await first).isError).toBe(false);
+  // All four running native sessions must still count against the same owner.
+  expect((await call(f,true,commands(5))).isError).toBe(true);
+ }finally{await f.close();}
+});
+
 test.each([false,true])('parallel command options keep their native names and values; reserved=%s',async reserved=>{
  const f=await connected();try{
   const items=commands(2).map((command,index)=>({...command,workdir:`/workspace/${index}`,max_output_tokens:1200+index,tty:false}));

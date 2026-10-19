@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-17",
+  "scope": "Day-10 P0-A final-stage READY provenance after native OCR/CV analysis",
+  "status": "WEB_RED_GREEN_FINAL_SOURCE_PROOF; NATIVE_COMPILED; LIVE_E2E_UNVERIFIED",
+  "goal_status": "ACTIVE",
+  "problem": "Native semantic OCR could establish provisional READY but later analysis or OCR delivery could expire/fail while the final receipt still said READY. A provider_error could be serialized as OCR completed.",
+  "changes": [
+    "The native observer downgrades provisional READY to PARTIAL, clears semantic success/frame/predicate markers when downstream CV or OCR completion fails, and reports OCR provider_error as UNAVAILABLE.",
+    "The native Web bridge rejects READY whose final CV/OCR source receipts are missing, incomplete, attributed to another frame, or explicitly expired.",
+    "Test fixtures for ordering, lease rotation and publication cancellation now carry consistent completed native source receipts."
+  ],
+  "red": {
+    "test": "bun test tests/mcp-screen-tree.test.ts",
+    "result": "24 PASS, 1 FAIL: contradictory READY was published with unavailable OCR, mismatched OCR frame or expired analysis"
+  },
+  "verification": {
+    "web_test_command": "bun test tests/mcp-screen-tree.test.ts tests/screen-observation.test.ts tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/screen-reader-pipe-framing.test.ts tests/mcp-stdio-screen-observer.test.ts",
+    "web_tests": "72 PASS, 0 FAIL across 8 files",
+    "web_log": "docs/superpowers/day10-ready-final-source-web-green-20261017.log",
+    "web_log_sha256": "F9779D83280D8FCA81CAEDB6649E6A79B4C6E561B333106A5DDE4D0D4BB25B21",
+    "typecheck": "PASS: bun run typecheck",
+    "native_build": "PASS: cmake --build native/build --target swift_observer_engine_tests swift_observer_ocr_tests swift_observer_readiness_tests swift_observer_reader_tests swift_observer_frame_tests --parallel 2",
+    "native_ctest_command": "ctest --test-dir native/build -R '^swift_observer_(readiness|reader|engine|frame|ocr)_tests$' --output-on-failure",
+    "native_ctest": "5 PASS, 0 FAIL",
+    "native_log": "ComputerUseSwift-MCP/output/day10-ready-final-source-green-20261017.log",
+    "native_log_sha256": "C423BEDCCEB1541169E77BF14978B5DD6286553DD331EDC70FFE49A3C0E372D3",
+    "diff_check": "PASS (Swift line-ending warnings only)"
+  },
+  "file_sha256": {
+    "web/src/adapters/chatgpt-web/screen-observation.ts": "0F402BF68E8B51630C254104E8196BD18ED65A5E746DA3640B363802820D4822",
+    "web/tests/mcp-screen-tree.test.ts": "79FFF4FF173266B413FD9CD6320C6C13F3CD41A2CE5BDAC2C77FCBB085335C2F",
+    "web/tests/screen-observation.test.ts": "95285B2EE378F0EBA7166CDE440E9465962F27FAE25AE01D48038FF5F2281C2A",
+    "web/tests/screen-observation-ordering.test.ts": "2136A36812D76B1A5B0F8904DD73C7BB7D74087CAE5D89FDC34BE97139C024EA",
+    "web/tests/screen-observation-publication.test.ts": "452281EB1F0751906E27B8EFBB42976ECD60D026972B124CF7087D8E9602FBD7",
+    "swift/native/src/swift.cpp": "ED8B5F584341F977536318B0AF79D92BB0B031B3BB3B5788D7A7548A6D5A3193"
+  },
+  "limits": [
+    "The Web regression is an isolated, real in-memory MCP client and synthetic native provider; it does not prove the native final-stage downgrade executes correctly in a live foreground observation.",
+    "Native post-readiness downgrade and OCR provider_error serialization compiled with five existing CTest groups; no dedicated native forced post-READY deadline E2E receipt has been produced.",
+    "Authenticated GPT-6 Sol Web High semantic-readiness E2E and direct model pixel delivery remain unverified."
+  ],
+  "status_upgrades": 0,
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "pending_review": 6,
+    "retry_allowed": false,
+    "review_tool_available": false
+  },
+  "model_and_reasoning_verified": false,
+  "new_subagents": 0,
+  "production_service_mutations": 0,
+  "git_reference_mutations": 0
+}

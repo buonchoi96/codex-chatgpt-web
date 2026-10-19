@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-18",
+  "phase": "VIEW-P0-15..19: legacy Swift observation compatibility notice, capability unverified",
+  "goal_status": "ACTIVE",
+  "scope": "Existing Native2 broker result annotation; no new observation, input, viewer, model call or controller switch",
+  "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "workspace": {
+    "web_branch": "main",
+    "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+    "web_preexisting_dirty_entries": 149,
+    "swift_branch": "main",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "swift_preexisting_dirty_entries": 66,
+    "git_reference_mutations": 0,
+    "production_or_global_config_mutations": 0
+  },
+  "implementation": {
+    "source_added": "src/adapters/chatgpt-web/legacy-observation-routing.ts",
+    "integration_modified": "src/adapters/chatgpt-web/mcp-server.ts",
+    "test_added": "tests/legacy-observation-routing.test.ts",
+    "target_tools": ["desktop.observe", "game.observe", "desktop.execute_and_observe", "game.execute_and_observe"],
+    "scope_guard": "Exact flattened Swift wire identity, successful original native ok:true and NO_FAILURE classification, no safety-ledger persistence error",
+    "result_contract": "Keep original content[] images, structuredContent, isError and _meta; add one bounded JSON observation_routing sidecar and text notice per binding/tool",
+    "routing_status": "LEGACY_COMPATIBILITY_ACTIVE",
+    "replacement_available": false,
+    "image_delivery_status": "UNAVAILABLE",
+    "action_execution": "none for observation, completed only for native status=completed, otherwise unknown",
+    "compound_action_guard": "do_not_replay_action=true; never redispatch or change controller",
+    "rate_limit": "At most one compatibility notice per turn binding/tool; bounded 256 keys",
+    "source_sha256": "6BD4FF6513F87B818517B0ED9524C40FCBFB976FC6344621819DB805BD0EE2FA",
+    "test_sha256": "FFF11CBC68C1A1FE16D7CB890ADBAE96F53DB83E7233692B706021F11B3883DA"
+  },
+  "red": {
+    "command": "bun test tests/legacy-observation-routing.test.ts",
+    "result": "1 PASS / 3 FAIL / 13 assertions",
+    "failure": "Original successful Swift result lacked the required model-readable observation_routing notice"
+  },
+  "green": {
+    "command": "bun test tests/legacy-observation-routing.test.ts tests/mcp-server-image-relay.test.ts tests/mcp-screen-tree.test.ts",
+    "result": "40 PASS / 0 FAIL / 311 assertions",
+    "test_runtime": "Bun 1.4.0 on Windows; real MCP SDK in-memory client and TurnBroker fixtures; native operations mocked",
+    "typecheck": "PASS: bun run typecheck after correcting test-only TypeScript typing",
+    "source_hygiene": "PASS: git diff --check",
+    "self_review": "The annotation cannot change source image bytes, execution receipt, isError, _meta, tool identity or side effects; source parser requires Swift ok:true. It never advertises a replacement before authenticated Web acceptance."
+  },
+  "acceptance_limits": {
+    "authentic_swift_native_e2e": "NOT RUN: no fresh owned Swift GUI operation authorized; historical safety refusals remain binding",
+    "authenticated_web_model_observation": "NOT RUN: current connector does not advertise a verified semantic observer",
+    "positive_legacy_observation_path": "NOT IMPLEMENTED: requires target and model-facing semantic capability verification; replacement_available remains false",
+    "text_only_model_consumption": "UNVERIFIED: MCP model-readable text is covered by fixture only",
+    "model_visible_pixels": "UNVERIFIED: no relay proof; observer image mode DISABLED",
+    "claim": "Partial implementation of negative/compatibility paths, not acceptance of VIEW-P0-15..19"
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "81e050ab93cbbb5478dde6bef16a28741454722c4febf6eedffd59102905be2d",
+    "unresolved": 20,
+    "status": "PENDING_SAFETY_REVIEW",
+    "native_review_tool": "NOT ADVERTISED",
+    "original_operations_retried": 0,
+    "synthetic_error_fixture": "One local mocked refusal per test run; not a fresh platform denial or an execution receipt"
+  },
+  "matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0},
+  "agents": {"spawned": 0, "actual_main_model_and_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR"}
+}

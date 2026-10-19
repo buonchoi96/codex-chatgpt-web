@@ -3,7 +3,7 @@ import type {BrokerToolResult} from './turn-broker';
 /** Only the locally generated gateway emits this invocation-specific control frame. */
 export function gatewayMetadataProgram(marker:string):string[] {
   return [
-    'const mcpResult = result && typeof result === "object" && Array.isArray(result.content);',
+    'const mcpResult = result && typeof result === "object" && (Array.isArray(result.content) || Array.isArray(result.content_items));',
     'const relayMetadata = {version:1,mcp:Boolean(mcpResult)};',
     'if(mcpResult){for(const key of ["isError","structuredContent","_meta"])if(Object.hasOwn(result,key))relayMetadata[key]=result[key];}',
     'else if(result && typeof result === "object" && !Array.isArray(result) && !["image","audio"].includes(result.type) && !Object.hasOwn(result,"image_url") && !Object.hasOwn(result,"audio_url"))relayMetadata.structuredContent=result;',

@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-17",
+  "goal_status": "ACTIVE",
+  "previous_goal_turn": "PROGRESS: the immediately previous phase added UIA focus/enable/offscreen fidelity and passed 52 focused tests; retained as a separate receipt",
+  "scope": "P0-A4 semantic tree ACK capture provenance and mixed source completion",
+  "classification": "RED_GREEN_LOCAL_MCP_SDK_REGRESSIONS; ACTUAL_AUTHENTICATED_WEB_MODEL_E2E_UNVERIFIED",
+  "verified_defects": [
+    "DPI change from 96 to 120 within an acknowledged UIA snapshot chain returned a diff instead of a full snapshot (RED: expected full, received diff).",
+    "Missing capture descriptors on both acknowledged frames still permitted incremental diff (RED: expected full, received diff).",
+    "The standalone mixed-diff helper accepted OCR UNAVAILABLE with zero OCR nodes and could emit an incremental patch despite missing OCR provenance (RED: expected undefined, received patch)."
+  ],
+  "implementation": [
+    "Require verified capture descriptors for incremental ACK; bind the previous snapshot to capture backend, DPI and dimensions, while generation/region/lease remain independently checked.",
+    "Changing DPI or GDI/DXGI backend, introducing or losing capture metadata, or omitting it from both frames forces full JSON tree, with no duplicate native dispatch.",
+    "Mixed-diff builder rejects incomplete or unavailable OCR status in both its base and current source, but accepts a verified completed-empty OCR source.",
+    "Updated synthetic fixture native receipts to contain matching final-frame capture identities; legacy output format still works."
+  ],
+  "web_source_modified": [
+    "src/adapters/chatgpt-web/screen-observation.ts",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts"
+  ],
+  "web_tests_modified": [
+    "tests/mcp-screen-tree.test.ts",
+    "tests/screen-tree-diff.test.ts",
+    "tests/screen-observation-ordering.test.ts",
+    "tests/screen-observation-publication.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/screen-observation.ts": "432763ADC5FBED84F44C9FC6B4B2D72F601A4360A4771B3B77AA76922810AD2C",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts": "D8FA8205FDC2A713B36BBB717A5B830C4BE94F05C6BDB1371C61D39860728F82"
+  },
+  "verification": {
+    "red_dpi_backend": "bun test tests/mcp-screen-tree.test.ts, 25 PASS / 1 FAIL before fix; ACK returned diff after DPI change",
+    "red_dpi_log": "output/day10-a4-capture-scope-red-20261017.log",
+    "red_dpi_log_sha256": "18D223F4AD4F40EBCFA4F865AB6D970EBBA67ED2D18922028E38F2FB9CE290D3",
+    "red_missing_capture": "bun test tests/mcp-screen-tree.test.ts -t 'MCP cannot deduplicate an ACK when neither frame has a verified capture descriptor': 0 PASS / 1 FAIL before fix",
+    "red_missing_log": "output/day10-a4-missing-capture-red-20261017.log",
+    "red_missing_log_sha256": "B9EB81AEBD2B586F4767C07A89A1C90E504E63570ECA8D1FB6D1ACB1ED3A2C17",
+    "green_command": "bun test tests/screen-tree-diff.test.ts tests/mcp-screen-tree.test.ts tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-tree.test.ts tests/screen-observation.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts tests/setup-observer-runtime-change.test.ts",
+    "green_result": "82 PASS, 0 FAIL, 487 assertions, 9 test files",
+    "green_log": "docs/superpowers/day10-a4-capture-ack-20261017-tests.log",
+    "green_log_sha256": "ABA7FC054D6B0FBCC7AD1E78009564745DC1F4EA2587430A9B502CEECAEB4F39",
+    "typecheck": "PASS: bun run typecheck",
+    "git_diff_check": "PASS: git diff --check",
+    "test_runner": "Windows native Codex command via Codex Native2; Bun 1.4.0"
+  },
+  "acceptance_limitations": [
+    "MCP tests use isolated in-process SDK client with a synthetic native provider; no real on-screen provider-frame pair or authenticated Web-model-visible semantic ACK was executed.",
+    "No new native C++ build or benchmark was required by these Web-only changes.",
+    "No claim that MCP return alone proves the Web model received a tool response.",
+    "Current connector does not advertise codex_safety_review or codex_parallel_exec; neither reserved interface was invoked.",
+    "Actual routed GPT-6 Sol (Web) High model/effort not independently exposed for validation."
+  ],
+  "local_worktree": {
+    "web_branch": "main",
+    "web_head": "e530f5b3c62d1d8a563266c75b6d424aaca0de64",
+    "swift_branch": "main",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C"
+  },
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "status_upgrades": 0,
+  "safety_scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "safety_snapshot_sha256": "9158a6a76321cf6cad2cd0ec8342653a12fb08eac46541e804297ff01449c39e",
+  "pending_safety_review": 6,
+  "safety_retry_allowed": false,
+  "subagents_spawned": 0,
+  "production_service_mutations": 0,
+  "git_reference_mutations": 0,
+  "next_safe_step": "Collect an owned genuine UIA-only multi-frame acknowledgement with verified capture descriptors through the permitted original native route if available; follow with authenticated Web-model semantic receipt. Continue other independent P0 tasks if the live route is unavailable."
+}

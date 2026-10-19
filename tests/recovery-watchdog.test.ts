@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { ChatGptRecoveryWatchdog, CHATGPT_FRONTEND_ERROR_STALL_MS, CHATGPT_SOFT_RECOVERY_STALL_MS } from '../src/adapters/chatgpt-web/recovery-watchdog';
+import { ChatGptRecoveryWatchdog, freshRecoveryStall, CHATGPT_FRONTEND_ERROR_STALL_MS, CHATGPT_SOFT_RECOVERY_STALL_MS } from '../src/adapters/chatgpt-web/recovery-watchdog';
+import { SameTabRecovery, type RecoveryObservation } from '../src/adapters/chatgpt-web/same-tab-recovery';
 
 const silent = { visibleText: '', traceBlocks: [], nativeToolCallsInFlight: false, approvalPending: false };
 test.each([['red', 60000], ['interrupted', 180000]] as const)('%s watchdog waits the full %d milliseconds of semantic silence', (errorKind, boundary) => {
@@ -43,3 +44,58 @@ test('healthy reasoning and disappeared banners cannot trigger recovery; clock r
   expect(tracker.update({ ...silent, errorKind: null }, 60000).expired).toBe(false);
   expect(tracker.update({ ...silent, errorKind: 'red' }, 120000).expired).toBe(false);
 });
+
+test.each([
+  ['resumed answer', { visibleText: 'New assistant tokens arrived.' }],
+  ['resumed native activity', { nativeRevision: 9, nativeLastProgressAt: 60001 }],
+  ['disappeared error', { errorKind: null }],
+] as const)('fresh recovery recheck rejects Stop after %s', async (_reason, changed) => {
+  const tracker = new ChatGptRecoveryWatchdog();
+  const stalled = { ...silent, errorKind: 'red' as const, visibleText: 'Original answer.' };
+  tracker.update(stalled, 0);
+  expect(tracker.update(stalled, 60000).expired).toBe(true);
+  let reads = 0, stops = 0, sends = 0;
+  const baseline: RecoveryObservation = {owned:true, revision:1, activeTools:0, approvalPending:false,
+    safetyBlocked:false, sendAcknowledged:true, generationActive:true, composerReady:true,
+    historyStable:true, verifiedStall:true};
+  const result = await new SameTabRecovery().recover({
+    observe: async () => ({...baseline, verifiedStall: freshRecoveryStall(tracker,
+      ++reads===1?stalled:{...stalled,...changed},60000+reads,false)}),
+    stop: async () => {stops++;},
+    submit: async () => {sends++; return 'accepted';},
+  });
+  expect(result).toBe('waiting');
+  expect({reads, stops, sends}).toEqual({reads:2,stops:0,sends:0});
+});
+
+test('explicit steering may request Stop even when the recovery watchdog has not expired', async () => {
+  const tracker = new ChatGptRecoveryWatchdog();
+  let active = true, stops = 0, sends = 0;
+  const result = await new SameTabRecovery().recover({
+    observe: async () => ({owned:true,revision:1,activeTools:0,approvalPending:false,safetyBlocked:false,
+      sendAcknowledged:true,generationActive:active,composerReady:true,historyStable:true,
+      verifiedStall:freshRecoveryStall(tracker,{...silent,errorKind:null},500,true)}),
+    stop: async () => {stops++; active=false;},
+    submit: async () => {sends++;return 'accepted';},
+  });
+  expect(result).toBe('resumed');
+  expect([stops,sends]).toEqual([1,1]);
+});
+
+test.each([['red',60000],['interrupted',180000]] as const)(
+  '%s recovery still submits once after a freshly verified %dms stall', async (kind,deadline) => {
+    const tracker = new ChatGptRecoveryWatchdog();
+    const stalled = {...silent,errorKind:kind};
+    tracker.update(stalled,0);
+    expect(tracker.update(stalled,deadline-1).expired).toBe(false);
+    let now=deadline,active=true,stops=0,sends=0;
+    const result=await new SameTabRecovery().recover({
+      observe:async()=>({owned:true,revision:1,activeTools:0,approvalPending:false,safetyBlocked:false,
+        sendAcknowledged:true,generationActive:active,composerReady:true,historyStable:true,
+        verifiedStall:freshRecoveryStall(tracker,stalled,now++,false)}),
+      stop:async()=>{stops++;active=false;},
+      submit:async()=>{sends++;return 'accepted';},
+    });
+    expect(result).toBe('resumed');
+    expect([stops,sends]).toEqual([1,1]);
+  });

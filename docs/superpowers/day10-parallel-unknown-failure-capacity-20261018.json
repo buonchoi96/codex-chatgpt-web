@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C native error receipts with uncertain dispatch status",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "source_files": [
+    "src/adapters/chatgpt-web/parallel-native-commands.ts",
+    "tests/parallel-native-capacity.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/parallel-native-commands.ts": "C0B5B0F5CD41160CB17FA33957C5B60D493DE988E1C1DC50FAF59343F8A83FE0",
+    "tests/parallel-native-capacity.test.ts": "116FAA2C587923FAB0FDE82013662E35B91DE73559A60CFE87433056C2CCD643"
+  },
+  "failure_mode": "The parallel runner regarded an explicit codex_tool_timeout or safety_status_unknown_or_blocked tool error as a completed failed invocation and released its unused native capacity despite unverified execution.",
+  "fix": "For those two explicit native error codes, preserve the exact returned child receipt, mark status uncertain and execution unknown, set retryable false, and retain the unreconciled native command slot. Ordinary terminal failures are unchanged.",
+  "test_evidence": {
+    "red": "Focused test cases 0 PASS / 2 FAIL, both child statuses incorrectly reported failed rather than uncertain",
+    "green": "94 PASS / 0 FAIL / 349 assertions across parallel-native-capacity and parallel-native-commands suites",
+    "typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1681 PASS / 93 SKIP / 2 Windows symlinkSync EPERM FAIL before these patches"
+  },
+  "limitations": {
+    "real_native_parallel_overlap": "NOT_RUN",
+    "native_parallel_exec_advertised": false,
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "safety_review_tool_advertised": false
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

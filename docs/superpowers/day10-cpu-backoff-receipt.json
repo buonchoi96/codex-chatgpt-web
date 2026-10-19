@@ -1,0 +1,34 @@
+{
+  "recorded_at": "2026-10-15T20:03:07.861Z",
+  "classification": "CPU_GOVERNOR_FIXTURE_ONLY",
+  "repo": "F:/Source Projects/ComputerUseSwift-MCP",
+  "branch": "main",
+  "head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "build": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-cpu-backoff-1c3e409e5c724e3989902c56b6bce5f4",
+  "changed": [
+    {
+      "path": "native/src/observer_cpu.cpp",
+      "sha256": "c60f383813ddb6aad447eb92d4a4b4590d1c7b09782db6f1fdc762b64e7e2d88"
+    },
+    {
+      "path": "native/tests/observer_cpu_tests.cpp",
+      "sha256": "11e3cd0663614e43822873dd4e432b7144cff5c8025cb19936f2c7f07a5f6bb8"
+    }
+  ],
+  "result": "PASS",
+  "ctest_suites": 1,
+  "cases": 13,
+  "failed": 0,
+  "elapsed_suite_seconds": 0.47,
+  "test_log": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-cpu-backoff-green-20261016.log",
+  "raw_ctest_log": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-cpu-backoff-1c3e409e5c724e3989902c56b6bce5f4\\Testing\\Temporary\\LastTest.log",
+  "before": "Unknown sample injected100ms backoff on every observation; deterministic new policy regression RED",
+  "after": "Unknown sample keeps one-worker limit without new delay; explicit foreground/deadline/measured pressure still backs off; existing real backoff preserved",
+  "reproduction": "output/day10-cpu-backoff-red-20261016.log",
+  "acceptance_limits": [
+    "No end-to-end observer short-deadline benchmark",
+    "No1worker vsAUTO performance benchmark",
+    "No native full-regression, controller install or UI actions"
+  ],
+  "production_changed": false
+}

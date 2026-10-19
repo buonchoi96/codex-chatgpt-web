@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-17",
+  "scope": "Day-10 P0-A native readiness cancellation/expiry races and final-frame capture provenance",
+  "repositories": {
+    "web": "F:/Source Projects/codex-chatgpt-web",
+    "swift": "F:/Source Projects/ComputerUseSwift-MCP"
+  },
+  "regression": {
+    "red": "A native semantic callback revoked the owning observer while returning ready. The existing coordinator returned READY instead of owner_revoked; native test aborted on the assertion.",
+    "red_log": "ComputerUseSwift-MCP/output/day10-readiness-post-sample-red-20261017.log",
+    "red_sha256": "566BD34A32997C1EA51FEC53E74EA063058DD8D16CCEAA3D58371BD6F6CB6ECA",
+    "original_red_exit": -1073740791,
+    "other_cases": "Cancellation raised inside the callback and callback completion after absolute deadline are also tested. An old test's last-frame expectation was corrected to require the last accepted authorized frame."
+  },
+  "fixes": [
+    "ReadinessCoordinator rechecks cancel, ownership and deadline after semantic sampling and before accepting a READY predicate or marking the sample as accepted.",
+    "Swift native observe_reader binds metadata-only capture receipts to each sampled frame identity and chooses the receipt belonging to the coordinator's actual final frame rather than the most recent capture.",
+    "Only bounded metadata for at most sixteen captures is retained; any missing or mismatched native capture identity fails closed. No new capture or image relay is issued."
+  ],
+  "native_files_sha256": {
+    "native/src/swift.cpp": "2A19D021ED35F7C495CA799C9A24D7DD0D9A5C9060289FA022C3D6BE666B1A86",
+    "native/src/observer_readiness.cpp": "286537B2F7E8507F8A1C1ED7C3967357A574A6640C4979C2F91167229473299F",
+    "native/tests/observer_readiness_tests.cpp": "53868DEF094CB825CC8F0567CD20213F9A38E283C487742A2A7BBBE7C1C2905E"
+  },
+  "verification": {
+    "command": "cmake --build native/build --target swift_observer_readiness_tests swift_observer_reader_tests swift_observer_engine_tests swift_observer_frame_tests swift_observer_ocr_tests --parallel 2",
+    "build": "PASS",
+    "build_log": "ComputerUseSwift-MCP/output/day10-readiness-post-sample-native-build-20261017.log",
+    "build_sha256": "57A72851DBD97AED81B25FD54EC65BC85EF781F79120A306D01C029D34F9D862",
+    "ctest_command": "ctest --test-dir native/build -R '^swift_observer_(readiness|reader|engine|frame|ocr)_tests$' --output-on-failure",
+    "ctest": "5 PASS, 0 FAIL",
+    "ctest_log": "ComputerUseSwift-MCP/output/day10-readiness-post-sample-native-tests-20261017.log",
+    "ctest_sha256": "C1EA563C751F7CBC3F37598B62CAB66CC6714D4E59F559E9C39AE5105BD7D728",
+    "git_diff_check": "PASS (Swift worktree; only line-ending warnings)"
+  },
+  "limits": "Readiness was tested with deterministic owned C++ frames and native CTest binaries, not live foreground Swift observer or authenticated GPT Web model. The final capture metadata selection is compiled into swift_core and structurally reviewed; real returned capture/ROI matching is still E2E-unverified. No existing denied desktop_observe operation was replayed.",
+  "scope_status": "PROGRESS_NATIVE_REGRESSION_VERIFIED; END_TO_END_PARTIAL",
+  "goal_status": "ACTIVE",
+  "matrix_requirement": "VIEW-P0-05",
+  "matrix_status_upgrade": false,
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT_RUN": 21},
+  "safety_scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "pending_safety_review": 6,
+  "safety_retry_allowed": false,
+  "model_and_reasoning_confirmed": false,
+  "subagents_spawned": 0,
+  "production_service_mutations": 0,
+  "git_ref_mutations": 0
+}

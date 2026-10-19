@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-17",
+  "kind": "screen-registry-cancelled-response-must-not-replace-ack-base",
+  "classification": "RED_GREEN_LOCAL_REGISTRY_FIX",
+  "reproduction": {
+    "command": "bun test tests/screen-observation-publication.test.ts",
+    "before_patch": {"passed": 0, "failed": 2, "expect_calls": 8},
+    "failure": "cancelled json and both observations replaced or cleared previously delivered snapshot; later explicit ACK fell back to full",
+    "native_exec_chunk_id": "91ce27"
+  },
+  "fix": {
+    "source": "src/adapters/chatgpt-web/screen-observation.ts",
+    "source_sha256": "362fef1d99b9a90b32f74458debe109239e1688f0040658e1bda609125f150a4",
+    "test": "tests/screen-observation-publication.test.ts",
+    "test_sha256": "3b93227a66815c65f83420870be7e318578b0ff3d1d49075df853d0b1b3b4965",
+    "behavior": "Stage snapshot or invalidation; commit only after final current-grant and abort checks, with no subsequent await."
+  },
+  "verification": {
+    "targeted_suite": "bun test tests/screen-observation-publication.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "tests": 46,
+    "failed": 0,
+    "assertions": 309,
+    "log": "output/day10-screen-publication-green-20261017.log",
+    "log_sha256": "c8407cb84ba2a09a808db95d1446054747794a9375035e64044b46fdadf6ae43",
+    "root_typecheck_exit_code": 0,
+    "git_diff_check_exit_code": 0,
+    "actual_web_model_e2e": "NOT_RUN"
+  },
+  "web_head": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "new_subagents": 0,
+  "production_or_global_configuration_mutations": 0,
+  "git_reference_mutations": 0,
+  "matrix_status_upgrades": 0,
+  "full_scope": 175,
+  "limitations": "Deterministic in-process cancellation fixture. Host reply delivery, native provider timeouts, target switching, and authenticated Web E2E remain separate acceptance gates."
+}

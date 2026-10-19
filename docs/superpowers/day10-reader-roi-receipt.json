@@ -1,0 +1,58 @@
+{
+  "recorded_at": "2026-10-16T02:00:52.802Z",
+  "status": "PASS_FOR_LOCAL_POSITIVE_AND_NEGATIVE_ROI",
+  "raw_receipt": "output/day10-reader-winrt-stdio-1792115933566/results.json",
+  "raw_sha256": "4bea66ffd2b9e3677888fa1a239bc785fa98697294d6b824e5cc27cc1ec1cd10",
+  "log": "output/day10-reader-winrt-negative-roi-standard-budget-20261016.log",
+  "prior_500ms_failure": {
+    "receipt": "output/day10-reader-winrt-stdio-1792115857278/results.json",
+    "status": "FAIL_EXPECTED_STRUCTURED_NOT_READY_GOT_NO_VALID_FRAME_ERROR",
+    "retry_kind": "Fresh fixture at standard3second budget; not policy denial or reused input sequence",
+    "hidden": false
+  },
+  "native2_observe_calls": 3,
+  "positive": {
+    "status": "READY",
+    "semantic_ready": true,
+    "capture_attempts": 1,
+    "frame_id": 2,
+    "image_delivery_status": "UNAVAILABLE"
+  },
+  "negative": {
+    "status": "NOT_READY",
+    "semantic_ready": false,
+    "region": {
+      "x": 256,
+      "y": 200,
+      "width": 160,
+      "height": 80
+    },
+    "capture_attempts": 6,
+    "image_delivery_status": "UNAVAILABLE"
+  },
+  "ocr": {
+    "status": "completed",
+    "language": "en-US",
+    "nodes": 1,
+    "exact_fixture_text": true,
+    "materialized_copies": 3
+  },
+  "cleanup": {
+    "held_keys": 0,
+    "held_buttons": 0,
+    "native2_stdio": true,
+    "fixture": true,
+    "native": true
+  },
+  "input_sequences": 0,
+  "image_encodes": 0,
+  "image_mode": "DISABLED",
+  "model_pixels": "NOT_RUN",
+  "swift_test_sha256": "e00d26a84451cf3868bbd253c3e97923b3bd99137f47d8def1a9de9889f2d6be",
+  "harness_sha256": "eafe8f713e6cd300c768d39c4bf12a07ebeab5753724207a82ddf9edb4fa360c",
+  "limits": [
+    "One owned rendered fixture; semantic tree only",
+    "No actual routed Web model/image receipt",
+    "UIA pixel correspondence unverified; no latency/scaling acceptance"
+  ]
+}

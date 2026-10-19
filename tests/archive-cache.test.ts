@@ -150,6 +150,23 @@ test('archive rejects traversal, remote images, live capability handles and tamp
   expect(()=>validateContextArchive(zipSync(files))).toThrow();
   files['../outside']=strToU8('escape');expect(()=>validateContextArchive(zipSync(files))).toThrow();
 });
+
+test('archive rejects inconsistent image and skill mappings despite valid file hashes',()=>{
+  const archive=buildContextArchive('Verified historical context',[image],[{name:'guide.md',text:'Historical guide'}]);
+  const original=unzipSync(archive.bytes);
+  const tamper=(mutate:(manifest:any)=>void)=>{
+    const files={...original};
+    const manifest=JSON.parse(new TextDecoder().decode(files['manifest.json']!));
+    mutate(manifest);
+    files['manifest.json']=strToU8(JSON.stringify(manifest));
+    return zipSync(files);
+  };
+  expect(()=>validateContextArchive(tamper(manifest=>{manifest.images=[];}))).toThrow(/manifest/i);
+  expect(()=>validateContextArchive(tamper(manifest=>{manifest.images[0].path='context.txt';}))).toThrow(/manifest/i);
+  expect(()=>validateContextArchive(tamper(manifest=>{manifest.images[0].mime_type='image/jpeg';}))).toThrow(/manifest/i);
+  expect(()=>validateContextArchive(tamper(manifest=>{manifest.skills[0].path=manifest.images[0].path;}))).toThrow(/manifest/i);
+  expect(()=>validateContextArchive(tamper(manifest=>{manifest.context.path=manifest.images[0].path;}))).toThrow(/manifest/i);
+});
 test('cold compiler sends the full image archive with an in-turn proof call; proven warm history stays a delta',()=>{
   const parsed={modelId:'gpt-5.6-sol',stream:true,options:{reasoning:'high'},context:{systemPrompt:['Native policy'],messages:[{role:'user' as const,content:[{type:'text' as const,text:'Inspect the complete image history.'},...Array.from({length:12},(_,index)=>({type:'image' as const,imageUrl:image.imageUrl,detail:'low' as const,ref:`image_${index+1}`}))],timestamp:1}]}} as Parameters<typeof compileChatGptWebPrompt>[0];
   const capabilities={solAvailable:true,extraHighAvailable:false,proAvailable:false,localToolsEnabled:true};

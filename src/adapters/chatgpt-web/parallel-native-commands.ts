@@ -121,10 +121,17 @@ export class NativeCommandCapacity{
   if(pollSession!==undefined&&!validSession(pollSession))return;
   const candidates:Record<string,unknown>[]=[];
   const structured=result.structuredContent;
-  if(structured&&typeof structured==='object'&&!Array.isArray(structured))candidates.push(structured as Record<string,unknown>);
-  for(const block of result.content){
-   if(!block||typeof block!=='object'||(block as any).type!=='text')continue;
-   try{const parsed=JSON.parse((block as any).text);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))candidates.push(parsed);}catch{}
+  const authoritative=structured&&typeof structured==='object'&&!Array.isArray(structured)
+   ?structured as Record<string,unknown>:undefined;
+  if(authoritative)candidates.push(authoritative);
+  // Native stdout can itself be JSON that resembles a lifecycle receipt.
+  // Once the connector supplies structured lifecycle metadata, ignore
+  // conflicting text rather than fabricating a terminal process observation.
+  if(!authoritative||(!Object.hasOwn(authoritative,'session_id')&&!Object.hasOwn(authoritative,'exit_code'))){
+   for(const block of result.content){
+    if(!block||typeof block!=='object'||(block as any).type!=='text')continue;
+    try{const parsed=JSON.parse((block as any).text);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))candidates.push(parsed);}catch{}
+   }
   }
   const state=this.owners.get(owner);
   if(pollSession!==undefined){
@@ -136,7 +143,10 @@ export class NativeCommandCapacity{
   const sessionReceipt=candidates.find(value=>validSession(value.session_id));
   if(!sessionReceipt){
    // An unidentified lost dispatch can only be settled through its exact lease handle.
-   if(reservation&&reservation.uncertain>0&&candidates.some(value=>terminalExit(value.exit_code))){
+   // An in-flight batch may finish a known sibling while another child's
+   // dispatch is uncertain. Only a separate post-release reconciliation may
+   // settle an unidentified terminal proof, and only for a single-child lease.
+   if(reservation?.released&&reservation.uncertain>0&&candidates.some(value=>terminalExit(value.exit_code))){
     if(reservation.reserved!==1)throw new Error('An uncertain batch child needs a distinct session identity for terminal reconciliation');
     reservation.uncertain--;reservation.remaining--;
     if(reservation.released&&!reservation.remaining)state?.reservations.delete(reservation);
@@ -165,7 +175,12 @@ export class NativeCommandCapacity{
    }
    return;
   }
-  if(state?.sessions.has(session))return;
+  const existingSession=state?.sessions.get(session);
+  if(existingSession){
+   if(reservation&&existingSession.reservation!==reservation)
+    throw new Error('Native session receipt belongs to a different command lease');
+   return;
+  }
   const donor=reservation??(state&&[...state.reservations].find(item=>!item.released&&item.remaining>item.uncertain));
   if(donor&&!donor.remaining)throw new Error('Native command lease has no remaining session slots');
   if(!donor||!state)throw new Error('New native session requires an outstanding reserved lease');
@@ -191,10 +206,46 @@ export async function runParallelNativeCommands(options:{
    const dispatched_at=Date.now();
    if(options.signal?.aborted)return{index,status:'not_dispatched',dispatched_at:null,finished_at:Date.now(),execution:'not_started',error:'Request cancelled before dispatch'};
    try{
-    const result=await options.invoke(command,index);
+    const invocation=options.invoke(command,index);
+    // A dispatched native call may never settle after its caller is cancelled.
+    // Return an uncertain child without waiting indefinitely or issuing a retry.
+    // Promise.race observes late rejections, but cannot prove native termination.
+    const cancelled=Symbol('native-call-cancelled');
+    let onAbort:(()=>void)|undefined;
+    let result:BrokerToolResult|typeof cancelled;
+    try{
+     if(options.signal){
+      const signal=options.signal;
+      const abort=new Promise<typeof cancelled>(resolve=>{
+       if(signal.aborted)resolve(cancelled);
+       else{onAbort=()=>resolve(cancelled);signal.addEventListener('abort',onAbort,{once:true});}
+      });
+      result=await Promise.race([invocation,abort]);
+     }else result=await invocation;
+    }finally{if(onAbort)options.signal?.removeEventListener('abort',onAbort);}
+    if(result===cancelled){
+     release.retainUncertain();
+     return{index,status:'uncertain',dispatched_at,finished_at:Date.now(),execution:'unknown',
+      error:'Native command request cancelled after dispatch; execution is unverified',retryable:false};
+    }
     // Successful siblings cannot reconcile another child's lost receipt. Only
     // explicit use of an exact lease handle can reconcile unidentified execution.
-    options.capacity.observeResult(options.owner,result);
+    // A sibling batch may share the stable turn owner. Attribute a child
+    // receipt to this batch's exact lease before releasing its reservation.
+    release.observeResult(result);
+    const failureDetails=result.structuredContent&&typeof result.structuredContent==='object'&&
+      !Array.isArray(result.structuredContent)
+      ?result.structuredContent as Record<string,unknown>:undefined;
+    const errorCode=failureDetails?.code;
+    if(result.isError===true&&(errorCode==='codex_tool_timeout'||errorCode==='safety_status_unknown_or_blocked'||
+      failureDetails?.execution_state==='unknown'||failureDetails?.dispatch_state==='unknown')){
+     // A returned timeout/safety error confirms an uncertain transport outcome,
+     // not native process termination. New error codes explicitly reporting
+     // unknown execution/dispatch must preserve the same capacity invariant.
+     release.retainUncertain();
+     return{index,status:'uncertain',dispatched_at,finished_at:Date.now(),execution:'unknown',
+      error:`Native command returned ${String(errorCode??'unknown_execution')}; execution is unverified`,retryable:false,result};
+    }
     return{index,status:result.isError===true?'failed':'succeeded',dispatched_at,finished_at:Date.now(),execution:'receipt_received',result};
    }catch(error){
     // Dispatch failure/retirement does not prove a native process or side effect stopped.

@@ -1,0 +1,83 @@
+{
+  "recorded_at": "2026-10-15T20:03:07.860Z",
+  "classification": "NATIVE_PROTOCOL_AND_SOURCE_PROVENANCE_FIXTURE_ONLY",
+  "result": "PASS_FOR_NATIVE_PROTOCOL_AND_SOURCE_ONLY",
+  "binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/9614f1d9b40d9c4f/codex.exe",
+  "binary_sha256": "e98c516f1c8935789aabe9122ee7e05ec4c3efd1ba6acf179242e031c495b99e",
+  "version": "0.162.0-alpha.17.2",
+  "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-native-install-1792094369519.json",
+  "raw_receipt_sha256": "5d75ca0a77549c5dbc499c2a9a3b573eac4e382ea2f3284ce584b2acd0cdb733",
+  "thread_id": "01a14125-f89c-7e93-a074-65d1957bf34e",
+  "rollout": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-install-Ctbq2g\\profile\\sessions\\2026\\10\\16\\rollout-2026-10-16T02-59-29-01a14125-f89c-7e93-a074-65d1957bf34e.jsonl",
+  "compaction_response_id": "resp_78f23c9b21854542a56ef4c6c9f97400",
+  "installed_sha256": "a68fa30a60f160238c88829514aa1ddd67e5b3e20d00fc934d7e131773e4f3d9",
+  "source_recovery": {
+    "source_id": "msg_01a14125-f9d0-7b43-ae00-9e5a53d509e6",
+    "source_turn_id": "01a14125-f8c2-7742-bc66-140230aae98b",
+    "summary_index": 5,
+    "provenance": {
+      "kind": "native_compacted",
+      "checkpoint_sha256": "ca59ea2e3c84df72d20545de7a179f7e5eabdd7d8f758946fbb05188bff4298c",
+      "source_id": "msg_01a14125-f9d0-7b43-ae00-9e5a53d509e6",
+      "source_revision": "retained_01a14125-f9d1-7bb3-8884-7e2e5eab73b5"
+    }
+  },
+  "native_context_window": 272000,
+  "usage_tokens": 0,
+  "actual_model_invoked": false,
+  "actual_auto_compact_threshold": "NOT TESTED",
+  "effective_272k_recall": "NOT TESTED",
+  "web_browser_composition": "NOT TESTED",
+  "source": [
+    {
+      "path": "src/adapters/chatgpt-web/native-compaction-provenance.ts",
+      "sha256": "4e052c82c12dbc46d7f163152c7d4b262c8d7ee1fb0bec16b3696d9b188c88e2"
+    },
+    {
+      "path": "tests/native-compaction-provenance.test.ts",
+      "sha256": "560a4611cb88c33e54f9bb790926136ea142f838cf7be7d031eff763868130d6"
+    }
+  ],
+  "regression": {
+    "log": "output/day10-native-peer-green-final-20261016.log",
+    "pass": 235,
+    "skip": 2,
+    "fail": 0,
+    "assertions": 970,
+    "files": 6,
+    "seconds": 25.97
+  },
+  "typecheck": {
+    "log": "output/day10-native-peer-typecheck-final-20261016.log",
+    "exit": 0
+  },
+  "supervisor": {
+    "report": "output/day10-euler-final-retest-20261016.md",
+    "log": "output/day10-euler-final-retest-20261016.log",
+    "report_sha256": "b842f76c9d89ba12692f25a70a8491cec78acebd6ce8f8e374559bf5da47a98b",
+    "log_sha256": "7a62672cd3dd5269bd3ef6d5de37f26aa67c0ba09e04dd4a631036979fa6d7a4"
+  },
+  "fixed_defects": [
+    "Missing retained proof must not revive older instruction",
+    "Text/image content must match native kind declarations",
+    "Structured retained identity binds exact message/turn/user role",
+    "Ownerless compact item binds exact installed item id",
+    "Malformed kinds or metadata on ordered source fail closed before older selection"
+  ],
+  "retained_failures": [
+    "output/day10-hilbert-native-regression-20261016.log",
+    "output/day10-native-wire-red-20261016.log",
+    "output/day10-native-peer-red-20261016.log",
+    "output/day10-native-wire-typecheck-20261016.log"
+  ],
+  "initial_startup_abort": "output/day10-native-startup-abort-20261016.json; script hashing bug, no native RPC; exact owned processes cleaned after identity check",
+  "host_skill_catalog": "Native serialized host skill inventory despite skip_host_skill_discovery flag. No actual model, tool execution or delegation; do not claim zero host discovery.",
+  "original_safety_blocks_retried": false,
+  "observer_image_mode": "DISABLED",
+  "production_changed": false,
+  "owned_native_process": {
+    "pid": 19968,
+    "exit": 0,
+    "cleanup_complete": true
+  }
+}

@@ -5,7 +5,8 @@ import {basename, dirname, join, resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {defaultBrokerEndpoint} from '../src/config';
+import {defaultBrokerEndpoint,defaultConfig} from '../src/config';
+import {mcpCommand} from '../src/tunnel';
 import {TurnBroker} from '../src/adapters/chatgpt-web/turn-broker';
 
 const grantWire='mcp__computer_use_swift__swift_observer_reader_grant';
@@ -15,7 +16,8 @@ async function bounded<T>(pending:Promise<T>):Promise<T>{
   try{return await Promise.race([pending,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('Private MCP stdio deadline')),10000);})]);}
   finally{if(timer)clearTimeout(timer);}
 }
-async function fixture(args:string[],check:(client:Client,turnToken:string)=>Promise<void>,advertiseGrant=true){
+async function fixture(args:string[],check:(client:Client,turnToken:string)=>Promise<void>,advertiseGrant=true,
+  generatedArgs?:(socket:string)=>string[]){
   const parent=realpathSync(process.platform==='win32'?tmpdir():'/tmp');
   const root=mkdtempSync(join(parent,'cgw-observer-'));
   const broker=TurnBroker.forSocket(defaultBrokerEndpoint(join(root,'broker')));
@@ -27,7 +29,8 @@ async function fixture(args:string[],check:(client:Client,turnToken:string)=>Pro
         ?[{namespace:'mcp__computer_use_swift',name:'swift_observer_reader_grant',description:'Grant an owned read-only fixture reader',parameters:{}}]
         :[{namespace:'mcp__fixture',name:'unrelated_read',description:'Unrelated read-only fixture tool',parameters:{}}]},30000,'observer-stdio');
     transport=new StdioClientTransport({command:process.execPath,
-      args:[join(process.cwd(),'src/cli.ts'),'mcp','--broker-socket',broker.socketPath,...args],cwd:process.cwd(),
+      args:generatedArgs?generatedArgs(broker.socketPath):
+        [join(process.cwd(),'src/cli.ts'),'mcp','--broker-socket',broker.socketPath,...args],cwd:process.cwd(),
       env:{CODEX_CHATGPT_WEB_HOME:appHome,CODEX_HOME:codexHome},stderr:'pipe'});
     transport.stderr?.on('data',chunk=>{if(stderr.length<4000)stderr+=String(chunk).slice(0,4000-stderr.length);});
     client=new Client({name:'private-screen-observer-stdio',version:'1'});
@@ -47,6 +50,41 @@ async function fixture(args:string[],check:(client:Client,turnToken:string)=>Pro
     if(errors.length)throw new AggregateError(errors,'Private MCP cleanup failed');
   }
 }
+
+function unpackTunnelCommand(command:string):string[]{
+  // The tunnel's Windows mcp.command format is a sequence of quoted arguments
+  // with backslashes escaped inside each argument; observer options contain
+  // no embedded quotation marks by construction.
+  const fields=[...command.matchAll(/"((?:\\\\|[^"\\])*)"/g)];
+  const decoded=fields.map(field=>field[1]!.replaceAll('\\\\','\\'));
+  if(decoded.map(field=>'"'+field.replaceAll('\\','\\\\')+'"').join(' ')!==command)
+    throw Error('Generated MCP command could not be round-tripped safely');
+  return decoded;
+}
+
+test.skipIf(process.platform!=='win32')('Launcher-generated native observer startup reaches private MCP stdio without granting guessed access',async()=>{
+  const observer={readerPipe:pipe(),grantWireName:grantWire};
+  await fixture([],async(client,turnToken)=>{
+    const tools=await bounded(client.listTools());
+    expect(tools.tools.some(item=>item.name==='codex_screen_observe')).toBe(true);
+    const result=await bounded(client.callTool({name:'codex_screen_observe',arguments:{
+      turn_token:turnToken,reader_lease:'reader_'+'d'.repeat(64)}},undefined,{timeout:10000,maxTotalTimeout:10000}));
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('SCREEN_READER_NOT_AUTHORIZED');
+  },true,brokerSocket=>{
+    const config=defaultConfig('full');
+    config.browserInteractionMode='automatic';
+    config.runtimeCommand=[process.execPath,join(process.cwd(),'src/cli.ts')];
+    config.brokerSocketPath=brokerSocket;
+    config.nativeScreenObserver=observer;
+    const fields=unpackTunnelCommand(mcpCommand(config,'win32'));
+    expect(fields.slice(0,2)).toEqual(config.runtimeCommand);
+    expect(fields.slice(2,5)).toEqual(['mcp','--contract','native']);
+    expect(fields.slice(5)).toEqual(['--broker-socket',brokerSocket,'--screen-observer-pipe',
+      observer.readerPipe,'--screen-observer-grant-tool',grantWire]);
+    return fields.slice(1);
+  });
+},30000);
 
 test('default native MCP startup does not advertise an unconfigured observer',async()=>{
   await fixture(['--contract','native'],async client=>{

@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-17",
+  "kind": "native_observer_ready_status_final_frame_semantic_proof",
+  "classification": "RED_GREEN_ISOLATED_MCP_REGRESSION",
+  "prior_gap": "The registry accepted native READY with semantic_ready:true even without a requested readiness predicate, frame-scoped evidence, or a matching readiness.status. That could falsely report successful UI readiness to the Web model.",
+  "red": {
+    "command": "bun test tests/mcp-screen-tree.test.ts",
+    "result": "20 pass, 2 fail, 179 assertions before patch",
+    "failure": "A READY receipt with no final-frame proof was accepted, and READY with an internal NOT_READY completion status was accepted.",
+    "log": "output/day10-ready-proof-red-20261017.log",
+    "sha256": "A5EED7F298F6B2C558C4EFA0C37B50C81A26C5D766B79273F3245085DEC6812A"
+  },
+  "fix": "The registry now accepts READY only after an explicit readiness request and a matching READY semantic receipt with the final frame/generation, ui_ready mode and OCR predicate. Any non-READY observation with semantic_ready:true is rejected. Requested readiness.status must agree with the outer native observation status.",
+  "test_changes": [
+    "Explicit RED regressions for READY without frame-scoped semantic evidence and for contradictory readiness status.",
+    "Regression for NOT_READY contradicting its semantic_ready flag, and positive NOT_READY with semantic_ready:false.",
+    "Positive UIA, mixed-diff, ACK and frame-publication fixtures now carry realistic requested readiness and a matching per-frame semantic receipt, including grant rotation and abort preservation."
+  ],
+  "verification": {
+    "command": "bun test tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-reader-pipe-framing.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "tests_passed": 65,
+    "tests_failed": 0,
+    "assertions": 392,
+    "files": 8,
+    "log": "output/day10-ready-proof-final-20261017.log",
+    "log_sha256": "94ADF2283F599A2C2E3DA530057E5D7CDF2429D46C28EC1FE95ACC9E1E651830",
+    "typecheck": "PASS",
+    "typecheck_log": "output/day10-ready-proof-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670E722A80795C2DE9002BDB4D7040F339E9BB333122E4A9F9FDC1F36BAF689",
+    "git_diff_check": "PASS"
+  },
+  "source_and_test_hashes": {
+    "src/adapters/chatgpt-web/screen-observation.ts": "83DA33A5AD229DE2DC92A26887548CF8245DC445F8BEBAC5F0BB339E2752AC3A",
+    "tests/mcp-screen-tree.test.ts": "1548F26588A362FBE589686E71051D27C01C640C8F6BEB682AAA6DCF4FA024F6",
+    "tests/screen-observation-ordering.test.ts": "2F33144E842930231027E234994F05F3D0FE42C95A3682E2FE656B8E0D4EACAF",
+    "tests/screen-observation-publication.test.ts": "D9B89D15D74C7761AF20EC544B85F3D7C469124D9A3E4492961A481AF5B9D715"
+  },
+  "limitations": "Local MCP/registry fixture proof only; real Swift capture readiness, foreground target, authenticated GPT Web semantic interpretation and actual pixel relay remain unverified. No full VIEW-P0-05 PASS claim is justified.",
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "pending_count": 6,
+    "review_tool": "NOT_ADVERTISED",
+    "retry_allowed": false
+  },
+  "goal_status": "ACTIVE",
+  "full_requirement_count": 175,
+  "status_upgrades": 0,
+  "model_selection": "NOT_VERIFIED_AS_GPT_6_SOL_WEB_HIGH",
+  "subagents_spawned": 0,
+  "production_changes": 0,
+  "git_reference_changes": 0,
+  "web_head": "e530f5b3c62d1d8a563266c75b6d424aaca0de64",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574"
+}

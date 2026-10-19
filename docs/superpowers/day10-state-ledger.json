@@ -1,0 +1,1944 @@
+{
+  "version": 1,
+  "date": "2026-10-16",
+  "goal_source": "E:/Codex/attachments/f529255e-fa33-46d7-b68d-3477c519c841/pasted-text-1.txt",
+  "goal_status": "ACTIVE",
+  "baseline": {
+    "web": {
+      "branch": "main",
+      "head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+      "initial_worktree": "clean",
+      "plan": "F:/Source Projects/codex-chatgpt-web/PLAN.md",
+      "plan_sha256": "8da926d072316ea9402bacd2ba63039d05bbe85239bb58198dbb4cc104328585",
+      "root_goal": "absent; authoritative goal is attachment"
+    },
+    "swift": {
+      "branch": "main",
+      "head": "30d3fe4570761943464947894a4e1e0b863b3574",
+      "initial_worktree": "dirty; preserved",
+      "design": "F:/Source Projects/ComputerUseSwift-MCP/PLAN.md"
+    }
+  },
+  "actors": [
+    {
+      "role": "main",
+      "requested_model": "gpt-6.1-sol",
+      "requested_effort": "high",
+      "resolved_model": "gpt-6.1-sol",
+      "resolved_effort": "high",
+      "evidence": {
+        "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+        "line": 19360,
+        "turn_id": "01a14467-9fa7-7550-b236-dc2ff038af1b",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "collaboration_model": "gpt-6.1-sol",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      },
+      "current_status": "working",
+      "current_context": {
+        "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+        "line": 20354,
+        "turn_id": "01a14582-3c8e-7e61-a82b-9f95b099fa16",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "collaboration_model": "gpt-6.1-sol",
+        "collaboration_effort": "high"
+      }
+    },
+    {
+      "id": "01a145a6-55cd-7691-834b-2bcb26869893",
+      "nickname": "Plato",
+      "role": "Coding / implementation",
+      "gate_role": "implementation",
+      "agent_id": "01a145a6-55cd-7691-834b-2bcb26869893",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-11-01a145a6-55cd-7691-834b-2bcb26869893.jsonl",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "session_meta": {
+        "line": 1,
+        "id": "01a145a6-55cd-7691-834b-2bcb26869893",
+        "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+        "model": null
+      },
+      "first_context": {
+        "line": 8,
+        "turn_id": "01a145a6-57d9-75c2-886a-b0c408044dd3",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      },
+      "latest_binding": {
+        "line": 8,
+        "turn_id": "01a145a6-57d9-75c2-886a-b0c408044dd3",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never",
+        "file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-11-01a145a6-55cd-7691-834b-2bcb26869893.jsonl"
+      },
+      "current_status": "active bounded offline assignment after actual native Luna/high verification",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high"
+    },
+    {
+      "id": "01a145a6-58d8-71a0-8611-5701663b2284",
+      "nickname": "Popper",
+      "role": "UI / research / test supervisor",
+      "gate_role": "supervisor",
+      "agent_id": "01a145a6-58d8-71a0-8611-5701663b2284",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-12-01a145a6-58d8-71a0-8611-5701663b2284.jsonl",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "session_meta": {
+        "line": 1,
+        "id": "01a145a6-58d8-71a0-8611-5701663b2284",
+        "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+        "model": null
+      },
+      "first_context": {
+        "line": 8,
+        "turn_id": "01a145a6-5c04-7852-89c7-4d04358aeeb1",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      },
+      "latest_binding": {
+        "line": 8,
+        "turn_id": "01a145a6-5c04-7852-89c7-4d04358aeeb1",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never",
+        "file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-58-12-01a145a6-58d8-71a0-8611-5701663b2284.jsonl"
+      },
+      "current_status": "completed independent negative receipt review; open for pending proof-diagnostics code review",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high"
+    }
+  ],
+  "model_incident": {
+    "old_children": [
+      "Gibbs/01a13860-79ec-7fa0-885f-8c709d7bbc84",
+      "Sagan/01a13860-b472-7770-b9bf-81819d042f56"
+    ],
+    "requested": "gpt-6-luna/high",
+    "actual_initial": "gpt-6-luna/high",
+    "actual_after_resume_followup": "gpt-6.1-sol/high",
+    "classification": "MODEL_OVERRIDE_NOT_PRESERVED_ON_RESUMED_FOLLOWUP",
+    "root_cause_limit": "Native implementation unavailable; cannot isolate resume versus follow-up internals",
+    "workaround": "Fresh user-authorized exactly-two replacement; literal Luna/high/no-history, actual native context and permissions checked before initial-turn nonce gate. No bare resume/send.",
+    "permanent_runtime_fix": false,
+    "evidence": "docs/superpowers/plans/2026-10-14-subagent-model-audit.md",
+    "configuration_recheck": "Read-only 2026-10-15: E:/Codex/config.toml model chatgpt-web/gpt-6-sol line1, effort high line2, multi_agent true line108, agents.max_depth2 line112; no named role heading or repo/global agents directory/local config found. Main did not edit configuration. Actual child turn_context, not defaults, establishes Luna/high.",
+    "operational_correction": "APP_EXPLICIT_FOLLOWUP_OVERRIDE_VERIFIED: reuse same Maxwell/Pascal UUIDs with explicit app model/effort override and fresh nonce gate only after native metadata verification. No new identity or global config edit.",
+    "latest_receipt": "docs/superpowers/day10-agent-followup-receipt.json"
+  },
+  "next_priorities": [
+    "Pending tool/approval and competing compact transaction races; missing native checkpoint and model/cwd rebind negatives",
+    "Native raw capture/State-Aware/UIA/OCR/CV/tree/codex_screen_observe integration and live frame publication acceptance",
+    "Native2–8 command overlap, archive regression scenarios, full1vsAUTO benchmark, empirical272Krecall and actual Web pixel delivery; image mode stays disabled"
+  ],
+  "image_mode": "disabled",
+  "production_changed": false,
+  "previous_goal_source": "E:/Codex/attachments/98fc1ad6-c7ae-49e1-8a98-d12124c10186/pasted-text-1.txt",
+  "previous_actors": [
+    {
+      "role": "Coding / implementation",
+      "agent_id": "01a13e65-2945-7953-a650-acbdbd6dbb20",
+      "nickname": "Beauvoir",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_context": false,
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "creation_event": "fresh explicit spawn; nonce gate authorized only after main verified native metadata",
+      "last_proven_receipt": "completed; exactly one turn_context at line6 remains Luna/high; close_agent returned completed",
+      "current_status": "closed",
+      "assigned_paths": [
+        "src/adapters/chatgpt-web/thread-environment.ts",
+        "tests/environment.test.ts"
+      ],
+      "evidence_directory": "E:/Codex/sessions/2026/10/15",
+      "session_meta_line": 1,
+      "turn_context_line": 6
+    },
+    {
+      "role": "UI / research / test supervisor",
+      "agent_id": "01a13e65-2c28-7410-ba2f-f504be1a6f91",
+      "nickname": "Heisenberg",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_context": false,
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "creation_event": "fresh explicit spawn; nonce gate authorized only after main verified native metadata",
+      "last_proven_receipt": "completed; exactly one turn_context at line6 remains Luna/high; close_agent returned completed",
+      "current_status": "closed",
+      "assigned_paths": [
+        "read-only provenance/compaction source and tests"
+      ],
+      "evidence_directory": "E:/Codex/sessions/2026/10/15",
+      "session_meta_line": 1,
+      "turn_context_line": 6
+    },
+    {
+      "role": "Coding / implementation",
+      "agent_id": "01a13eab-9002-79d2-bc89-8e42850802c0",
+      "nickname": "Maxwell",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "schema_boundary": "task_name and fork_turns unsupported; role in message, no-history via fork_context:false",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\15\\rollout-2026-10-15T15-26-33-01a13eab-9002-79d2-bc89-8e42850802c0.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        106
+      ],
+      "creation_event": "User explicitly requested replacement spawn; both previous owners terminal; validation-only first prompt, native checks before nonce gate task handoff",
+      "current_status": "closed; completed prior work preserved",
+      "last_proven_receipt": "Same UUID explicit app follow-up; actual native Luna/high before gate and after completed work; raw child tool receipt and app completion in day10-agent-followup-receipt.json",
+      "assigned_paths": [
+        "src/adapters/chatgpt-web/blocked-operation-ledger.ts",
+        "tests/blocked-operation-ledger.test.ts"
+      ],
+      "tests": "11 pass,53 assertions; added five tests only",
+      "latest_followup_method": "mcp__codex_app__send_message_to_thread model:gpt-6-luna thinking:high",
+      "latest_phase": "MCP review regression tests8pass68assert"
+    },
+    {
+      "role": "UI / research / test supervisor",
+      "agent_id": "01a13eab-bb5a-7ca1-b474-b4e3d5765347",
+      "nickname": "Pascal",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "schema_boundary": "task_name and fork_turns unsupported; role in message, no-history via fork_context:false",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\15\\rollout-2026-10-15T15-26-44-01a13eab-bb5a-7ca1-b474-b4e3d5765347.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        113
+      ],
+      "creation_event": "User explicitly requested replacement spawn; both previous owners terminal; validation-only first prompt, native checks before nonce gate task handoff",
+      "current_status": "closed; completed prior work preserved",
+      "last_proven_receipt": "Same UUID explicit app follow-up; actual native Luna/high before gate and after completed work; raw child tool receipt and app completion in day10-agent-followup-receipt.json",
+      "assigned_paths": [
+        "read-only native provenance source/test review"
+      ],
+      "tests": "73 pass,281 assertions; no source edits; effort-evidence review note followed up by main",
+      "latest_followup_method": "mcp__codex_app__send_message_to_thread model:gpt-6-luna thinking:high",
+      "latest_phase": "Independent SAFE source review;14pass118assert; found scope status inconsistency"
+    }
+  ],
+  "active_owned_children": 2,
+  "latest_model_inventory": "Plato coding and Popper supervisor fresh authorized Luna/high/no-history; actual first contexts verified before productive gate release; old pair preserved as terminal history",
+  "verification": {
+    "final_typecheck": "PASS; exec48695 collected exit0; output/day10-native-glob-typecheck-20261016.log",
+    "final_native_focused": "235pass2skip0fail970assert6files25.97s; exec58450 collected exit0; output/day10-native-peer-green-final-20261016.log",
+    "final_mcp_focused": "146 pass,2 skip,0 fail,637 assertions,11 files,18.78s; output/day10-ledger-mcp-accepted-20261015.log",
+    "previous_full_verify": "1297 pass,72 skip,2 fail,9643 assertions,114 files; exit1 Windows EPERM symlink fixtures. Predates latest ledger/MCP/native-effort changes; not rerun after user no-retry direction.",
+    "runtime_build": "Private bundle PASS before latest safety/effort edits; output/day10-native-runtime-build-20261015.log; not installed",
+    "runtime_smoke": "Private pre-safety bundle log has RELOCATABLE_RUNTIME_SMOKE_OK; original exec handle96916 no longer retained. No new production deployment or current-source bundle claim.",
+    "interrupted_owned_runs": "PID8928,23356,25644 exact command+creation identities verified before stop; all terminal exit1, NOT PASS. Windows Bun socket promise matcher stalls; explicit-await assertions retained and fresh regressions green.",
+    "browser_focused": "195 pass,0 fail,1465 assertions,6 files,68.94s; exec15245 terminal exit0; output/day10-binding-final-v4-regression-20261015.log",
+    "browser_final_typecheck": "PASS; exec39736 terminal exit0; output/day10-binding-final-v4-typecheck-20261015.log",
+    "browser_prior_batch": "194 pass,1 Windows Bun rejection matcher timeout; NOT PASS. Explicit await preserves negative assertion; focused rerun1 pass26assert, full fresh batch195pass.",
+    "json_transport_focused": "102 pass,0 fail,746 assertions,7 files,29.71s; exec33289 terminal exit0; output/day10-json-final-regression-20261015.log",
+    "json_transport_typecheck": "PASS; exec55339 terminal exit0; output/day10-json-final-typecheck-20261015.log",
+    "current_source_scope": "Current asterisk encoding:2RED -> focused264pass25skip + typecheck + opt-inDOM29pass + actual native/Web3stage PASS. Prior native235/Safety201 receipts remain historical broader checks.",
+    "safety_review": "201pass0fail1081assert/16files28.88s; exec7334 collected exit0; output/day10-safety-review-reviewed-regression-20261016.log",
+    "current_prompt_regression": "264pass25skip0fail1698assert7files36.36s; exec83407 exit0; output/day10-native-glob-regression-20261016.log",
+    "current_dom_regression": "29pass0fail208assert2files50.29s; exec3765 exit0; output/day10-native-glob-dom-final-20261016.log"
+  },
+  "browser_recovery": {
+    "evidence": "docs/superpowers/plans/2026-10-15-day10-live-browser-recovery.md",
+    "basic_live": "PASS initial DEV browser reply, trace11f8407f50c2; one accepted INLINE Send with Native2 selected; no native compact ACK",
+    "failed_live": [
+      "ba80d5f1020d interactive initial binding failure; no follow-up/compact/resend",
+      "cbeea8d9e723 v1 initial binding failure; cleanup completed",
+      "0d8a96797dcf v2 initial binding failure; body10184 vs canonical40863; cleanup completed",
+      "v3 initial and retained recall passed; compact harness accepted5 replacements; postcompact trace089d1b543c39 failed full-body comparison9657 vs9584; exit1; both cleanup completed"
+    ],
+    "repairs": [
+      "exact pre-Send semantic draft/connector proof",
+      "same logical group remount physical locator refresh",
+      "shared semantic newline/BR reader",
+      "one scoped Show more disclosure then full exact re-verification",
+      "directional verified editor encoding only; intentional NBSP preserved",
+      "escaped bulk multiline editor insert with full integrity check",
+      "JSON Unicode transport of angle tags/literal slash pairs/escaped quotes preserves decoded original source and avoids rich-text escaping; comparator unchanged"
+    ],
+    "current_live_attempt": {
+      "outcome": "PASS_FOR_DEV_PROTOCOL_ONLY",
+      "report": "output/day10-live-chain-v4-20261015.json",
+      "log": "output/day10-live-chain-v4-20261015.log",
+      "exec_handle": 45642,
+      "cleanup": [
+        "completed",
+        "completed"
+      ],
+      "stages": [
+        {
+          "stage": "initial",
+          "matched": true,
+          "tool_calls": 0
+        },
+        {
+          "stage": "retained_followup",
+          "matched": true,
+          "tool_calls": 0
+        },
+        {
+          "stage": "compact",
+          "replacement_items": 5,
+          "protocol_ack": "Harness accepted canonical replacement history; native app-server installation NOT TESTED"
+        },
+        {
+          "stage": "post_compact_followup",
+          "matched": true,
+          "tool_calls": 0
+        }
+      ],
+      "native_app_server_ack": "NOT TESTED"
+    },
+    "boundary": "DEV canonical replacement is not native app-server installation ACK; no observer pixels proved",
+    "durable_terminal_receipt": "docs/superpowers/day10-live-browser-receipt.json; exact owned exec45642 terminal exit0 collected independently; DEV protocol only",
+    "latest_native_web": {
+      "receipt": "docs/superpowers/day10-native-web-installation-receipt.json",
+      "result": "PASS_FOR_EXPLICIT_COMPACT_AND_AUTHENTIC_NEXT_USER_TURN"
+    }
+  },
+  "safety_review": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-safety-review-receipt.json",
+    "implemented": [
+      "scoped bounded read-only snapshot and hash-bound paging",
+      "direct/reserved/manual read tool and broker activity settlement",
+      "current notices outside historical carriers",
+      "fresh-process/stdio restart privacy and failure tests",
+      "other_scope_pending separates unrelated scopes while preserving aggregate pending work"
+    ],
+    "live_current_scope_notice": "v2 PASS before peer correction; unchanged current-pending branch",
+    "live_other_scope_notice": "PASS_FOR_DEV_OTHER_SCOPE_NOTICE_ONLY",
+    "new_review_tool_model_invocation": "NOT TESTED",
+    "remaining": [
+      "additional denial-class capture",
+      "genuine human/native original-interface review and once-only permitted retry receipts",
+      "historical raw refusal reconciliation; originals prohibited from retry"
+    ]
+  },
+  "native_fixture_discovery": {
+    "desktop_binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/9614f1d9b40d9c4f/codex.exe",
+    "desktop_version": "0.162.0-alpha.17.2",
+    "npm_cli_version": "0.162.1",
+    "read_only_commands": "Exact binary schema/help/features introspection completed",
+    "unsafe_for_current_topology": "scripts/smoke-codex-environment.ts emits spawn_agent with model chatgpt-web/pro; not executed",
+    "actual_fixture": "Owned private native stdio app-server+fixed provider: native install/source PASS; terminal native exit0. No actual LLM/delegate invoked."
+  },
+  "latest_checkpoint_generator": "output/day10-nested-parallel-checkpoint-20261016.ts; preserve frame publication and native goal receipts",
+  "native_compact_installation": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-native-web-installation-receipt.json",
+    "proven": "Actual Web model initial -> native compacted installation+hash/id/source -> authentic next native user turn recalling marker, exact3Sends/0ZIP/0native actions; fresh native+bridge process continuation also PASS from original durable checkpoint, no cache copy; actual native automatic synthetic-only goal continuation also authenticates installed source and recalls40-character marker,3physicalSends/0native actions",
+    "remaining": "Source/approval/compaction races; effective272Krecall and other model/effort scopes; missing native checkpoint/rebind negatives and combined restart-plus-goal"
+  },
+  "cpu_backoff": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-cpu-backoff-receipt.json",
+    "remaining": "End-to-end observer short-deadline and1vsAUTO foreground/eight-command benchmark"
+  },
+  "latest_agent_scope_receipt": "docs/superpowers/day10-p0-pair-receipt.json",
+  "native_process_restart": {
+    "status": "PASS_FOR_NAMED_POSITIVE_SCENARIO",
+    "receipt": "docs/superpowers/day10-native-restart-receipt.json",
+    "remaining": "Actual synthetic-only /goal, missing native checkpoint negative, model/cwd rebind and live race scenarios"
+  },
+  "native_context_policy": {
+    "status": "PASS_FOR_NATIVE_CLAMP_CALIBRATION_AND_BOUNDARY_DECISIONS",
+    "receipt": "docs/superpowers/day10-native-boundary-receipt.json",
+    "native_window": 272000,
+    "calibrated_auto_threshold": 258400,
+    "uncalibrated_clamp": 244800,
+    "usage": "Controlled fixture usage, not actual Web consumption",
+    "remaining": "Other native-executed Web model/effort profiles, real272Krecall, exact account/transport limits",
+    "current_native_upgrade": {
+      "status": "PASS_FOR_0163_NATIVE_CLAMP_CALIBRATION_AND_BOUNDARY_DECISIONS",
+      "receipt": "docs/superpowers/day10-current-native-boundary-receipt.json",
+      "version": "0.163.0-alpha.10.2",
+      "actual_model_calls": 0,
+      "effective_web_recall": "NOT TESTED",
+      "peer_review": "output/day10-current-native-boundary-supervisor-round7-report.json"
+    }
+  },
+  "previous_actor_checkpoint": [
+    {
+      "role": "main",
+      "requested_model": "gpt-6.1-sol",
+      "requested_effort": "high",
+      "resolved_model": "gpt-6.1-sol",
+      "resolved_effort": "high",
+      "evidence": {
+        "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+        "line": 15086,
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      },
+      "current_status": "working"
+    },
+    {
+      "agent_id": "01a1422e-1444-73b3-8402-7468d2656e57",
+      "nickname": "Popper",
+      "role": "Coding / implementation",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T07-47-59-01a1422e-1444-73b3-8402-7468d2656e57.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6
+      ],
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1422e-1856-74d1-baa2-d3b1fee2d124",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "developer_instructions": null
+          },
+          "approval_policy": "never",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          }
+        }
+      ],
+      "current_status": "completed; close_agent acknowledged completed",
+      "final_turn_context_lines": [
+        6
+      ]
+    },
+    {
+      "agent_id": "01a1422e-18bc-7b82-a16e-47d4b8fac7b8",
+      "nickname": "Kant",
+      "role": "UI / research / test supervisor",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T07-47-59-01a1422e-18bc-7b82-a16e-47d4b8fac7b8.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6
+      ],
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1422e-1a1b-7680-8f1c-d16d8ea3a74f",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "developer_instructions": null
+          },
+          "approval_policy": "never",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          }
+        }
+      ],
+      "current_status": "completed; close_agent acknowledged completed",
+      "final_turn_context_lines": [
+        6
+      ]
+    }
+  ],
+  "current_agent_receipt": "docs/superpowers/day10-compaction-cancel-pair-receipt.json",
+  "native_goal_probe": {
+    "status": "PASS_FIXED_PROVIDER_ONLY",
+    "receipt": "docs/superpowers/day10-native-goal-probe-receipt.json",
+    "real_web_goal": "PASS_FOR_NAMED_SCENARIO",
+    "real_web_receipt": "docs/superpowers/day10-native-web-goal-receipt.json"
+  },
+  "cpu_synthetic_benchmark": {
+    "status": "MEASURED_WITH_UNCERTAIN_ALLOCATION_AUTO_ONE",
+    "receipt": "docs/superpowers/day10-cpu-synthetic-benchmark-receipt.json",
+    "full_acceptance": false
+  },
+  "latest_settlement_regression": {
+    "paths": [
+      "tests/retained-compaction.test.ts"
+    ],
+    "test": "bun test ./tests/retained-compaction.test.ts",
+    "log": "output/day10-popper-retained-compaction-20261016.txt",
+    "pass": 48,
+    "fail": 0,
+    "assertions": 241
+  },
+  "frame_publication_race": {
+    "status": "PASS_FOR_NAMED_PURE_NATIVE_SCENARIOS",
+    "receipt": "docs/superpowers/day10-frame-publication-receipt.json",
+    "remaining": "Live native capture admission/reader publication and authorized GUI integration acceptance remain open"
+  },
+  "parallel_native": {
+    "status": "NESTED_IMPLEMENTED_114PASS_438ASSERT; ACTUAL_NATIVE_POLICY_BLOCKED",
+    "receipt": "docs/superpowers/day10-nested-parallel-receipt.json",
+    "actual_overlap": "NOT_RUN",
+    "retry_allowed": false
+  },
+  "native_reader_integrated": {
+    "status": "PASS_FOR_NAMED_PARTIAL_OBSERVATION_SCENARIO",
+    "receipt": "docs/superpowers/day10-reader-integrated-receipt.json",
+    "one_call_tool": "codex_screen_observe",
+    "image_mode": "DISABLED",
+    "actual_raw_capture": true,
+    "ocr_semantic_ready": false,
+    "phase": "Historical OCR-OFF in-memory transport variant; latest actual stdio WinRT evidence is native_reader_winrt"
+  },
+  "native_reader_winrt": {
+    "status": "PASS_FOR_OWNED_RENDERED_FIXTURE",
+    "receipt": "docs/superpowers/day10-reader-winrt-ready-receipt.json",
+    "local_ocr": "completed en-US exact fixture text",
+    "semantic_ready": true,
+    "actual_native2_transport": "stdio CLI",
+    "model_pixels": "NOT_RUN",
+    "image_mode": "DISABLED",
+    "positive_negative_roi_receipt": "docs/superpowers/day10-reader-roi-receipt.json",
+    "negative_roi": "NOT_READY",
+    "local_benchmark": {
+      "receipt": "docs/superpowers/day10-reader-benchmark-receipt.json",
+      "cases": 20,
+      "errors": 0,
+      "observations": 60,
+      "model_pixels": "NOT_RUN",
+      "image_mode": "DISABLED"
+    }
+  },
+  "cancellation_publication_fix": {
+    "status": "RED_TO_GREEN_AND_INDEPENDENT_SUPERVISOR_PASS",
+    "source": "F:/Source Projects/ComputerUseSwift-MCP/native/src/observer_engine.cpp",
+    "implementer": "01a1424c-d1f6-7011-bf2c-6ae50118bfec",
+    "peer": "output/day10-p0-supervisor-round4-complete.json"
+  },
+  "updated_at": "2026-10-16T17:01:26.056Z",
+  "observer_image_mode": "DISABLED",
+  "active_child_count": 2,
+  "active_owned_subagents": 2,
+  "latest_agent_operational_block": {
+    "current_status": "SAME_TWO_IDS_EXPLICIT_LUNA_HIGH_NEW_TURNS_FULL_SCOPE_NATIVE_VERIFIED",
+    "current_receipt": "docs/superpowers/day10-current-pair-usage-limit-receipt.json",
+    "limits": "Generic allowance was not allocation proof; actual new Luna/high contexts and unchanged full scope were verified before release. Quota terminal receipts remain historical."
+  },
+  "retained_delta_account_cap": {
+    "status": "RED_TO_GREEN_MAIN_REVIEW_AND_RAW_PEER_TEST_PASS",
+    "receipt": "docs/superpowers/day10-retained-cap-receipt.json",
+    "peer_final_report": "MISSING_USAGE_LIMIT"
+  },
+  "last_goal_turn_classification": "PROGRESS",
+  "previous_actor_checkpoints": [
+    {
+      "at": "2026-10-16T05:50:27.829Z",
+      "receipt": "docs/superpowers/day10-p0-pair-receipt.json",
+      "actors": [
+        {
+          "role": "main",
+          "requested_model": "gpt-6.1-sol",
+          "requested_effort": "high",
+          "resolved_model": "gpt-6.1-sol",
+          "resolved_effort": "high",
+          "evidence": {
+            "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+            "line": 16743,
+            "model": "gpt-6.1-sol",
+            "effort": "high",
+            "turn_id": "01a14338-0289-7292-b371-326d92bce0e6"
+          },
+          "current_status": "working"
+        },
+        {
+          "agent_id": "01a1424c-d1f6-7011-bf2c-6ae50118bfec",
+          "nickname": "Hypatia",
+          "role": "Coding / implementation",
+          "requested_model": "gpt-6-luna",
+          "requested_effort": "high",
+          "requested_fork_turns": "none",
+          "actual_spawn_arguments": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "fork_context": false,
+            "role_in_message": true
+          },
+          "resolved_model": "gpt-6-luna",
+          "resolved_effort": "high",
+          "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T08-21-33-01a1424c-d1f6-7011-bf2c-6ae50118bfec.jsonl",
+          "session_meta_line": 1,
+          "turn_context_lines": [
+            6
+          ],
+          "contexts": [
+            {
+              "line": 6,
+              "turn_id": "01a1424c-d40f-72a3-bd0c-5e5796cbe4fa",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "sandbox": {
+                "type": "danger-full-access"
+              },
+              "approval": "never",
+              "permissions": {
+                "type": "disabled"
+              }
+            }
+          ],
+          "current_status": "terminal usage-limit error confirmed in native task_complete; native wait not_found",
+          "assigned_paths": [
+            "tests/archive-cache.test.ts",
+            "tests/transport-selector.test.ts",
+            "F:/Source Projects/ComputerUseSwift-MCP/native/src/observer_engine.cpp",
+            "F:/Source Projects/ComputerUseSwift-MCP/native/tests/observer_engine_tests.cpp",
+            "output/day10-reader-local-benchmark-20261016.ts"
+          ],
+          "last_checked_at": "2026-10-16T05:40:28.037Z",
+          "latest_actual_context": {
+            "line": 6,
+            "turn_id": "01a1424c-d40f-72a3-bd0c-5e5796cbe4fa",
+            "model": "gpt-6-luna",
+            "effort": "high",
+            "approval": "never",
+            "sandbox": {
+              "type": "danger-full-access"
+            }
+          },
+          "round_history": [
+            {
+              "round": 1,
+              "receipt": "output/day10-p0-implementation-round1-complete.json"
+            },
+            {
+              "round": 2,
+              "receipt": "output/day10-p0-implementation-round2-complete.json"
+            },
+            {
+              "round": 3,
+              "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-p0-implementation-round3-complete.json"
+            },
+            {
+              "round": 4,
+              "receipt": "output/day10-p0-implementation-round4-complete.json"
+            },
+            {
+              "round": 5,
+              "receipt": "output/day10-p0-implementation-round5-complete.json"
+            },
+            {
+              "round": 6,
+              "receipt": "output/day10-p0-implementation-round6-complete.json"
+            },
+            {
+              "round": 7,
+              "receipt": "output/day10-p0-implementation-round7-complete.json"
+            }
+          ],
+          "final_turn_context_lines": [
+            6
+          ],
+          "final_contexts": [
+            {
+              "line": 6,
+              "turn_id": "01a1424c-d40f-72a3-bd0c-5e5796cbe4fa",
+              "model": "gpt-6-luna",
+              "effort": "high"
+            }
+          ],
+          "terminal_evidence": {
+            "line": 1088,
+            "error": "usage_limit_exceeded",
+            "completed_at": 1792116800
+          },
+          "final_model": "gpt-6-luna",
+          "final_effort": "high"
+        },
+        {
+          "agent_id": "01a1424c-d494-7fa2-922d-a8bd303cee76",
+          "nickname": "Sartre",
+          "role": "UI / research / test supervisor",
+          "requested_model": "gpt-6-luna",
+          "requested_effort": "high",
+          "requested_fork_turns": "none",
+          "actual_spawn_arguments": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "fork_context": false,
+            "role_in_message": true
+          },
+          "resolved_model": "gpt-6-luna",
+          "resolved_effort": "high",
+          "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T08-21-34-01a1424c-d494-7fa2-922d-a8bd303cee76.jsonl",
+          "session_meta_line": 1,
+          "turn_context_lines": [
+            6
+          ],
+          "contexts": [
+            {
+              "line": 6,
+              "turn_id": "01a1424c-d715-7471-a64b-6814e2a0f32b",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "sandbox": {
+                "type": "danger-full-access"
+              },
+              "approval": "never",
+              "permissions": {
+                "type": "disabled"
+              }
+            }
+          ],
+          "current_status": "terminal usage-limit error confirmed in native task_complete; native wait not_found",
+          "assigned_paths": [
+            "read-only Web nested/Swift frame source review",
+            "output/day10-p0-supervisor-*"
+          ],
+          "last_checked_at": "2026-10-16T05:40:28.037Z",
+          "latest_actual_context": {
+            "line": 6,
+            "turn_id": "01a1424c-d715-7471-a64b-6814e2a0f32b",
+            "model": "gpt-6-luna",
+            "effort": "high",
+            "approval": "never",
+            "sandbox": {
+              "type": "danger-full-access"
+            }
+          },
+          "round_history": [
+            {
+              "round": 1,
+              "receipt": "output/day10-p0-supervisor-round1-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 2,
+              "receipt": "output/day10-p0-supervisor-round2-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 3,
+              "receipt": "output/day10-p0-supervisor-round3-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 4,
+              "receipt": "output/day10-p0-supervisor-round4-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 5,
+              "receipt": "output/day10-p0-supervisor-round5-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 6,
+              "receipt": "output/day10-p0-supervisor-round6-complete.json",
+              "receipt_present": true
+            },
+            {
+              "round": 7,
+              "receipt": "output/day10-p0-supervisor-round7-complete.json",
+              "receipt_present": false,
+              "raw_test_log": "output/day10-p0-supervisor-round7-tests.log",
+              "test_receipt": "21pass0fail215assertEXIT_CODE0",
+              "review_report": "NOT_WRITTEN_BEFORE_QUOTA_ERROR"
+            }
+          ],
+          "final_turn_context_lines": [
+            6,
+            1550
+          ],
+          "final_contexts": [
+            {
+              "line": 6,
+              "turn_id": "01a1424c-d715-7471-a64b-6814e2a0f32b",
+              "model": "gpt-6-luna",
+              "effort": "high"
+            },
+            {
+              "line": 1550,
+              "turn_id": "01a1424c-d715-7471-a64b-6814e2a0f32b",
+              "model": "gpt-6-luna",
+              "effort": "high"
+            }
+          ],
+          "terminal_evidence": {
+            "line": 1569,
+            "error": "usage_limit_exceeded",
+            "completed_at": 1792116783
+          },
+          "final_model": "gpt-6-luna",
+          "final_effort": "high"
+        }
+      ]
+    }
+  ],
+  "compaction_cancel_before_consume": {
+    "status": "LOCAL_PRIMITIVE_AND_MCP_BROKER_CANCELLATION_FIX_ACCEPTED",
+    "receipt": "docs/superpowers/day10-compaction-cancel-receipt.json"
+  },
+  "native_web_direct_pixel_probe": {
+    "status": "MODEL_REPORTED_IMAGE_RELAY_UNAVAILABLE",
+    "receipt": "docs/superpowers/day10-native-web-pixel-direct-receipt.json",
+    "oracle_read": false,
+    "one_send": true,
+    "composer_attachments": 0,
+    "loss_layer": "UNKNOWN after broker receipt; no raw tunnel image capture",
+    "nested_case": "NEW0.163 case1 negative; see docs/superpowers/day10-native-web-pixel-nested-receipt.json",
+    "requirement_status": "VIEW-P0-01 BLOCKED"
+  },
+  "current_native_runtime": {
+    "at": "2026-10-16T06:03:54.416Z",
+    "executable": "C:\\Users\\Long-PC\\AppData\\Local\\OpenAI\\Codex\\bin\\e78bad9887fa50cf\\codex.exe",
+    "sha256": "9ecb9df2ecafcc00542ef0966c6f1737a81397dc9531b0a4b178238e2bf4a46d",
+    "live_processes": [
+      {
+        "Name": "codex.exe",
+        "ProcessId": 2792,
+        "ParentProcessId": 18092,
+        "ExecutablePath": "C:\\Users\\Long-PC\\AppData\\Local\\OpenAI\\Codex\\bin\\e78bad9887fa50cf\\codex.exe"
+      },
+      {
+        "Name": "codex.exe",
+        "ProcessId": 13796,
+        "ParentProcessId": 18092,
+        "ExecutablePath": "C:\\Users\\Long-PC\\AppData\\Local\\OpenAI\\Codex\\bin\\e78bad9887fa50cf\\codex.exe"
+      }
+    ],
+    "source": "Read-only Win32_Process executable paths under actual Desktop native bin, no process control",
+    "old_executable_exists": false,
+    "child_session_cli_version": "0.163.0-alpha.10.2",
+    "scope": "Current 0.163 host fingerprint; earlier native threshold/ACK proofs used the older binary and remain historical"
+  },
+  "native_compaction_interrupt": {
+    "status": "NATIVE_STOP_PENDING_PROVIDER_RECOVERY_ACCEPTED_AFTER_PEER_CORRECTION",
+    "receipt": "docs/superpowers/day10-native-compaction-interrupt-receipt.json",
+    "peer_review": "output/day10-native-compaction-interrupt-review-round10-report.json",
+    "actual_model_calls": 0
+  },
+  "mcp_stdio_image_relay": {
+    "status": "MCP_STDIO_SYNTHETIC_DIRECT_NESTED_IMAGE_SERIALIZATION_ACCEPTED",
+    "receipt": "docs/superpowers/day10-mcp-stdio-image-relay-receipt.json",
+    "web_pixels": "NOT PROVED"
+  },
+  "observer_launch_wiring": {
+    "status": "LOCAL_OBSERVER_STARTUP_WIRING_AND_ONE_REAL_SEMANTIC_CALL_ACCEPTED",
+    "receipt": "docs/superpowers/day10-observer-launch-wiring-receipt.json",
+    "scope": "Actual private generated startup and one semantic SDK observer call, not a Web model",
+    "external_tunnel": "NOT EXERCISED",
+    "image_mode": "DISABLED"
+  },
+  "active_subagents": 2,
+  "latest_agent_model_completion_receipt": "docs/superpowers/day10-nested-offline-replacement-model-receipt.json",
+  "screen_tree": {
+    "status": "OPTIONAL_NATIVE2_COMPACT_JSON_TREE_ACCEPTED_FOR_NAMED_LOCAL_SCENARIOS",
+    "receipt": "docs/superpowers/day10-screen-tree-receipt.json",
+    "model_receipt": "docs/superpowers/day10-screen-tree-final-model-receipt.json",
+    "full_gate": "PARTIAL",
+    "latest_opt_in_raw_node_privacy_fix": {
+      "receipt": "docs/superpowers/day10-screen-tree-raw-node-privacy-20261017.json",
+      "status": "LOCAL_MCP_FIXTURE_GREEN; LIVE_WEB_E2E_NOT_RUN",
+      "web_head": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+      "raw_provider_id_exposure": "EXCLUDED_FROM_OPT_IN_FORMATTED_MCP_REPLY",
+      "legacy_unformatted_receipt": "PRESERVED",
+      "model_effort": "UNVERIFIED",
+      "subagents_created_in_phase": 0
+    },
+    "latest_acknowledged_uia_diff": {
+      "receipt": "docs/superpowers/day10-screen-tree-ack-diff-20261017.json",
+      "status": "LOCAL_MCP_AND_PURE_TESTS_GREEN; LIVE_WEB_E2E_UNVERIFIED",
+      "head": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+      "tests": "39 pass, 0 fail, 236 assertions; TypeScript typecheck pass",
+      "frame_ack": "Explicit latest snapshot ID bound to fresh current reader grant",
+      "diff_scope": "Complete READY UIA-only stable provider IDs; redacted, OCR, CV, stale or changed epoch fall back full",
+      "observer_image_mode": "DISABLED",
+      "actual_main_model_effort": "UNVERIFIED",
+      "subagents_created": 0
+    }
+  },
+  "native_nested_pixel_phase": {
+    "status": "NEW_NESTED_CASE_COMPLETED_NEGATIVE; STRICT_LIVE_GUARD_FAILURE_PRESERVED",
+    "receipt": "docs/superpowers/day10-native-web-pixel-nested-receipt.json",
+    "reconciliation": "output/day10-native-nested-reconciliation-20261016.json",
+    "model_receipt": "docs/superpowers/day10-nested-pixel-final-model-receipt.json",
+    "image_mode": "DISABLED",
+    "oracle_read": false,
+    "case1_consumed": true,
+    "one_send": true,
+    "one_native_viewer": true,
+    "cleanup_complete": true,
+    "actual_receipt_peer_review": {
+      "status": "INDEPENDENT_RECEIPTS_CONSISTENT_NEGATIVE; NO PIXEL_PROOF_UPGRADE",
+      "report": "output/day10-native-nested-peer-receipt-review-20261016.json",
+      "report_sha256": "f5f282f41b5b8d0b8b68ff49c6d40ff64e2b33d756761580c0f48d9e6f7f4de5",
+      "reviewer_id": "01a145a6-58d8-71a0-8611-5701663b2284",
+      "model_receipt": "docs/superpowers/day10-nested-offline-replacement-model-receipt.json",
+      "initial_primary_receipt_sha256": "2008d83b835e106ed74d9d1a08d85722b94f018b1798e4a1b18fe081698d87ed"
+    },
+    "prior_unavailable_peer_review_preserved": true
+  },
+  "agent_topology_current": {
+    "at": "2026-10-16T16:59:00.204Z",
+    "status": "EXACT_TWO_LUNA_HIGH_VERIFIED",
+    "receipt": "docs/superpowers/day10-nested-offline-replacement-model-receipt.json",
+    "active_owned_agents": 2
+  },
+  "retired_authorized_pairs": [
+    {
+      "at": "2026-10-16T16:59:00.204Z",
+      "actors": [
+        {
+          "agent_id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+          "nickname": "Huygens",
+          "role": "Coding / implementation",
+          "gate_role": "implementation",
+          "requested_model": "gpt-6-luna",
+          "requested_effort": "high",
+          "requested_fork_turns": "none",
+          "actual_spawn": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "fork_context": false
+          },
+          "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl",
+          "session_meta_line": 1,
+          "contexts": [
+            {
+              "line": 8,
+              "turn_id": "01a14341-fe17-7200-920f-611187a96248",
+              "model": "gpt-6-luna",
+              "effort": "high"
+            }
+          ],
+          "resolved_model": "gpt-6-luna",
+          "resolved_effort": "high",
+          "current_status": "completed; close acknowledged; native wait not_found. Explicit app follow-up for final receipt review returned thread not found; no model substitution or new identity",
+          "last_checked_at": "2026-10-16T16:54:58.106Z",
+          "final_checked_contexts": [
+            {
+              "line": 8,
+              "turn_id": "01a14341-fe17-7200-920f-611187a96248",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 882,
+              "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 975,
+              "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 1725,
+              "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 2356,
+              "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 2824,
+              "turn_id": "01a1449b-e47d-7c23-ab1c-6f555563d4b6",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3399,
+              "turn_id": "01a144bb-995f-7e80-a670-fc7fb48084cb",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3447,
+              "turn_id": "01a144c0-7e93-7a51-b2c2-ad8fe3eb8613",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3859,
+              "turn_id": "01a144d0-6e37-7af3-9c99-9ce428ac855f",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            }
+          ],
+          "completed_rounds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13
+          ],
+          "assigned_paths": [
+            "src/native-screen-observer-config.ts",
+            "src/config.ts",
+            "src/tunnel.ts",
+            "tests/native-screen-observer-config.test.ts",
+            "read-only source/live-evidence reviews rounds12/13"
+          ],
+          "latest_binding": {
+            "line": 3988,
+            "turn_id": "01a14586-1dd6-79b0-8374-123f039de658",
+            "model": "gpt-6-luna",
+            "effort": "high",
+            "collaboration_model": "gpt-6-luna",
+            "collaboration_effort": "high",
+            "scope": "danger-full-access/never",
+            "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl"
+          },
+          "quota_terminal": {
+            "line": 1720,
+            "timestamp": "2026-10-16T07:13:31.311Z",
+            "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+            "error": "usage_limit_exceeded"
+          },
+          "current_phase_completed_assignments": [
+            "output/day10-screen-tree-implementation-complete.json",
+            "output/day10-screen-tree-fix-complete.json"
+          ]
+        },
+        {
+          "agent_id": "01a14341-fe53-7023-9755-4e420399e31a",
+          "nickname": "Confucius",
+          "role": "UI / research / test supervisor",
+          "gate_role": "supervisor",
+          "requested_model": "gpt-6-luna",
+          "requested_effort": "high",
+          "requested_fork_turns": "none",
+          "actual_spawn": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "fork_context": false
+          },
+          "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl",
+          "session_meta_line": 1,
+          "contexts": [
+            {
+              "line": 8,
+              "turn_id": "01a14341-ffd4-7450-9028-805bf419e046",
+              "model": "gpt-6-luna",
+              "effort": "high"
+            }
+          ],
+          "resolved_model": "gpt-6-luna",
+          "resolved_effort": "high",
+          "current_status": "completed; close acknowledged; native wait not_found. Explicit app follow-up for final receipt review returned thread not found; no model substitution or new identity",
+          "last_checked_at": "2026-10-16T16:54:58.106Z",
+          "final_checked_contexts": [
+            {
+              "line": 8,
+              "turn_id": "01a14341-ffd4-7450-9028-805bf419e046",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 516,
+              "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 1183,
+              "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 1806,
+              "turn_id": "01a14472-1245-78f2-a40f-f0a8d9d145a2",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3540,
+              "turn_id": "01a144bb-a03f-7a83-b928-cb1a6ead0616",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3685,
+              "turn_id": "01a144ca-0f77-7550-9aa6-fadafd150096",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3807,
+              "turn_id": "01a144d5-cc20-7ed2-a25f-dbfa66240025",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            },
+            {
+              "line": 3822,
+              "turn_id": "01a144d5-cc20-7ed2-a25f-dbfa66240025",
+              "model": "gpt-6-luna",
+              "effort": "high",
+              "collaboration_model": "gpt-6-luna",
+              "collaboration_effort": "high",
+              "scope": "danger-full-access/never"
+            }
+          ],
+          "completed_rounds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "assigned_paths": [
+            "read-only observer wiring audits/retests rounds9/10/11"
+          ],
+          "latest_followup_proof": "docs/superpowers/day10-current-luna-followup-receipt.json",
+          "latest_binding": {
+            "line": 4105,
+            "turn_id": "01a1459c-0248-74a3-b9ff-6fec67168a49",
+            "model": "gpt-6-luna",
+            "effort": "high",
+            "collaboration_model": "gpt-6-luna",
+            "collaboration_effort": "high",
+            "scope": "danger-full-access/never",
+            "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl"
+          },
+          "quota_terminal": {
+            "line": 1801,
+            "timestamp": "2026-10-16T07:13:20.964Z",
+            "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+            "error": "usage_limit_exceeded"
+          },
+          "current_phase_completed_assignments": [
+            "output/day10-screen-tree-supervisor-contract-report.json",
+            "output/day10-screen-tree-supervisor-retest-complete.json",
+            "output/day10-screen-tree-final-supervisor-complete.json"
+          ]
+        }
+      ],
+      "receipt": "docs/superpowers/day10-nested-pixel-final-model-receipt.json"
+    }
+  ],
+  "cpu_auto_integration_gap": {
+    "receipt": "docs/superpowers/day10-cpu-auto-integration-gap-receipt.json",
+    "status": "SOURCE_CONFIRMED: production engine always supplies unknown pressure; measurable recovery wiring remains open"
+  },
+  "running_child_count": 1,
+  "open_child_count": 2,
+  "single_agent_native_frame_ack_20261017": {
+    "receipt": "docs/superpowers/day10-native-frame-ack-integration-20261017.json",
+    "scope": "fresh owned isolated MCP/native fixture and full-ACK/full fallback on three real mixed UIA/OCR/CV frames",
+    "new_subagents_spawned": 0,
+    "live_web_model_e2e": "NOT RUN",
+    "acceptance_status": "PARTIAL"
+  },
+  "single_agent_native_uia_identity_guard_20261017": {
+    "receipt": "docs/superpowers/day10-uia-unstable-identity-regression-20261017.json",
+    "classification": "RED_GREEN_PATCH_VERIFIED_LOCAL",
+    "subagents_spawned": 0,
+    "web_model_e2e": "NOT RUN",
+    "acceptance_status": "PARTIAL"
+  },
+  "single_agent_native_grant_rotation_20261017": {
+    "receipt": "docs/superpowers/day10-native-grant-rotation-20261017.json",
+    "status": "PASS_LOCAL_NATIVE_AND_MCP; WEB_UNVERIFIED",
+    "new_subagents": 0,
+    "production_mutations": 0
+  },
+  "single_agent_native_reconnect_20261017": {
+    "receipt": "docs/superpowers/day10-native-reconnect-20261017.json",
+    "status": "PASS_REAL_PRIVATE_MCP_RECONNECT; WEB_UNVERIFIED",
+    "subagents_spawned": 0,
+    "production_mutations": 0
+  },
+  "single_agent_native_mixed_diff_20261017": {
+    "receipt": "docs/superpowers/day10-native-mixed-diff-20261017.json",
+    "status": "PASS_REAL_PRIVATE_NATIVE2_MIXED_ACK; LIVE_WEB_UNVERIFIED",
+    "native_observations": 5,
+    "mixed_diffs": 2,
+    "subagents_spawned": 0,
+    "production_mutations": 0
+  },
+  "single_agent_snapshot_publication_race_20261017": {
+    "receipt": "docs/superpowers/day10-screen-publication-race-20261017.json",
+    "status": "RED_GREEN_LOCAL_REGISTRY; NATIVE_AND_WEB_PUBLICATION_RACES_UNVERIFIED",
+    "tests_passed": 46,
+    "tests_failed": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0
+  },
+  "scoped_safety_advisory_20261017": {
+    "receipt": "docs/superpowers/day10-scoped-safety-advisory-20261017.json",
+    "status": "PENDING_SAFETY_REVIEW",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "pending_count": 6,
+    "independent_review": "UNAVAILABLE_IN_CURRENT_TOOL_REGISTRY",
+    "retry_allowed": false
+  },
+  "single_agent_native_pipe_utf8_20261017": {
+    "receipt": "docs/superpowers/day10-screen-observer-utf8-framing-20261017.json",
+    "status": "RED_GREEN_PRIVATE_NAMED_PIPE_UTF8; REAL_NATIVE_WEB_UNVERIFIED",
+    "tests_passed": 47,
+    "tests_failed": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0
+  },
+  "single_agent_all_formats_frame_order_20261017": {
+    "receipt": "docs/superpowers/day10-observer-all-formats-frame-order-20261017.json",
+    "status": "RED_GREEN_LOCAL_MONOTONIC_FRAME_GUARD; NATIVE_RETEST_FOCUS_FAILED_BEFORE_OBSERVER",
+    "tests_passed": 54,
+    "tests_failed": 0,
+    "native_retest": "FAIL_BEFORE_OBSERVER_FOCUS_FAILED",
+    "authenticated_web_model": "NOT_RUN",
+    "safety_scoped_pending_entries": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cancel_once_20261017": {
+    "receipt": "docs/superpowers/day10-observer-cancel-once-20261017.json",
+    "status": "RED_GREEN_PRIVATE_WINDOWS_NAMED_PIPE; NATIVE_E2E_FOCUS_PRECONDITION_UNMET",
+    "tests_passed": 55,
+    "tests_failed": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cpu_live_allocation_benchmark_20261017": {
+    "receipt": "docs/superpowers/day10-cpu-live-allocation-matched-bench-20261017.json",
+    "status": "PASS_READ_ONLY_TOPOLOGY_AND_SYNTHETIC_BENCH; AUTO_SCALING_UNVERIFIED",
+    "observed_system_processors": 12,
+    "observed_cpu_set_processors": 6,
+    "actual_auto_workers": 1,
+    "native_policy_tests_passed": 13,
+    "matched_synthetic_pairs": 6,
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_reader_timeout_recovery_20261017": {
+    "receipt": "docs/superpowers/day10-screen-observer-timeout-recovery-20261017.json",
+    "status": "PASS_PRIVATE_PIPE_TIMEOUT_AND_RECOVERY; REAL_NATIVE_WEB_E2E_UNVERIFIED",
+    "tests_passed": 57,
+    "tests_failed": 0,
+    "typecheck": "PASS",
+    "git_diff_check": "PASS",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cross_frame_guard_20261017": {
+    "receipt": "docs/superpowers/day10-observer-cross-frame-provenance-20261017.json",
+    "status": "RED_GREEN_LOCAL_MCP_CROSS_FRAME_GUARD; REAL_SWIFT_AND_WEB_E2E_UNVERIFIED",
+    "tests_passed": 61,
+    "tests_failed": 0,
+    "typecheck": "PASS",
+    "diff_check": "PASS",
+    "new_proof": "Nested capture/OCR frame mismatch rejected before tree publication; pending old-grant result cannot invalidate new grant ACK",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_ready_proof_20261017": {
+    "receipt": "docs/superpowers/day10-observer-ready-proof-20261017.json",
+    "status": "RED_GREEN_LOCAL_MCP_READY_SEMANTIC_PROOF; REAL_SWIFT_WEB_E2E_UNVERIFIED",
+    "tests_passed": 65,
+    "tests_failed": 0,
+    "typecheck": "PASS",
+    "diff_check": "PASS",
+    "new_proof": "Native READY requires explicit readiness request, matched READY internal status, OCR predicate, exact final frame and target generation; contradictory NOT_READY rejected",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_native_post_sample_readiness_20261017": {
+    "receipt": "docs/superpowers/day10-native-readiness-post-sample-20261017.json",
+    "status": "RED_GREEN_NATIVE_READINESS_CANCELLATION_RACE; LIVE_NATIVE_WEB_E2E_UNVERIFIED",
+    "native_build": "PASS",
+    "ctest_groups_passed": 5,
+    "ctest_groups_failed": 0,
+    "capture_receipt_binding": "COMPILED_AND_REVIEWED; REAL_RUNTIME_OUTPUT_UNVERIFIED",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cpu_pressure_telemetry_20261017": {
+    "receipt": "docs/superpowers/day10-native-cpu-pressure-telemetry-20261017.json",
+    "status": "RED_GREEN_REAL_CPU_COUNTERS_CONSERVATIVE_INITIAL_DISPATCH; AUTO_MULTIWORKER_UNVERIFIED",
+    "build": "PASS",
+    "ctest_groups_passed": 2,
+    "ctest_groups_failed": 0,
+    "cpu_policy_cases_passed": 8,
+    "paired_synthetic_worker_count": 1,
+    "verified_host_job_ancestor_capacity": false,
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_final_readiness_source_20261017": {
+    "receipt": "docs/superpowers/day10-final-readiness-source-20261017.json",
+    "status": "RED_GREEN_WEB_READY_FINAL_SOURCE_PROOF; NATIVE_BUILD_AND_TEST_PASS; LIVE_E2E_UNVERIFIED",
+    "web_observer_tests_passed": 72,
+    "web_observer_tests_failed": 0,
+    "native_ctest_groups_passed": 5,
+    "native_ctest_groups_failed": 0,
+    "typecheck": "PASS",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_observer_startup_roi_20261017": {
+    "receipt": "docs/superpowers/day10-observer-startup-roi-20261017.json",
+    "status": "SOURCE_MCP_STDIO_GENERATED_STARTUP_VERIFIED; NATIVE_ROI_RED_GREEN; LIVE_MODEL_E2E_UNVERIFIED",
+    "web_tests_passed": 52,
+    "web_tests_failed": 0,
+    "native_ctest_groups_passed": 5,
+    "native_ctest_groups_failed": 0,
+    "web_typecheck": "PASS",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_a4_uia_state_fidelity_20261017": {
+    "receipt": "docs/superpowers/day10-a4-uia-state-fidelity-20261017.json",
+    "status": "RED_GREEN_UIA_FOCUS_ENABLED_OFFSCREEN_DIFF; LIVE_WEB_MODEL_E2E_UNVERIFIED",
+    "web_tests_passed": 52,
+    "web_tests_failed": 0,
+    "web_typecheck": "PASS",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_a4_capture_ack_20261017": {
+    "receipt": "docs/superpowers/day10-a4-capture-ack-20261017.json",
+    "status": "RED_GREEN_DPI_BACKEND_MISSING_CAPTURE_ACK_AND_OCR_UNAVAILABLE; WEB_MODEL_E2E_UNVERIFIED",
+    "web_tests_passed": 82,
+    "web_tests_failed": 0,
+    "web_typecheck": "PASS",
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_p0_e_compaction_source_20261017": {
+    "receipt": "docs/superpowers/day10-e-native-compaction-auth-20261017.json",
+    "status": "RED_GREEN_LOCAL_NATIVE_COMPACTION_SOURCE_GUARD; LIVE_AUTHENTICATED_WEB_E2E_UNVERIFIED",
+    "web_tests_passed": 377,
+    "web_tests_failed": 0,
+    "web_assertions": 1939,
+    "typecheck": "PASS",
+    "git_diff_check": "PASS",
+    "requirements_status_upgrades": 0,
+    "goal_status": "ACTIVE",
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_source_receipt_fidelity_20261018": {
+    "receipt": "docs/superpowers/day10-source-receipt-fidelity-20261018.json",
+    "status": "RED_GREEN_LOCAL_CV_OCR_SOURCE_RECEIPT_GUARD; NATIVE_WEB_E2E_UNVERIFIED",
+    "red_tests_failed_as_expected": 5,
+    "focused_tests_passed": 6,
+    "observer_tests_passed": 72,
+    "observer_tests_failed": 0,
+    "typecheck": "PASS",
+    "full_suite_passed": 1627,
+    "full_suite_skipped": 93,
+    "full_suite_failed": 2,
+    "full_suite_failures": "Unrelated Windows EPERM symlink creation in tests/codex-integration.test.ts",
+    "git_diff_check": "PASS",
+    "goal_status": "ACTIVE",
+    "requirements_status_upgrades": 0,
+    "full_scope": 175,
+    "counts": {
+      "PARTIAL": 137,
+      "PASS": 5,
+      "BLOCKED": 12,
+      "NOT RUN": 21
+    },
+    "safety_prerequisites_pending": 6,
+    "subagents_spawned": 0,
+    "actual_main_model_effort": "UNVERIFIED",
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_uia_source_status_20261018": {
+    "receipt": "docs/superpowers/day10-a4-uia-source-status-20261018.json",
+    "status": "RED_GREEN_LOCAL_UIA_SOURCE_RECEIPT_GUARD; NATIVE_WEB_E2E_UNVERIFIED",
+    "red_tests_failed_as_expected": 1,
+    "observer_tests_passed": 76,
+    "observer_assertions": 421,
+    "typecheck": "PASS",
+    "launcher_typecheck": "PASS",
+    "git_diff_check": "PASS",
+    "isolated_prior_symlink_failures": "2 PASS; full repository suite not rerun",
+    "requirements_upgraded": 0,
+    "goal_status": "ACTIVE",
+    "full_scope": 175,
+    "counts": {
+      "PARTIAL": 137,
+      "PASS": 5,
+      "BLOCKED": 12,
+      "NOT RUN": 21
+    },
+    "subagents_spawned": 0,
+    "actual_main_model_effort": "UNVERIFIED",
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "scoped_safety_advisory_20261018": {
+    "receipt": "docs/superpowers/day10-scoped-safety-review-19-record-snapshot-20261018.json",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "previous_snapshot_sha256": "ab4e0de2b99420612a11e2be4328784a63b121b4c78b2ffa661b59c45d31d3d9",
+    "unresolved_count_advertised": 19,
+    "other_scope_unresolved_count": 0,
+    "complete": true,
+    "retry_allowed": false,
+    "status": "PENDING_SAFETY_REVIEW",
+    "independent_review_tool": "NOT_ADVERTISED",
+    "original_retries": 0,
+    "previous_snapshot_records": 11,
+    "requirement_upgrades": 0
+  },
+  "single_agent_validation_continuation_20261018": {
+    "receipt": "docs/superpowers/day10-validation-continuation-20261018.json",
+    "full_suite": "1639 PASS / 93 SKIP / 0 FAIL",
+    "isolated_native_reader": "PASS_SEMANTIC_ONLY",
+    "web_model_e2e": "UNVERIFIED",
+    "status_upgrades": 0
+  },
+  "single_agent_native_winrt_ocr_verification_20261018": {
+    "receipt": "docs/superpowers/day10-native-winrt-ocr-verification-20261018.json",
+    "isolated_winrt_ctest": "5 observer PASS / 0 FAIL; 1 CPU PASS / 0 FAIL",
+    "native2_e2e": "FOCUS_FAILED_BEFORE_OBSERVATION",
+    "web_model_e2e": "UNVERIFIED",
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_readiness_predicate_fidelity_20261018": {
+    "receipt": "docs/superpowers/day10-readiness-predicate-fidelity-20261018.json",
+    "observer_tests": "89 PASS / 0 FAIL",
+    "native_ctest": "6 PASS / 0 FAIL",
+    "full_suite": "1637 PASS / 93 SKIP / 2 EPERM FAIL",
+    "web_model_e2e": "UNVERIFIED",
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_screen_grant_epoch_fidelity_20261018": {
+    "receipt": "docs/superpowers/day10-screen-grant-epoch-fidelity-20261018.json",
+    "observer_tests": "92 PASS / 0 FAIL / 499 assertions",
+    "root_typecheck": "PASS",
+    "live_semantic_e2e": "NOT_RUN",
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_observer_validation_dispatch_fence_20261018": {
+    "receipt": "docs/superpowers/day10-observer-validation-dispatch-fence-20261018.json",
+    "observer_tests": "93 PASS / 0 FAIL / 505 assertions",
+    "root_typecheck": "PASS",
+    "real_model_semantic_e2e": "NOT_RUN",
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_same_tab_recovery_progress_race_20261018": {
+    "receipt": "docs/superpowers/day10-same-tab-recovery-progress-race-20261018.json",
+    "tests": "37 PASS / 3 SKIP / 0 FAIL / 211 assertions across 7 files",
+    "root_typecheck": "PASS",
+    "real_owned_browser_e2e": "NOT_RUN",
+    "scoped_safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_watchdog_fresh_recheck_20261018": {
+    "receipt": "docs/superpowers/day10-watchdog-fresh-recheck-20261018.json",
+    "browser_worker_contracts": "182 PASS / 0 FAIL / 1042 assertions",
+    "isolated_dom_fixture": "3 PASS / 0 FAIL / 24 assertions",
+    "root_typecheck": "PASS",
+    "real_account_web_e2e": "UNVERIFIED",
+    "scoped_safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_cpu_high_frequency_hysteresis_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-high-frequency-governor-receipt-20261018.json",
+    "native_tests": "17 PASS / 0 FAIL",
+    "isolated_cpu_ctest": "1 PASS / 0 FAIL",
+    "real_cpu_auto_parallelism": "UNVERIFIED; job ancestor limits unknown, worker ceiling one",
+    "scoped_safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_cpu_final_frame_stage_timing_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-stage-telemetry-receipt-20261018.json",
+    "native_core_build": "PASS",
+    "native_ctest": "2 PASS / 0 FAIL",
+    "native2_contract": "50 PASS / 0 FAIL / 308 assertions",
+    "web_typecheck": "PASS",
+    "real_auto_speedup": "UNVERIFIED",
+    "scoped_safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0
+  },
+  "single_agent_cpu_cv_overlap_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-cv-overlap-green-20261018.json",
+    "native_engine_ctest": "2 PASS / 0 FAIL",
+    "web_native2_contract": "50 PASS / 0 FAIL / 309 assertions",
+    "native_core_build": "PASS",
+    "web_typecheck": "PASS",
+    "model_visible_e2e": "UNVERIFIED",
+    "auto_throughput_speedup": "UNVERIFIED",
+    "safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0,
+    "main_model_effort": "UNVERIFIED"
+  },
+  "single_agent_cpu_callback_overlap_benchmark_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-callback-overlap-bench-receipt-20261018.json",
+    "benchmark_orders": 2,
+    "measured_frames_per_mode_per_order": 100,
+    "native_ctest": "7 PASS / 0 FAIL",
+    "cpu_allocation": "UNCERTAIN / one worker",
+    "cv_peak_parallel_single": 1,
+    "cv_peak_parallel_auto": 1,
+    "actual_auto_throughput_gain": "UNVERIFIED",
+    "model_visible_e2e": "NOT_RUN",
+    "status_upgrades": 0,
+    "subagents": 0,
+    "production_changed": false,
+    "scoped_safety_pending": 10
+  },
+  "single_agent_native_ocr_final_frame_identity_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-ocr-final-frame-identity-receipt-20261018.json",
+    "native_ctest": "6/6 PASS",
+    "integration_e2e": "NOT RUN",
+    "current_safety_refusal": "BLOCKED_BY_SAFETY",
+    "other_scoped_pending": 10,
+    "subagents": 0,
+    "status_upgrades": 0
+  },
+  "single_agent_uia_timing_boundary_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-uia-timing-boundary-receipt-20261018.json",
+    "native_ctest": "6 PASS",
+    "web_observer": "17 PASS",
+    "web_related": "34 PASS",
+    "typecheck": "PASS",
+    "diff_check": "PASS",
+    "authenticated_web_e2e": "NOT RUN",
+    "model_pixel_relay": "UNVERIFIED",
+    "scoped_safety_pending": 10,
+    "status_upgrades": 0,
+    "subagents": 0,
+    "model_effort": "UNVERIFIED",
+    "production_modified": false
+  },
+  "single_agent_native_content_items_image_relay_20261018": {
+    "receipt": "docs/superpowers/day10-native-content-items-image-relay-20261018.json",
+    "goal_status": "ACTIVE",
+    "direct_native2_image_control": "PNG and JPEG content_items reached current ChatGPT model; both randomized text oracles matched",
+    "nested_gateway_source_fix": "Support content_items multimodal wrapper without text/base64 flattening; preserve isError, structuredContent and _meta",
+    "synthetic_gateway_tests": "12 PASS / 0 FAIL / 59 assertions",
+    "full_suite": "1657 PASS / 93 SKIP / 2 FAIL, preexisting Windows EPERM symlink fixture failures",
+    "authenticated_codex_screen_observe_web_e2e": "NOT_RUN",
+    "model_config": "UNVERIFIED",
+    "scoped_safety_review": "12 PENDING_SAFETY_REVIEW; unchanged complete scoped snapshot; no current review tool advertised",
+    "safety_retries": 0,
+    "status_upgrades": 0,
+    "subagents": 0,
+    "production_modified": false
+  },
+  "single_agent_resume_validation_20261018": {
+    "receipt": "docs/superpowers/day10-resume-ledger-validation-20261018.json",
+    "goal_status": "ACTIVE",
+    "focus_test_pass": 80,
+    "focus_test_fail": 0,
+    "web_typecheck": "PASS",
+    "launcher_typecheck": "PASS",
+    "scoped_safety_pending": 17,
+    "native_review_available": false,
+    "actual_main_model_effort": "UNVERIFIED",
+    "observer_image_mode": "DISABLED",
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_modified": false
+  },
+  "single_agent_parallel_lease_attribution_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-lease-attribution-20261018.json",
+    "goal_status": "ACTIVE",
+    "targeted_tests": "90 PASS / 0 FAIL / 326 assertions",
+    "typecheck": "PASS",
+    "full_suite": "1681 PASS / 93 SKIP / 2 symlink EPERM FAIL",
+    "native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 18,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_session_cross_lease_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-session-cross-lease-20261018.json",
+    "goal_status": "ACTIVE",
+    "targeted_tests": "91 PASS / 0 FAIL / 329 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_same_tab_fresh_send_gate_20261018": {
+    "receipt": "docs/superpowers/day10-same-tab-fresh-send-gate-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "14 PASS / 1 FAIL",
+    "green": "33 PASS / 3 SKIP / 0 FAIL / 157 assertions",
+    "root_typecheck": "PASS",
+    "live_browser_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_archive_inventory_selection_20261018": {
+    "receipt": "docs/superpowers/day10-archive-inventory-selection-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "12 PASS / 1 FAIL",
+    "green": "168 PASS / 0 FAIL / 1039 assertions",
+    "root_typecheck": "PASS",
+    "real_browser_zip_ingestion_e2e": "NOT_RUN",
+    "model_recall_272K": "RECALL_272K_UNVERIFIED",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_batch_owner_attribution_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-batch-owner-attribution-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "Out-of-order second batch falsely reported failed",
+    "green": "92 PASS / 0 FAIL / 337 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_unknown_failure_capacity_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-unknown-failure-capacity-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "2 FAIL: timeout/safety error freed an uncertain native slot",
+    "green": "94 PASS / 0 FAIL / 349 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_structured_receipt_precedence_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-structured-receipt-precedence-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "2 FAIL: JSON stdout falsely released live native capacity",
+    "green": "96 PASS / 0 FAIL / 351 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_cancel_hung_native_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-cancel-hung-native-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "1 FAIL: cancellation left native batch pending",
+    "green": "97 PASS / 0 FAIL / 357 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_upstream_sse_recovery_integration_20261018": {
+    "receipt": "docs/superpowers/day10-upstream-sse-recovery-integration-20261018.json",
+    "goal_status": "ACTIVE",
+    "regression": "35 PASS / 0 FAIL / 158 assertions",
+    "real_native_final_answer_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_parallel_unknown_execution_state_20261018": {
+    "receipt": "docs/superpowers/day10-parallel-unknown-execution-state-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "1 FAIL: native error with unknown execution state freed uncertain capacity",
+    "green": "99 PASS / 0 FAIL / 360 assertions",
+    "root_typecheck": "PASS",
+    "real_native_parallel_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cross_phase_integration_20261018": {
+    "receipt": "docs/superpowers/day10-cross-phase-integration-20261018.json",
+    "goal_status": "ACTIVE",
+    "regression": "360 PASS / 0 FAIL / 1833 assertions across 12 source suites",
+    "real_native_web_e2e": "NOT_RUN",
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_full_suite_concurrent_baseline_20261018": {
+    "receipt": "docs/superpowers/day10-full-suite-concurrent-baseline-20261018.json",
+    "goal_status": "ACTIVE",
+    "full_suite": "2111 PASS / 97 SKIP / 6 FAIL / 11724 assertions",
+    "isolated_followups": "All 11 isolated localization and Linux packaging tests PASS",
+    "windows_symlink_eperm": 3,
+    "full_suite_green": false,
+    "scoped_safety_pending": 19,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_cpu_p0b_readonly_matched_20261018": {
+    "receipt": "F:/Source Projects/ComputerUseSwift-MCP/output/day10-cpu-native2-fresh-matched-readonly-receipt-20261018.json",
+    "goal_status": "ACTIVE",
+    "observed_allocation": "12 system logical, 7 CPU sets, unresolved ancestor Job, conservative 1 worker",
+    "matched_cv_runs": "2 pairs single/AUTO, 100 frames per mode, no true worker overlap",
+    "native_ctest": "2 PASS / 0 FAIL",
+    "scoped_safety_pending": 20,
+    "real_auto_speedup": "NOT_PROVEN",
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_legacy_observation_routing_20261018": {
+    "receipt": "docs/superpowers/day10-legacy-observation-routing-20261018.json",
+    "goal_status": "ACTIVE",
+    "owned_source_changes": ["src/adapters/chatgpt-web/legacy-observation-routing.ts", "src/adapters/chatgpt-web/mcp-server.ts"],
+    "new_regression": "tests/legacy-observation-routing.test.ts",
+    "red": "1 PASS / 3 FAIL (missing advisory)",
+    "green": "40 PASS / 0 FAIL / 311 assertions across 3 MCP suites",
+    "typecheck": "PASS",
+    "source_diff_check": "PASS",
+    "capability_status": "LEGACY_COMPATIBILITY_ACTIVE; replacement_available=false; semantic Web E2E unverified",
+    "scoped_safety_pending": 20,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_same_tab_cancel_ack_race_20261018": {
+    "receipt": "docs/superpowers/day10-same-tab-cancel-ack-race-20261018.json",
+    "goal_status": "ACTIVE",
+    "red": "16 PASS / 2 FAIL: accepted Send misclassified as cancelled",
+    "green": "36 PASS / 0 FAIL / 3 SKIP / 172 assertions across 4 recovery suites",
+    "typecheck": "PASS",
+    "source_diff_check": "PASS",
+    "latest_scoped_advisory_unresolved": 23,
+    "latest_scoped_advisory_displayed": 20,
+    "additional_pages_unread": true,
+    "native_safety_review_advertised": false,
+    "status_upgrades": 0,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_zip_manifest_mapping_20261019": {
+    "receipt": "docs/superpowers/day10-zip-manifest-mapping-20261019.json",
+    "goal_status": "ACTIVE",
+    "zip_validation_regression": "RED 9 PASS / 1 FAIL; GREEN 10 PASS / 0 FAIL / 135 assertions",
+    "transport_suite": "203 PASS / 0 FAIL / 1349 assertions",
+    "typecheck": "PASS",
+    "requirement_status_upgrades": "ZIP-01, ZIP-02, ZIP-03: NOT RUN to PARTIAL only",
+    "remaining_native_web_e2e": "NOT_RUN",
+    "latest_scoped_advisory_unresolved": 23,
+    "latest_scoped_advisory_displayed": 20,
+    "additional_pages_unread": true,
+    "native_safety_review_advertised": false,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  },
+  "single_agent_zip_live_dev_followup_20261019": {
+    "receipt": "docs/superpowers/day10-zip-dev-followup-20261019.json",
+    "goal_status": "ACTIVE",
+    "goal_source_at_original_path": "MISSING_ON_FRESH_READ; last verified SHA retained as historical evidence",
+    "dev_first_turn": "PASS: authentic isolated Web GPT-6 Sol requested, INLINE, acceptedSendCount=1, assistant DAY10 DEV READY, broker committed and retired",
+    "dev_followup": "FAIL: session inspection timed out after 30000ms, prior to driver initialization; no follow-up Send receipt",
+    "source_fix": "NOT_PERFORMED: helper timeout primary cause unconfirmed",
+    "matrix_change": "none; ZIP-01/02/03 remain PARTIAL",
+    "latest_scoped_advisory_unresolved": 23,
+    "latest_scoped_advisory_displayed": 20,
+    "additional_pages_unread": true,
+    "native_safety_review_advertised": false,
+    "subagents_spawned": 0,
+    "production_mutations": 0,
+    "git_reference_mutations": 0
+  }
+}

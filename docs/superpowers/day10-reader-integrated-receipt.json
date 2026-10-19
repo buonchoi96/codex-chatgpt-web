@@ -1,0 +1,130 @@
+{
+  "recorded_at": "2026-10-16T01:32:39.927Z",
+  "classification": "ACTUAL_NATIVE_RAW_FRAME_READER_SWIFT_STDIO_NATIVE2_MCP_TREE_ONLY",
+  "status": "PASS_FOR_NAMED_PARTIAL_OBSERVATION_SCENARIO",
+  "raw_receipt": "output/day10-reader-integrated-1792114238863/results.json",
+  "raw_sha256": "60d07466093d46090197fca29e385c6b1e6ba92d3e603dcc87139e7ae7bdcc6a",
+  "log": "output/day10-reader-integrated-live-20261016.log",
+  "log_sha256": "cc48ead30dea9909647020895d3c5106af87fc09afd1c68165c7c761ef04dc47",
+  "build": {
+    "root": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-observer-integrated-8ab2af3f1a564db286c026e96a1afaf8",
+    "configure_log": "output/day10-observer-integrated-configure-20261016.log",
+    "configure_exit": 0,
+    "build_log": "output/day10-observer-integrated-build-20261016.log",
+    "build_exit": 0,
+    "typescript_log": "output/day10-observer-integrated-typescript-20261016.log",
+    "typescript_exit": 0,
+    "typescript_output": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-observer-integrated-8ab2af3f1a564db286c026e96a1afaf8\\typescript",
+    "production_dist_changed": false,
+    "fetchcontent_disconnected": true,
+    "dependency_commits": {
+      "libgit2": "ca225744b992bf2bf24e9a2eb357ddef78179667",
+      "abseil": "d38452e1ee03523a208362186fd42248ff2609f6",
+      "re2": "927f5d53caf8111721e734cf24724686bb745f55"
+    },
+    "winrt_ocr": false
+  },
+  "native_binary_sha256": "8fbea771c830b26e5d54fe9037758c7b84b42fe1b8104a56c6cf7d9d76c42d22",
+  "fixture_binary_sha256": "897ebfa70652408c4110aa70152336b04b7c1af283add7d6a61e0b380108fdd9",
+  "source_sha256": {
+    "native/CMakeLists.txt": "e8fa9b0f1b152e2139d30277fe818a4ea30d860fc5713a0ca9a3c0285a9c4ee4",
+    "native/src/swift.cpp": "bccc06e448b39f4eb6e8040fd19df876aa79f7c456c4456b71be58be8fd6ad21",
+    "native/src/dxgi_capture.cpp": "d3c86a5ec700eda2a4f360c68f5ae6630726a36ee65a52b54b14e85989e3bc48",
+    "native/src/observer_cpu.cpp": "c996a18eb1553624087da01421e47042808f4dee166d5a6bbda3032bed54f209",
+    "native/src/observer_engine.cpp": "abd46a65aa1922ad1fb05d5c4321239c859b9e7a72f75fd00293cc400581a497",
+    "native/src/observer_frame.cpp": "52d763216e38ab7dcd4f32dc6fb094c04b2f41f3f7e6f6d5bed4c678e8191e5b",
+    "native/src/observer_reader.cpp": "48535d82c1f73c8cb0c1a2ffd38e13da0f6742c919c219a22b4f6cff3e388dea",
+    "native/src/observer_readiness.cpp": "a2d0ac990a004f6bd27b65a754bb5854241aca1e4117b7280480d412ed3b3c87",
+    "native/src/observer_ocr.cpp": "ee9827f3eab0157806c3abe0406c312ae12ed68abe0a7eb4a32b763324172a56",
+    "native/src/uia_observe.cpp": "23bbdd8225eac1da4d27026ad37a4ca8f533e99aad7a422d61834c87d10987b9",
+    "native/include/observer_cpu.hpp": "70d3a54bfcc462c854d76357cff16b366024e7f31e1bdebc8516c2ef099a9597",
+    "native/include/observer_engine.hpp": "6db9d404928a1cbefeebb0629fc714aaf2eded49b111455882c3824c36d92466",
+    "native/tests/observer_engine_tests.cpp": "56de539c2eff9d0743abd9ba5bf9eec84bccfc621b1eb87be2ea9db0d656f074"
+  },
+  "web_source_sha256": {
+    "src/adapters/chatgpt-web/mcp-server.ts": "5d152ee31908e7e859fd691b757eb1c1ff0983c06534111447298abf4e7b6da3",
+    "src/adapters/chatgpt-web/screen-observation.ts": "76edd0b6a0045b2baf83a4ee7d75a08c87acbe9ee4b8a3bbe736ba66eecc1338"
+  },
+  "ctest": {
+    "log": "output/day10-observer-integrated-ctest-20261016.log",
+    "pass": 6,
+    "fail": 0,
+    "cases": [
+      "cpu",
+      "frame",
+      "readiness",
+      "reader",
+      "engine",
+      "ocr_unavailable_branch"
+    ]
+  },
+  "observation": {
+    "kind": "real-swift-stdio-native2-mcp-inmemory-native-reader",
+    "status": "PASS",
+    "image_delivery_status": "UNAVAILABLE",
+    "model_pixels": "NOT_RUN",
+    "ocr": "NOT_INTEGRATED",
+    "readiness": {
+      "status": "PARTIAL",
+      "semantic_ready": false,
+      "capture_attempts": 1,
+      "frame_id": 2,
+      "image_delivery_status": "UNAVAILABLE"
+    },
+    "input_sequences": 0,
+    "image_encodes": 0,
+    "cleanup": {
+      "held_keys": 0,
+      "held_buttons": 0,
+      "fixture": true,
+      "native": true
+    },
+    "native2_observe_calls": 2,
+    "frame": {
+      "id": 1,
+      "generation": 1,
+      "width": 480,
+      "height": 320
+    },
+    "cv": {
+      "nodes": 25,
+      "best_expected_roi_iou": 0.72
+    },
+    "uia": {
+      "nodes": 1,
+      "temporal_relation": "after_final_frame",
+      "pixel_correspondence": "unverified"
+    },
+    "compute": {
+      "mode": "AUTO",
+      "worker_threads": 1,
+      "control_threads": 1,
+      "concurrency_limit": 1,
+      "active": 0,
+      "queued": 0,
+      "governor_reason": "pressure_unknown_safe_one",
+      "available_logical_processors": null,
+      "allocation_status": "uncertain",
+      "allocation_reasons": [
+        "job_ancestor_limits_unverified",
+        "unresolved_allocation_safe_one_worker"
+      ],
+      "foreground_reserved": 0,
+      "bootstrap_workers": 1,
+      "uia_provider_ownership": "isolated_private_helper",
+      "ocr_provider_ownership": "isolated_private_helper",
+      "ocr_engine_internal_parallelism": "not_measured"
+    },
+    "total_ms": 425.2295
+  },
+  "native2_transport": "Actual Web MCP implementation via in-memory SDK, real Swift stdio and real private native reader pipe; no installed connector/model-loop acceptance",
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "production_changed": false,
+  "limits": [
+    "OCR WinRT OFF: unavailable branch, no semantic READY acceptance",
+    "UIA sampled after final frame; pixel correspondence remains unverified",
+    "AUTO one due unverified ancestor job limits; no scaling/FPS/load claim",
+    "No real Web model/image delivery or live native parallel overlap acceptance"
+  ]
+}

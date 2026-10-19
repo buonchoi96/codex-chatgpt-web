@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-G native multimodal transport diagnosis and P0-A nested gateway image preservation",
+  "source_repo": "F:/Source Projects/codex-chatgpt-web",
+  "web_head": "bca4b395e3fbff8a3aa23d357ac5638221165084",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "implementation": {
+    "sources": [
+      "src/adapters/chatgpt-web/mcp-server.ts",
+      "src/adapters/chatgpt-web/gateway-result-metadata.ts"
+    ],
+    "tests": ["tests/mcp-server-image-relay.test.ts"],
+    "defect": "Nested exec gateway expected result.content to be an array. Direct native connector produced a wrapper whose content is a generic text string and whose content_items array holds real image blocks. Generated gateway serialized the entire wrapper as text, including image base64, and lost model-visible image blocks; metadata serialization also included the raw wrapper.",
+    "red": "One isolated MCP regression failed before fix: expected a text block and PNG/JPEG image blocks, got two text blocks containing serialized base64 and metadata.",
+    "fix": "Generated gateway forwards content_items as real multimodal blocks after the legacy content-array branch. Metadata treats the alternate envelope as an MCP result and forwards only allowlisted isError/structuredContent/_meta, excluding image data.",
+    "green": "12 PASS / 0 FAIL / 59 assertions in two focused suites, including success/error envelope variants and codex_view_image nested gateway",
+    "related": "123 PASS / 0 FAIL / 547 assertions across seven image, safety, viewer and observer suites, before final test-only parameterization",
+    "typecheck": "bun run typecheck PASS after final test parameterization",
+    "git_diff_check": "PASS after final source and evidence changes",
+    "root_suite": "bun run test: 1657 PASS / 93 SKIP / 2 FAIL / 11518 assertions / 141 files; 224.67s",
+    "root_suite_failures": [
+      "tests/codex-integration.test.ts:114 symlinkSync relative file link returns Windows EPERM before route assertions",
+      "tests/codex-integration.test.ts:149 symlinkSync absolute file link returns Windows EPERM before route assertions"
+    ],
+    "root_suite_log": "%TEMP%/day10-content-items-full-suite-20261018.log",
+    "self_review": "No tool retry, no input action or browser composer attachment. The legacy content-array branch retains precedence; only real image blocks are handed to image(), not serialized as text. Native2 wrapper error status and metadata remain explicit."
+  },
+  "actual_native2_direct_pixel_control": {
+    "scope": "Current ChatGPT conversation via direct Codex Native2 connector view_image, NOT the authenticated Web MCP codex_view_image nested route",
+    "png": {"mime":"image/png","oracle_match":true,"model_read":"HTHH","oracle_characters":4,"sha256":"B5410757EBC4FD6988BF7D76EAE7E768BD548CD66B7B3C576B46E6B0F8B3867B"},
+    "jpeg": {"mime":"image/jpeg","oracle_match":true,"model_read":"R6ZJ7","oracle_characters":5,"sha256":"C33B93D24CC91B2985DCF28EC97C78E0786675C7F2C2439CBADA34943BBC0773"},
+    "native_tool_result_shape": {"content":"Tool returned multimodal content.","content_items":"array containing image blocks with data and mimeType"},
+    "image_source":"Freshly generated synthetic Windows temp-file test fixtures, not real desktop screenshots",
+    "actual_web_mcp_model_loop":"NOT_TESTED",
+    "image_mode":"DISABLED",
+    "composer_screenshots_uploaded":0
+  },
+  "safety_review": {
+    "scope_sha256":"e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256":"4bc2a473ee881f42be30e3bb66e04c638f8d173c78cdf159350ffa3d36f233d2",
+    "unresolved_count":12,
+    "complete":true,
+    "resolution":"PENDING_SAFETY_REVIEW",
+    "retry_allowed":false,
+    "review_tool":"NOT_ADVERTISED",
+    "original_actions_retried":0,
+    "model_facing_swift_desktop_observe":"NOT_ATTEMPTED",
+    "isolated_unit_test_failure_fixtures":"Synthetic broker results only, not new live platform refusals",
+    "status_upgrades":0
+  },
+  "acceptance":{"total":175,"PASS":5,"PARTIAL":137,"BLOCKED":12,"NOT_RUN":21,"status_upgrades":0},
+  "main_model":{"requested":"GPT-6 Sol (Web) High","routed_model_and_effort":"UNVERIFIED_BY_NATIVE_CONNECTOR","subagents_spawned":0},
+  "production_or_global_config_changed":false,
+  "git_refs_changed":false,
+  "remaining_p0":[
+    "Web MCP nested image tool result model-visible randomized pixel oracle, not inferred from direct ChatGPT Native2 connector",
+    "authorized native semantic observer E2E with fresh owner/target/grant and verified Web model response",
+    "effective CPU AUTO scaling and load/FPS A/B evidence",
+    "272K native compaction and real account recall/retained transport verification",
+    "remaining ENV/REPLAY/COMPACT/steering races and genuine safe native parallel command overlap",
+    "native read-only safety review availability and classification of all 12 pending entries"
+  ]
+}

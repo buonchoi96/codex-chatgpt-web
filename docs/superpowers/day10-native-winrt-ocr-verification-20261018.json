@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-A2/A3 WinRT OCR isolated build, native tests and foreground-gated E2E attempt",
+  "goal_status": "ACTIVE",
+  "main_model_and_effort": "NOT_VERIFIED_AS_GPT_6_SOL_WEB_HIGH",
+  "subagents_created": 0,
+  "repositories": {
+    "web": {"branch": "main", "head": "bca4b395e3fbff8a3aa23d357ac5638221165084"},
+    "swift": {"branch": "main", "head": "30d3fe4570761943464947894a4e1e0b863b3574"},
+    "git_references_changed": false,
+    "production_processes_modified": false,
+    "production_configuration_modified": false
+  },
+  "isolated_build": {
+    "directory": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/artifacts/native-ocr-build-20261018",
+    "configuration": "Release; MinGW Makefiles; SWIFT_NATIVE_OCR_WINRT=ON; offline cached libgit2/abseil/re2",
+    "cppwinrt_include": "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt",
+    "cmake_configure": "PASS",
+    "compile_targets": ["swift_observer_ocr_tests", "computer_use_swift_native", "swift_rendered_fixture", "swift_observer_frame_tests", "swift_observer_readiness_tests", "swift_observer_reader_tests", "swift_observer_engine_tests", "swift_observer_cpu_tests"],
+    "compile": "PASS",
+    "native_executable_sha256": "ED06C7672257A307298B9FF3A0B1F8F4419DA0CF448538F2B561311D98B1DE4E",
+    "rendered_fixture_sha256": "A027B415D7E275CEE756824CEC129E4DE6D60D951255F31F500467E550BA01DF",
+    "ocr_tests_sha256": "A2698742B762666DD400C9A52139BBE0000456336BA20AAC49B86E0C5E44580E"
+  },
+  "native_tests": {
+    "command": "ctest --test-dir <isolated-build> -R '^swift_observer_(ocr|readiness|engine|frame|reader)_tests$' --output-on-failure",
+    "pass": 5,
+    "fail": 0,
+    "duration_seconds": 1.49,
+    "ocr_specific_evidence": "WinRT-enabled executable recognized locally rendered ORCHID7319 test pixels, tested frame/generation, ROI bounds, repeated call and cancellation/deadline behavior"
+  },
+  "cpu_auto_read_only": {
+    "command": "swift_observer_cpu_tests.exe --topology-only",
+    "system_logical": 12,
+    "group_logical": 12,
+    "affinity_logical": 12,
+    "cpu_set_logical": 6,
+    "job_affinity_logical": null,
+    "job_rate_permyriad": null,
+    "limits_verified": false,
+    "allocation_uncertain": true,
+    "effective_logical": 1,
+    "bootstrap_workers": 1,
+    "reasons": ["job_ancestor_limits_unverified", "unresolved_allocation_safe_one_worker"],
+    "test_command": "ctest --test-dir <isolated-build> -R '^swift_observer_cpu_tests$' --output-on-failure",
+    "test_result": "1 PASS / 0 FAIL",
+    "live_multiworker_acceptance": "UNVERIFIED",
+    "production_cpu_settings_changed": false
+  },
+  "e2e_attempt": {
+    "command": "bun tests/e2e/reader-observation.mjs --run <isolated-native-exe> <isolated-rendered-fixture-exe> --expect-ocr --native2-web-root <web-repo>",
+    "result": "FAIL_BEFORE_OBSERVATION",
+    "actual_tool_error": "FOCUS_FAILED: Native runtime did not confirm target focus",
+    "failed_stage": "swift.session_status enable target focus",
+    "foreground_after_failure": "LockApp (PID 5600)",
+    "windows_lock_screen_suspected": true,
+    "artifact": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/artifacts/reader-1792302472494/results.json",
+    "cleanup": {"native": true, "fixture": true},
+    "ocr_e2e": "NOT_RUN",
+    "semantic_readiness_e2e": "NOT_RUN",
+    "web_model_semantic_e2e": "NOT_RUN",
+    "model_visible_pixels": "NOT_RUN"
+  },
+  "safety_review": {
+    "receipt": "docs/superpowers/day10-scoped-safety-advisory-20261018.json",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "ea4b10148b49a396b4e2e91c420131c88284d955e893b9cbe31406c507fb9dd6",
+    "unresolved": 9,
+    "native_review_tool_advertised": false,
+    "original_denied_operations_retried": 0,
+    "status": "PENDING_SAFETY_REVIEW"
+  },
+  "requirements": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT_RUN": 21, "status_upgrades": 0},
+  "source_changes": [],
+  "scope_limitations": [
+    "WinRT OCR local CTest success does not prove authenticated Web-model observation or READY from a live native fixture.",
+    "Foreground policy is mandatory; the E2E fixture could not acquire focus while LockApp was foreground.",
+    "CPU AUTO multiple worker acceptance and pixel delivery remain unverified.",
+    "Previous green full Web repo suite remains historical evidence; it was not rerun in this phase."
+  ],
+  "next_safe_step": "Once Windows is unlocked, inspect focus and rerun the owned rendered fixture E2E only after the environment changes; do not bypass target focus or retry blocked historical desktop operations."
+}

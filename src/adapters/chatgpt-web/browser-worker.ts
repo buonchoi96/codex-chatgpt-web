@@ -108,7 +108,7 @@ import {
 import { SameTabRecovery, type RecoveryObservation } from "./same-tab-recovery";
 import { RecoveryHistoryWait } from './recovery-history-wait';
 import { classifySameTabRecoveryTrigger, createSameTabRecoveryDelta, createSameTabRecoveryFallback, runSameTabRecoverySafely } from "./same-tab-recovery-policy";
-import { ChatGptRecoveryWatchdog, CHATGPT_FRONTEND_ERROR_STALL_MS, type RecoveryWatchdogObservation } from "./recovery-watchdog";
+import { ChatGptRecoveryWatchdog, CHATGPT_FRONTEND_ERROR_STALL_MS, freshRecoveryStall, type RecoveryWatchdogObservation } from "./recovery-watchdog";
 import type {SteeringProgressReader} from './live-steering';
 import {
   ChatGptLunaCheckpointStream,
@@ -6355,17 +6355,37 @@ export class ChatGptBrowserWorker {
           if (!steering && snapshot.completionActionVisible && snapshot.visibleText.trim() && !generationActive && !responseErrorPresent) {
             if (!turn.completionFence || ledgerRevision !== undefined && await turn.completionFence.commit(ledgerRevision)) reconciledSnapshot = snapshot;
           }
+          // Re-evaluate the recovery watchdog against the *current* DOM and
+          // native activity. The outer loop's earlier expiry is not sufficient
+          // authority to Stop a generation that has resumed in the meantime.
+          const currentProgress = turn.externalProgress?.snapshot();
+          const activeTools = Math.max(currentProgress?.activeToolCalls ?? 0, ledgerBusy ? 1 : 0);
+          const deliveryTimeoutNow = await chatGptMessageDeliveryTimeoutVisible(page);
+          const interruptedNow = !responseErrorPresent && !deliveryTimeoutNow
+            && await chatGptInterruptedNetworkVisible(page);
+          const freshObservation: RecoveryWatchdogObservation = {
+            errorKind: responseErrorPresent || deliveryTimeoutNow ? 'red' : interruptedNow ? 'interrupted' : null,
+            visibleText: snapshot.visibleText,
+            traceBlocks: snapshot.traceBlocks,
+            nativeLastProgressAt: currentProgress?.lastProgressAt,
+            nativeRevision: currentProgress?.revision,
+            nativeToolCallsInFlight: activeTools > 0,
+            approvalPending: false,
+          };
+          const verifiedStall = freshRecoveryStall(recoveryWatchdog, freshObservation,
+            Date.now() - chatGptSuspensionClock.suspendedMs(),
+            steering && Boolean(turn.steering?.snapshot().pending));
           return {
             owned: true,
             revision,
-            activeTools: Math.max(turn.externalProgress?.snapshot().activeToolCalls ?? 0, ledgerBusy ? 1 : 0),
+            activeTools,
             approvalPending: false,
             safetyBlocked: false,
             sendAcknowledged: finalSubmissionEvidence !== undefined,
             generationActive,
             composerReady,
             historyStable,
-            verifiedStall: true,
+            verifiedStall,
             completed: Boolean(reconciledSnapshot),
           };
         };

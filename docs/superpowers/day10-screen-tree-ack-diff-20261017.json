@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-17",
+  "phase": "P0-A4 frame acknowledgement and UIA provider diff",
+  "status": "LOCAL_PURE_AND_MCP_FIXTURES_GREEN; LIVE_WEB_E2E_UNVERIFIED",
+  "repository": "F:/Source Projects/codex-chatgpt-web",
+  "branch": "main",
+  "head": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+  "source_and_tests": [
+    "src/adapters/chatgpt-web/screen-observation.ts",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts",
+    "src/adapters/chatgpt-web/mcp-server.ts",
+    "tests/screen-tree-diff.test.ts",
+    "tests/mcp-screen-tree.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/screen-observation.ts": "aa0377ad1c5ace3783c8f839f050ed9f2b0fdef2c896e7db439bc3d9564ed429",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts": "7fcb6457af4b7cd8327afd8765baa9552ad8fcdb4fdadb304a3350b6bc8d75dc",
+    "src/adapters/chatgpt-web/mcp-server.ts": "9d7aa755ba6cc9d142e92a64fd690b82f23d94495cd1f7a1d60cbce6372b41db",
+    "tests/screen-tree-diff.test.ts": "0358e1151aaccf9d89792a8c1acc5ac34f19b827b5c4bb6395b862fd0cbd6bfe",
+    "tests/mcp-screen-tree.test.ts": "023e727119100be9cf2689572d949cd741d45c67756d1122fea15b9b0c23fa24"
+  },
+  "behavior": {
+    "full_snapshot": "Explicit json tree receives a unique snapshot_id; omitted/compact/both mode does not retain a diff baseline",
+    "acknowledgement": "Only the exact latest acknowledged snapshot_id under the active native reader grant qualifies; a cached frame by itself is never delivery proof",
+    "diff": "Complete, non-redacted, unique native UIA provider identities in READY frames may produce added/updated/removed; provider IDs survive, ephemeral per-projection IDs and parent pointers are removed from deltas",
+    "safe_fallback": "Missing/stale ACK, new grant, OCR/CV input, partial/truncated/unverified or ambiguous UIA tree, changed generation, mismatched viewport, stale frames return a full tree or explicit stale-frame error",
+    "privacy": "Opt-in formatted output excludes duplicate raw native nodes; no raw redacted-parent IDs are emitted through the formatted result",
+    "legacy_compatibility": "No tree_format continues to return the original raw native receipt without changing Swift observation tools"
+  },
+  "verification": {
+    "red": "New test initially failed with missing screen-tree-diff module; ACK tests failed before implementing registry fields",
+    "green": "bun test tests/mcp-screen-tree.test.ts tests/screen-tree.test.ts tests/screen-tree-diff.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts: 39 pass, 0 fail, 236 assertions across five files",
+    "typecheck": "bun run typecheck exit0 after all modifications",
+    "diff_check": "git diff --check exit0",
+    "runtime": "Windows PowerShell / Bun 1.4.0 / Node 24.20.0",
+    "self_review": "Scoped source diff reviewed; provider identity is only reused within grant. Diff nodes omit invalid ephemeral identifiers and cross-frame parent references. The legacy raw receipt remains exposed only in legacy mode by compatibility design."
+  },
+  "limits": [
+    "ACK echo proves model caller has the snapshot ID, not that a human saw or Web backend understood the complete frame",
+    "Only verified UIA node diffs are enabled: no inferred OCR/CV stable identity matching",
+    "No actual Web-model E2E, external DEV tunnel, production deployment or game/frame observation was performed in this phase",
+    "Live cancellation, target/provider identity semantics, reconnect behavior and genuine SDK-to-Web integration are not yet accepted",
+    "Pixel delivery remains disabled due historical IMAGE_RELAY_UNAVAILABLE; no image content or composer upload"
+  ],
+  "execution": {
+    "actual_main_model_effort": "UNVERIFIED: outer bridge does not expose the specific Sol/Web/High runtime variant",
+    "subagents_created": 0,
+    "production_or_global_config_mutations": 0,
+    "swift_files_modified": 0,
+    "git_reference_changes": 0,
+    "physical_web_sends": 0,
+    "native_screen_captures": 0
+  },
+  "matrix": {
+    "requirement_count": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT RUN": 21,
+    "changed_requirement_statuses": 0,
+    "affected_gates": ["UI-P0-05", "VIEW-P0-03"]
+  },
+  "next_step": "Run authorized, isolated generated-startup or DEV Native2 screen observations across two fresh same-target UIA frames, then verify exact ACK, full fallback on reconnect and truthful mixed OCR/CV behavior. Do not change production MCP/tunnel or reuse historical denied commands."
+}

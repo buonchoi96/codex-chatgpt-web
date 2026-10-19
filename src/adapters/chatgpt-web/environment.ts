@@ -443,6 +443,28 @@ export function extractChatGptCompactionSourceRevision(
   }
   const restored = !revision && trustedMatches ? trusted!.revision : undefined;
   const source = revision ?? restored;
+  // Enforce an independent rollout witness for actual native compaction
+  // identities. Lightweight legacy/SDK fixture IDs are not Codex task IDs;
+  // they retain their existing simulated checkpoint behavior.
+  const metadata = clientTurnMetadata(parsed);
+  const nativeId = (id: unknown): id is string => typeof id === "string"
+    && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id);
+  const nativeCompaction = metadata?.request_kind === "compaction"
+    && nativeId(identity.threadId) && nativeId(identity.turnId)
+    && typeof record(parsed._rawBody)?.model === "string";
+  const input = record(parsed._rawBody)?.input;
+  const priorHuman = nativeCompaction && source?.turnId !== undefined
+    && source.turnId !== identity.turnId && Array.isArray(input)
+    && input.some(value => {
+      const item = record(value);
+      return item?.type === "message" && item.role === "user"
+        && item.id === source.itemId && itemTurnId(item) === source.turnId;
+    });
+  if (priorHuman && source && !isAuthenticatedNativeCompactionSource(parsed, identity, source)
+    && !isAcceptedCompactionContinuation(parsed, identity, source)) {
+    throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
+      { status: 400, errorType: "invalid_request_error", code: "REPLAY_PROVENANCE_UNVERIFIED", retryable: false });
+  }
   if (!source || (!options.allowAbortedRetainedComparison && source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
     // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
     // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.

@@ -1,0 +1,145 @@
+{
+  "recorded_at": "2026-10-16T00:49:38.133Z",
+  "classification": "USER_AUTHORIZED_FRESH_LUNA_HIGH_REPLACEMENT_VERIFIED",
+  "user_authorization": "Cho phép thay bằng 2 Luna High mới",
+  "old_pair_terminal_snapshot": {
+    "Hilbert": "not_found",
+    "Euler": "not_found"
+  },
+  "requested": "gpt-6-luna/high/no inherited turns",
+  "parent_rollout": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+  "parent_spawn_wrapper": {
+    "line": 15105,
+    "call_id": "call_467b444710644fc38788d5d5510633fa",
+    "tool": "exec",
+    "arguments_sha256": "65edb56f87c4a3377cfca9a7478bc815dfb2aaf64130f93d715a5126865ff389"
+  },
+  "main_context": {
+    "line": 15086,
+    "model": "gpt-6.1-sol",
+    "effort": "high"
+  },
+  "actors": [
+    {
+      "agent_id": "01a1422e-1444-73b3-8402-7468d2656e57",
+      "nickname": "Popper",
+      "role": "Coding / implementation",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T07-47-59-01a1422e-1444-73b3-8402-7468d2656e57.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6
+      ],
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1422e-1856-74d1-baa2-d3b1fee2d124",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "developer_instructions": null
+          },
+          "approval_policy": "never",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          }
+        }
+      ],
+      "current_status": "completed; close_agent acknowledged completed",
+      "final_turn_context_lines": [
+        6
+      ]
+    },
+    {
+      "agent_id": "01a1422e-18bc-7b82-a16e-47d4b8fac7b8",
+      "nickname": "Kant",
+      "role": "UI / research / test supervisor",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T07-47-59-01a1422e-18bc-7b82-a16e-47d4b8fac7b8.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6
+      ],
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1422e-1a1b-7680-8f1c-d16d8ea3a74f",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration": {
+            "model": "gpt-6-luna",
+            "reasoning_effort": "high",
+            "developer_instructions": null
+          },
+          "approval_policy": "never",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          }
+        }
+      ],
+      "current_status": "completed; close_agent acknowledged completed",
+      "final_turn_context_lines": [
+        6
+      ]
+    }
+  ],
+  "gate": "output/day10-replacement-97dea28e40ec4a159e911b078b9602e3",
+  "gate_released_only_after_native_metadata_verification": true,
+  "resume_or_followup_used": false,
+  "production_config_changed": false,
+  "permanent_runtime_fix": false,
+  "historical_incident": "MODEL_OVERRIDE_NOT_PRESERVED_ON_RESUMED_FOLLOWUP; see model audit for exact old rollout/config evidence",
+  "limits": [
+    "Initial turn allocation and scope verified; no universal resume lifecycle repair claim",
+    "task_name/fork_turns absent in native schema; role in message and fork_context:false used"
+  ],
+  "active_owned_children": 0,
+  "final_metadata_verified_at": "2026-10-16T00:54:36.625Z",
+  "completed_work": {
+    "Popper": {
+      "paths": [
+        "tests/retained-compaction.test.ts"
+      ],
+      "test": "bun test ./tests/retained-compaction.test.ts",
+      "log": "output/day10-popper-retained-compaction-20261016.txt",
+      "pass": 48,
+      "fail": 0,
+      "assertions": 241
+    },
+    "Kant": {
+      "report": "output/day10-kant-luna-replacement-20261016-report.md",
+      "benchmark_log": "output/day10-kant-luna-replacement-20261016-benchmark.log",
+      "run_count": 1,
+      "exit": 0
+    }
+  },
+  "final_gates_revoked": true
+}

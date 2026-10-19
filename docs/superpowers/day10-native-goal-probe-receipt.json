@@ -1,0 +1,123 @@
+{
+  "recorded_at": "2026-10-16T00:54:36.627Z",
+  "classification": "NATIVE_GOAL_AUTO_CONTINUATION_AFTER_COMPACT_FIXED_PROVIDER_PROBE",
+  "status": "PASS_FIXED_PROVIDER_ONLY",
+  "raw_receipt": "output/day10-native-goal-1792111918916.json",
+  "raw_sha256": "078a33b80d6f86d943d43aa491e7e591a1e892e2eec6d2b2ad42bd3ff5cd100a",
+  "thread_id": "01a14231-c0e0-75c1-a9fa-bffc3fc08acd",
+  "goal_turn_id": "01a14231-c449-7a03-8282-f1f7e9d38987",
+  "turn_trigger": "goal",
+  "goal_origin": "user",
+  "new_user_turn_after_compact": false,
+  "goal_message_fabricated": false,
+  "one_automatic_goal_dispatch": true,
+  "request_shapes": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "id": "at_4f0770f9-89d0-5256-a767-b7b14c661e26"
+    },
+    {
+      "type": "message",
+      "role": "developer",
+      "id": "msg_d6e68db0-1427-5f21-93cd-07fe6b4107ea",
+      "metadata": {
+        "content_item_kinds": [
+          "model.base_instructions"
+        ]
+      },
+      "content_types": [
+        "input_text"
+      ]
+    },
+    {
+      "type": "message",
+      "role": "developer",
+      "id": "msg_01a14231-c38b-7240-8357-79ff5b8fd9aa",
+      "metadata": {
+        "turn_id": "01a14231-c33a-7033-a67e-043dc1f08034",
+        "content_item_kinds": [
+          "host_skills.instructions",
+          "permissions.instructions",
+          "collaboration_mode.instructions"
+        ]
+      },
+      "content_types": [
+        "input_text",
+        "input_text",
+        "input_text"
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "id": "msg_01a14231-c38b-7240-8357-7a04960c84f9",
+      "metadata": {
+        "turn_id": "01a14231-c33a-7033-a67e-043dc1f08034",
+        "content_item_kinds": [
+          "environments.environment_context"
+        ]
+      },
+      "content_types": [
+        "input_text"
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "id": "msg_01a14231-c211-74c0-8351-bc885ed456cf",
+      "metadata": {
+        "turn_id": "01a14231-c10c-7331-9be9-990f389c2a60",
+        "create_time": 1792111919.633255,
+        "content_item_kinds": [
+          "user.text"
+        ]
+      },
+      "content_types": [
+        "input_text"
+      ]
+    },
+    {
+      "type": "compaction",
+      "id": "cmp_2dae6c19ff8b4367822bb0e78d50cee3"
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "id": "msg_01a14231-c422-76c3-ac71-63e63f3b2708",
+      "metadata": {
+        "turn_id": "auto-compact-0",
+        "create_time": 1792111920.1620038,
+        "content_item_kinds": [
+          "user.goal"
+        ]
+      },
+      "content_types": [
+        "input_text"
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "id": "msg_01a14231-c4a5-7191-8235-69054917c3d2",
+      "metadata": {
+        "turn_id": "01a14231-c449-7a03-8282-f1f7e9d38987",
+        "create_time": 1792111920.2935722,
+        "content_item_kinds": [
+          "goal.internal_context"
+        ]
+      },
+      "content_types": [
+        "input_text"
+      ]
+    }
+  ],
+  "native_exit": 0,
+  "cleanup_complete": true,
+  "real_web_model": false,
+  "production_changed": false,
+  "earlier_harness_failure": {
+    "raw_receipt": "output/day10-native-goal-1792111819565.json",
+    "cause": "Bridge inspected campaign CODEX_HOME instead of its private native profile; corrected only in fixture, no product source patch"
+  }
+}

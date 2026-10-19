@@ -27,6 +27,76 @@ test('already committed answer reconciles without Stop or Send',async()=>{
   expect(await recovery.recover({observe:async()=>({...idle,completed:true}),stop:async()=>{stops++;},submit:async()=>{sends++;return 'accepted';}})).toBe('completed');
   expect([stops,sends]).toEqual([0,0]);
 });
+test('fresh semantic progress during pre-Stop recheck cancels recovery without mutation',async()=>{
+  let reads=0,stops=0,sends=0,fallbacks=0;
+  const recovery=new SameTabRecovery();
+  const outcome=await recovery.recover({
+    observe:async()=>({...idle,generationActive:true,verifiedStall:++reads===1}),
+    stop:async()=>{stops++;},
+    submit:async()=>{sends++;return 'accepted';},
+    reconcileFallback:async()=>({oldGenerationStopped:true,toolReceiptsSettled:true,
+      sendAcknowledged:true,ownershipMatched:true,revisionUnchanged:true,
+      approvalPending:false,safetyBlocked:false}),
+    fallback:async()=>{fallbacks++;return 'accepted';}
+  });
+  expect(outcome).toBe('waiting');
+  expect(recovery.state).toBe('ACTIVE');
+  expect(reads).toBe(2);
+  expect({stops,sends,fallbacks}).toEqual({stops:0,sends:0,fallbacks:0});
+});
+
+test('fresh semantic progress before an idle-generation Send cancels stale recovery',async()=>{
+  let reads=0,sends=0,stops=0;
+  const recovery=new SameTabRecovery();
+  const actions={observe:async()=>({...idle,generationActive:false,verifiedStall:++reads===1}),
+    stop:async()=>{stops++;},submit:async()=>{sends++;return 'accepted' as const}};
+  expect(await recovery.recover(actions)).toBe('waiting');
+  expect(recovery.state).toBe('ACTIVE');
+  expect([reads,stops,sends]).toEqual([2,0,0]);
+  // The recovered frontend's fresh progress must not consume either send attempt.
+  expect(await recovery.recover({...actions,observe:async()=>({...idle,verifiedStall:true})})).toBe('resumed');
+  expect(sends).toBe(1);
+});
+
+test('confirmed Stop may clear an error banner without cancelling its safe delta',async()=>{
+  let stops=0,sends=0;
+  const recovery=new SameTabRecovery();
+  const outcome=await recovery.recover({
+    observe:async()=>({...idle,generationActive:stops===0,verifiedStall:stops===0}),
+    stop:async()=>{stops++;},
+    submit:async()=>{sends++;return 'accepted' as const}
+  });
+  expect(outcome).toBe('resumed');
+  expect([stops,sends]).toEqual([1,1]);
+  expect(recovery.state).toBe('RESUMED');
+});
+test('progress that cancels pre-Stop recovery does not consume the bounded mutation budget',async()=>{
+  let reads=0,stops=0,sends=0;
+  const recovery=new SameTabRecovery();
+  const progress={
+    observe:async()=>({...idle,generationActive:true,verifiedStall:++reads%2===1}),
+    stop:async()=>{stops++;},
+    submit:async()=>{sends++;return 'accepted' as const},
+  };
+  for (let i=0;i<3;i++) expect(await recovery.recover(progress)).toBe('waiting');
+  expect([reads,stops,sends]).toEqual([6,0,0]);
+  const idleResumption={observe:async()=>({...idle,generationActive:false}),
+    stop:async()=>{stops++;},submit:async()=>{sends++;return 'accepted' as const}};
+  expect(await recovery.recover(idleResumption)).toBe('resumed');
+  expect(await recovery.recover(idleResumption)).toBe('resumed');
+  expect([stops,sends]).toEqual([0,2]);
+});
+test('a generation that has already stopped at the second ownership check is not stopped twice',async()=>{
+  let reads=0,stops=0,sends=0;
+  const recovery=new SameTabRecovery();
+  expect(await recovery.recover({
+    observe:async()=>({...idle,generationActive:++reads===1}),
+    stop:async()=>{stops++;},
+    submit:async()=>{sends++;return 'accepted';},
+  })).toBe('resumed');
+  expect(reads).toBe(3);
+  expect([stops,sends]).toEqual([0,1]);
+});
 test('confirmed Stop waits for positive quiescence and submits exactly once',async()=>{
   let now=0,stops=0,sends=0;
   const recovery=new SameTabRecovery(()=>{},()=>now,async ms=>{now+=ms;});
@@ -116,4 +186,62 @@ test('a committed answer winning the final mutation race is reconciled without a
   const recovery=new SameTabRecovery();
   expect(await recovery.recover({observe:async()=>idle,stop:async()=>{},submit:async()=> 'completed'})).toBe('completed');
   expect(recovery.state).toBe('COMPLETED');
+});
+
+test('cancellation racing with an acknowledged same-tab Send retains the accepted receipt',async()=>{
+  let accept!:()=>void,sends=0;
+  const accepted=new Promise<void>(resolve=>{accept=resolve;});
+  const recovery=new SameTabRecovery();
+  const actions={observe:async()=>idle,stop:async()=>{},submit:async()=>{
+    sends++;await accepted;return 'accepted' as const;
+  }};
+  const pending=recovery.recover(actions);
+  for(let n=0;n<10&&sends===0;n++) await Bun.sleep(0);
+  expect(sends).toBe(1);
+  recovery.cancel();
+  accept();
+  expect(await pending).toBe('resumed');
+  expect(recovery.state).toBe('RESUMED');
+  expect(await recovery.recover(actions)).toBe('cancelled');
+  expect(sends).toBe(1);
+});
+
+test('cancellation racing with an acknowledged fallback Send retains the accepted receipt',async()=>{
+  let accept!:()=>void,fallbacks=0;
+  const accepted=new Promise<void>(resolve=>{accept=resolve;});
+  const recovery=new SameTabRecovery();
+  const actions={observe:async()=>({...idle,generationActive:true}),
+    stop:async()=>{throw new Error('Stop activation failed');},
+    submit:async()=> 'unknown' as const,
+    reconcileFallback:async()=>({oldGenerationStopped:true,toolReceiptsSettled:true,
+      sendAcknowledged:true,ownershipMatched:true,revisionUnchanged:true,
+      approvalPending:false,safetyBlocked:false}),
+    fallback:async()=>{fallbacks++;await accepted;return 'accepted' as const;}};
+  const pending=recovery.recover(actions);
+  for(let n=0;n<10&&fallbacks===0;n++) await Bun.sleep(0);
+  expect(fallbacks).toBe(1);
+  recovery.cancel();
+  accept();
+  expect(await pending).toBe('fallback');
+  expect(recovery.state).toBe('FALLBACK_SUBMITTED');
+  expect(await recovery.recover(actions)).toBe('cancelled');
+  expect(fallbacks).toBe(1);
+});
+
+test('cancellation racing with an unacknowledged Send never invents acceptance or retries',async()=>{
+  let settle!:()=>void,sends=0;
+  const pendingReceipt=new Promise<void>(resolve=>{settle=resolve;});
+  const recovery=new SameTabRecovery();
+  const actions={observe:async()=>idle,stop:async()=>{},submit:async()=>{
+    sends++;await pendingReceipt;return 'unknown' as const;
+  }};
+  const pending=recovery.recover(actions);
+  for(let n=0;n<10&&sends===0;n++) await Bun.sleep(0);
+  expect(sends).toBe(1);
+  recovery.cancel();
+  settle();
+  expect(await pending).toBe('unsafe');
+  expect(recovery.state).toBe('UNKNOWN_STOP_OR_SEND');
+  expect(await recovery.recover(actions)).toBe('cancelled');
+  expect(sends).toBe(1);
 });

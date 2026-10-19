@@ -1,0 +1,129 @@
+{
+  "recorded_at": "2026-10-16T01:52:11.566Z",
+  "classification": "ACTUAL_WINRT_OCR_NATIVE2_STDIO_SEMANTIC_READY",
+  "status": "PASS_FOR_OWNED_RENDERED_FIXTURE",
+  "raw_receipt": "output/day10-reader-winrt-stdio-1792115230889/results.json",
+  "raw_sha256": "801260b12708632e68c473d27563bb70f29f6ecba60090a93683733f855c1266",
+  "log": "output/day10-reader-winrt-stdio-text-roi-20261016.log",
+  "private_build": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-observer-integrated-8ab2af3f1a564db286c026e96a1afaf8",
+  "winrt_ocr_enabled_in_private_build": true,
+  "production_config_changed": false,
+  "installed_connector_changed": false,
+  "isolated_native2_cli": true,
+  "private_native2_home": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-observer-integrated-8ab2af3f1a564db286c026e96a1afaf8\\native2-stdio-profile",
+  "binary_snapshot": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-observer-integrated-8ab2af3f1a564db286c026e96a1afaf8\\variants\\winrt-ready-v1",
+  "native_binary_sha256": "ef62acd71e33d7f8acbf84302ba04155a7381d7b71ae2a8b74a450a3b342ebc8",
+  "harness_snapshot": "output/day10-reader-winrt-ready-v1-20261016.snapshot.mjs",
+  "harness_sha256": "260150e0bed67b049f2f5d5aba740edcca2dc79aa6041f90206799eeeb1a1052",
+  "native_source_sha256": {
+    "native/src/swift.cpp": "bccc06e448b39f4eb6e8040fd19df876aa79f7c456c4456b71be58be8fd6ad21",
+    "native/src/observer_engine.cpp": "bd4a3d33ecfd95131f4bfbcb00a40d4686ad99cccd6b291f61c1ad6dfc9c22b1",
+    "native/src/observer_cpu.cpp": "c996a18eb1553624087da01421e47042808f4dee166d5a6bbda3032bed54f209",
+    "native/src/observer_ocr.cpp": "ee9827f3eab0157806c3abe0406c312ae12ed68abe0a7eb4a32b763324172a56",
+    "native/src/observer_readiness.cpp": "a2d0ac990a004f6bd27b65a754bb5854241aca1e4117b7280480d412ed3b3c87",
+    "native/src/observer_reader.cpp": "48535d82c1f73c8cb0c1a2ffd38e13da0f6742c919c219a22b4f6cff3e388dea",
+    "native/tests/observer_engine_tests.cpp": "aeb9bfa8d2a2872ea3ca622cdda40a1918d48868f4c0e8e9f788baa66a4e3666",
+    "native/tests/observer_ocr_tests.cpp": "f2a5b669023fa0148719cdeccd6237d78d17505f2f240dc6c9710d01dc4064ec",
+    "tests/e2e/reader-observation.mjs": "3856778810013b41baced9de4b0c0d0541cfd26116d2b6bf3443eb4cc32d0081",
+    "tests/e2e/rendered-fixture.cpp": "0f712fc989f88e61da7450e5066a126d6c05e2434f046291871c30f7056cf6f5"
+  },
+  "web_source_sha256": {
+    "src/cli.ts": "1c7aea2b1a21e3e2583ef152a4318524616d9180a9ff1a2607d9a8ab9fe70ea8",
+    "src/adapters/chatgpt-web/mcp-main.ts": "d4bd53beef1167d4454dcc1e2ee6f70098d82141e5bd8aa450a9b897e845cde8",
+    "src/adapters/chatgpt-web/mcp-server.ts": "5d152ee31908e7e859fd691b757eb1c1ff0983c06534111447298abf4e7b6da3",
+    "src/adapters/chatgpt-web/screen-observation.ts": "76edd0b6a0045b2baf83a4ee7d75a08c87acbe9ee4b8a3bbe736ba66eecc1338"
+  },
+  "ctest": {
+    "log": "output/day10-observer-winrt-ctest-20261016.log",
+    "pass": 2,
+    "fail": 0,
+    "scope": "Updated cancellation engine and actual WinRT OCR generated-bitmap recognition/reuse/deadline"
+  },
+  "capability_probe": {
+    "compile_exit": 0,
+    "runtime_exit": 0,
+    "log": "output/day10-winrt-capability-runtime-20261016.log",
+    "language": "en-US"
+  },
+  "observation": {
+    "kind": "real-swift-stdio-native2-stdio-native-reader",
+    "status": "PASS",
+    "image_delivery_status": "UNAVAILABLE",
+    "model_pixels": "NOT_RUN",
+    "ocr": {
+      "status": "completed",
+      "language": "en-US",
+      "nodes": 1,
+      "exact_fixture_text": true,
+      "materialized_copies": 3
+    },
+    "readiness": {
+      "status": "READY",
+      "semantic_ready": true,
+      "capture_attempts": 1,
+      "frame_id": 2,
+      "image_delivery_status": "UNAVAILABLE"
+    },
+    "input_sequences": 0,
+    "image_encodes": 0,
+    "cleanup": {
+      "held_keys": 0,
+      "held_buttons": 0,
+      "native2_stdio": true,
+      "fixture": true,
+      "native": true
+    },
+    "native2_stdio_pid": 23804,
+    "native2_observe_calls": 2,
+    "frame": {
+      "id": 1,
+      "generation": 1,
+      "width": 480,
+      "height": 320
+    },
+    "cv": {
+      "nodes": 16,
+      "best_expected_roi_iou": 0.8
+    },
+    "uia": {
+      "nodes": 1,
+      "temporal_relation": "after_final_frame",
+      "pixel_correspondence": "unverified"
+    },
+    "compute": {
+      "mode": "AUTO",
+      "worker_threads": 1,
+      "control_threads": 1,
+      "concurrency_limit": 1,
+      "active": 0,
+      "queued": 0,
+      "governor_reason": "pressure_unknown_safe_one",
+      "available_logical_processors": null,
+      "allocation_status": "uncertain",
+      "allocation_reasons": [
+        "job_ancestor_limits_unverified",
+        "unresolved_allocation_safe_one_worker"
+      ],
+      "foreground_reserved": 0,
+      "bootstrap_workers": 1,
+      "uia_provider_ownership": "isolated_private_helper",
+      "ocr_provider_ownership": "isolated_private_helper",
+      "ocr_engine_internal_parallelism": "not_measured"
+    },
+    "total_ms": 454.645
+  },
+  "prior_roi_test_failure": {
+    "raw_receipt": "output/day10-reader-winrt-stdio-1792115040540/results.json",
+    "classification": "TEST_ROI_EXPECTATION_ERROR",
+    "reason": "Fixture draws text at36,22 with42px font; old readiness predicate used separate colored rectangle at y>=100. Native correctly returned NOT_READY.",
+    "fix": "Select known bounded text rectangle28,16,400,64. No controller/recognizer readiness behavior weakened."
+  },
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "limits": [
+    "No real routed Web model call or pixel delivery proof",
+    "UIA root sampled after final frame; pixel correspondence remains unverified",
+    "Private WinRT-enabled build; production unchanged",
+    "AUTO1due allocation uncertainty; not full foreground/eight-command or model-latency acceptance"
+  ]
+}

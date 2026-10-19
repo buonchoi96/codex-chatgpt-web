@@ -59,7 +59,10 @@ export class SameTabRecovery {
     const sent = await actions.fallback();
     if (sent === 'completed') { this.transition('COMPLETED'); return 'completed'; }
     if (sent !== 'accepted') { this.transition('UNKNOWN_STOP_OR_SEND'); return 'unsafe'; }
-    return this.cancelled ? 'cancelled' : 'fallback';
+    // Cancellation remains sticky for subsequent recovery attempts, but a
+    // confirmed Send receipt cannot be reclassified as an unsent cancellation.
+    if (this.cancelled) this.transition('FALLBACK_SUBMITTED');
+    return 'fallback';
   }
   async recover(actions: SameTabRecoveryActions): Promise<RecoveryOutcome> {
     if (this.cancelled) return 'cancelled';
@@ -77,64 +80,80 @@ export class SameTabRecovery {
       if (refused) return refused;
       if (observed.completed) { this.transition('COMPLETED'); return 'completed'; }
       if (!observed.verifiedStall) { this.transition('ACTIVE'); return 'waiting'; }
-      this.attempts++;
       if (observed.generationActive) {
         observed = await actions.observe(); refused = this.guard(observed, revision); if (refused) return refused;
         if (observed.completed) { this.transition('COMPLETED'); return 'completed'; }
-        this.transition('STOP_REQUESTED'); mutationStarted = true;
-        this.stopRequestedAt = this.now();
-        const deadline = this.stopRequestedAt + STOP_CONFIRMATION_DEADLINE_MS;
-        const controller = new AbortController(); this.stopController = controller;
-        let clearDeadline = () => {};
-        const checkDeadline = () => {
-          const remaining = deadline - this.now();
-          if (remaining <= 0) controller.abort();
-          else clearDeadline = this.scheduleTimeout(checkDeadline, remaining);
-        };
-        // A wall timer can fire immediately after system sleep. Recheck the injected awake
-        // clock before revoking Stop authority, including when the Stop RPC itself is stuck.
-        clearDeadline = this.scheduleTimeout(checkDeadline, STOP_CONFIRMATION_DEADLINE_MS);
-        const bounded = <T>(pending: Promise<T>) => new Promise<T>((resolve, reject) => {
-          const aborted = () => reject(new Error('Stop confirmation deadline or cancellation'));
-          controller.signal.addEventListener('abort', aborted, { once: true });
-          pending.then(value => { controller.signal.removeEventListener('abort', aborted); resolve(value); }, error => {
-            controller.signal.removeEventListener('abort', aborted); reject(error);
+        // The first stall receipt can become obsolete while ownership and
+        // native progress are rechecked. A recovered generation must never be
+        // stopped using that stale decision.
+        if (!observed.verifiedStall) { this.transition('ACTIVE'); return 'waiting'; }
+        // The second snapshot can also prove that the generation ended on its
+        // own. Only a still-active generation requires a Stop side effect.
+        if (observed.generationActive) {
+          this.attempts++;
+          this.transition('STOP_REQUESTED'); mutationStarted = true;
+          this.stopRequestedAt = this.now();
+          const deadline = this.stopRequestedAt + STOP_CONFIRMATION_DEADLINE_MS;
+          const controller = new AbortController(); this.stopController = controller;
+          let clearDeadline = () => {};
+          const checkDeadline = () => {
+            const remaining = deadline - this.now();
+            if (remaining <= 0) controller.abort();
+            else clearDeadline = this.scheduleTimeout(checkDeadline, remaining);
+          };
+          // A wall timer can fire immediately after system sleep. Recheck the injected awake
+          // clock before revoking Stop authority, including when the Stop RPC itself is stuck.
+          clearDeadline = this.scheduleTimeout(checkDeadline, STOP_CONFIRMATION_DEADLINE_MS);
+          const bounded = <T>(pending: Promise<T>) => new Promise<T>((resolve, reject) => {
+            const aborted = () => reject(new Error('Stop confirmation deadline or cancellation'));
+            controller.signal.addEventListener('abort', aborted, { once: true });
+            pending.then(value => { controller.signal.removeEventListener('abort', aborted); resolve(value); }, error => {
+              controller.signal.removeEventListener('abort', aborted); reject(error);
+            });
+            if (controller.signal.aborted) aborted();
           });
-          if (controller.signal.aborted) aborted();
-        });
-        try {
-          try { await bounded(actions.stop(controller.signal)); }
-          catch {
-            if (this.cancelled) return 'cancelled';
-            return await this.eligibleFallback(actions, controller.signal.aborted || this.now() >= deadline ? 'stop_confirmation_timeout' : 'stop_activation_failed');
-          }
-          for (;;) {
-            if (this.cancelled) return 'cancelled';
-            if (controller.signal.aborted || this.now() >= deadline) return await this.eligibleFallback(actions, 'stop_confirmation_timeout');
-            try { observed = await bounded(actions.observe(controller.signal)); }
-            catch (error) {
+          try {
+            try { await bounded(actions.stop(controller.signal)); }
+            catch {
+              if (this.cancelled) return 'cancelled';
+              return await this.eligibleFallback(actions, controller.signal.aborted || this.now() >= deadline ? 'stop_confirmation_timeout' : 'stop_activation_failed');
+            }
+            for (;;) {
               if (this.cancelled) return 'cancelled';
               if (controller.signal.aborted || this.now() >= deadline) return await this.eligibleFallback(actions, 'stop_confirmation_timeout');
-              throw error;
+              try { observed = await bounded(actions.observe(controller.signal)); }
+              catch (error) {
+                if (this.cancelled) return 'cancelled';
+                if (controller.signal.aborted || this.now() >= deadline) return await this.eligibleFallback(actions, 'stop_confirmation_timeout');
+                throw error;
+              }
+              refused = this.guard(observed, revision); if (refused) return refused;
+              if (observed.completed) { this.transition('COMPLETED'); return 'completed'; }
+              if (this.now() < deadline && !observed.generationActive && observed.composerReady) break;
+              await this.wait(Math.min(250, Math.max(0, deadline - this.now())));
             }
-            refused = this.guard(observed, revision); if (refused) return refused;
-            if (observed.completed) { this.transition('COMPLETED'); return 'completed'; }
-            if (this.now() < deadline && !observed.generationActive && observed.composerReady) break;
-            await this.wait(Math.min(250, Math.max(0, deadline - this.now())));
-          }
-        } finally { clearDeadline(); this.stopController = undefined; }
+          } finally { clearDeadline(); this.stopController = undefined; }
+        }
       }
       if (observed.generationActive || !observed.composerReady) { this.transition('UNKNOWN_STOP_OR_SEND'); return 'unsafe'; }
-      this.stopConfirmedAt = this.now();
-      this.transition('STOP_CONFIRMED'); this.transition('RESUME_PREPARED');
+      if (mutationStarted) { this.stopConfirmedAt = this.now(); this.transition('STOP_CONFIRMED'); }
+      else this.stopConfirmedAt = undefined;
+      this.transition('RESUME_PREPARED');
       observed = await actions.observe(); refused = this.guard(observed, revision); if (refused) return refused;
       if (observed.completed) { this.transition('COMPLETED'); return 'completed'; }
       if (observed.generationActive || !observed.composerReady) { this.transition('UNKNOWN_STOP_OR_SEND'); return 'unsafe'; }
+      // With no Stop side effect, a stale initial stall must not authorize
+      // Send after the last native/DOM recheck proves frontend progress.
+      // A confirmed Stop may clear the error banner, so do not require the
+      // watchdog to remain expired after a real Stop mutation.
+      if (!mutationStarted && !observed.verifiedStall) { this.transition('ACTIVE'); return 'waiting'; }
+      if (!mutationStarted) this.attempts++;
       this.transition('RESUME_SUBMITTED'); mutationStarted = true;
       const sent = await actions.submit();
       if (sent === 'completed') { this.transition('COMPLETED'); return 'completed'; }
       if (sent !== 'accepted') { this.transition('UNKNOWN_STOP_OR_SEND'); return 'unsafe'; }
-      if (this.cancelled) return 'cancelled';
+      // Once accepted, the Send already happened even if cancellation raced
+      // the acknowledgement. Keep the cancellation flag to prohibit replay.
       this.transition('RESUMED'); return 'resumed';
     } catch (error) {
       if (this.cancelled) return 'cancelled';

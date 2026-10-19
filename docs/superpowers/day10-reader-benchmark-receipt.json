@@ -1,0 +1,372 @@
+{
+  "recorded_at": "2026-10-16T02:07:02.736Z",
+  "classification": "ACTUAL_WINRT_NATIVE2_STDIO_LOCAL_COLD_FIXTURE_BENCHMARK",
+  "status": "PASS_FOR20LOCAL_FIXTURES_ONLY",
+  "summary": "output/day10-reader-local-benchmark-20261016-1792116172244-4025f490-8c0e-4792-ae1f-4cc862cd1613/summary.json",
+  "summary_sha256": "3fecbf934f5007ad9b51c33e11d076a9473e72458c345dda787dedb6921cf631",
+  "cases_jsonl": "output/day10-reader-local-benchmark-20261016-1792116172244-4025f490-8c0e-4792-ae1f-4cc862cd1613/cases.jsonl",
+  "requested_cases": 20,
+  "completed_cases": 20,
+  "error_count": 0,
+  "observations": 60,
+  "first_observation_ms": {
+    "count": 20,
+    "min": 229.9492,
+    "p50": 445.1268,
+    "p90": 731.3586,
+    "p95": 765.601,
+    "p99": 789.8616,
+    "max": 789.8616,
+    "percentile_method": "nearest-rank"
+  },
+  "whole_harness_ms": {
+    "count": 20,
+    "min": 8738.955099999992,
+    "p50": 9248.485600000004,
+    "p90": 10287.383799999996,
+    "p95": 10338.945999999996,
+    "p99": 10359.300799999997,
+    "max": 10359.300799999997,
+    "percentile_method": "nearest-rank"
+  },
+  "observed_allocations": [
+    {
+      "worker_threads": 1,
+      "concurrency_limit": 1,
+      "allocation_status": "uncertain",
+      "cases": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ]
+    }
+  ],
+  "raw_receipts": [
+    {
+      "case": 1,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116172400\\results.json",
+      "sha256": "d3996c526228f530bf2905f123411cbe71a315bb72246f4c2ba514cc878d8fed",
+      "native2_pid": 14864,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 2,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116181256\\results.json",
+      "sha256": "4cbb2f20495ca894c77db8efffb66957a55bd9db455b91e7dfe182c24e717374",
+      "native2_pid": 10292,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 3,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116190351\\results.json",
+      "sha256": "a1236f2d0032281e0b95f156e1688cc33d2516fe2548e93bd31375f73d885bd8",
+      "native2_pid": 13440,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 4,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116199583\\results.json",
+      "sha256": "4c62233a733d3ffb2bc87a21bb681c233ff80ea885907b8b944982c864ba0ad0",
+      "native2_pid": 22860,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 5,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116208870\\results.json",
+      "sha256": "4351a83db1687ee7581f58f3cc48f46c2f91af3a7289ed416bb033d8c94193a5",
+      "native2_pid": 24468,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 6,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116218606\\results.json",
+      "sha256": "a9d877a12e8915d0ca9c25ae95758bbbaf0a62dd33c1eba458ec98549d4ee398",
+      "native2_pid": 10708,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 7,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116227659\\results.json",
+      "sha256": "51f522ff74e2aced66ecb637bdaaf2e80d48dcea213cff455ddd1644ffe3a983",
+      "native2_pid": 9796,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 8,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116236887\\results.json",
+      "sha256": "10af434d134c98ebea0b9cf1ead8cb44e339a2b86bf6d45bbfc0085a9425a2ab",
+      "native2_pid": 21120,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 9,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116246010\\results.json",
+      "sha256": "a6993ad7f4a689b48bfaeb18624b993046df252c041fd91b36e819614318ee2b",
+      "native2_pid": 12524,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 10,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116256179\\results.json",
+      "sha256": "bff95c2c079db630d29fcf3303ed94f577597a22bb6a12494e00fd4d0734c7d1",
+      "native2_pid": 9108,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 11,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116266526\\results.json",
+      "sha256": "e8f5228b2ad97678eb838c8f4ab0413cd4fd3d4646ff3cae83a5841f7175df80",
+      "native2_pid": 22116,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 12,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116276787\\results.json",
+      "sha256": "24762f9d364ad4c0dd9677a35ab0666d5564602a99d74a83f4191ab0ea8ac5cc",
+      "native2_pid": 14820,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 13,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116286928\\results.json",
+      "sha256": "9adddf9df547e0016c005f8ed18125fe79712606fd71d5adb9f08e8e1aed3d2a",
+      "native2_pid": 25088,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 14,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116296233\\results.json",
+      "sha256": "d2297799057c99b4a968de84230ffadf0209eba32f19ed4476a12b984fda339c",
+      "native2_pid": 11024,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 15,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116305256\\results.json",
+      "sha256": "bc81a14d06272f4e0bec32947734b14539d7c8078271024c63ec1368a3fb1abe",
+      "native2_pid": 14168,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 16,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116314045\\results.json",
+      "sha256": "83e39bf2fc6ebe0804939f1b3e7883cd13f00d4fdb80d21ed9ad87df1c5bc8d4",
+      "native2_pid": 7748,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 17,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116323740\\results.json",
+      "sha256": "4f75bbd373f9b67ab34fa10bf692b239530b54dc56b0eeaf2874f64e549ecc49",
+      "native2_pid": 3320,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 18,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116332998\\results.json",
+      "sha256": "a9bb73d8b00a2d9adaeb4e2dceed871d24bc36237056d346ae12b89b2d031673",
+      "native2_pid": 25212,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 19,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116342062\\results.json",
+      "sha256": "36aea74955c87bf920927b56319550a818e6bf23676d841e79038a78e7cbeb7a",
+      "native2_pid": 23736,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    },
+    {
+      "case": 20,
+      "path": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-reader-winrt-stdio-1792116351494\\results.json",
+      "sha256": "44ad1877681a5d1426380dc20c1ca8c9400a5e1ee53a7a2be6ef4ef87260758b",
+      "native2_pid": 4108,
+      "observe_calls": 3,
+      "cleanup": {
+        "held_keys": 0,
+        "held_buttons": 0,
+        "native2_stdio": true,
+        "fixture": true,
+        "native": true
+      }
+    }
+  ],
+  "runner": "output/day10-reader-local-benchmark-20261016.ts",
+  "runner_sha256": "b101143131edd495653f7acbf44bbc259436ba82850f88b7e10e92580e49eb08",
+  "harness_snapshot": "output/day10-reader-benchmark20-20261016.snapshot.mjs",
+  "harness_sha256": "eafe8f713e6cd300c768d39c4bf12a07ebeab5753724207a82ddf9edb4fa360c",
+  "actor": {
+    "id": "01a1424c-d494-7fa2-922d-a8bd303cee76",
+    "nickname": "Sartre",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "native_context": 6,
+    "context_count": 1
+  },
+  "input_sequences": 0,
+  "image_encodes": 0,
+  "observer_image_mode": "DISABLED",
+  "model_pixels": "NOT_RUN",
+  "cleanup": "All20rawreceipts: owned fixture/native/Native2 stdio closed; heldkeys/buttons0",
+  "prior_short_budget_failure": "docs/superpowers/day10-reader-roi-receipt.json",
+  "limits": [
+    "Local first-observation time excludes model/network and whole-harness process startup/cleanup",
+    "Whole-harness includes fresh native/stdio startup and intentional negativeROI timeout",
+    "One-worker AUTO due unresolved ancestor allocation; no scaling/foreground/eight-command/FPS proof",
+    "Not matched before/after or model-facing pixel acceptance",
+    "Prior500ms no-frame failure remains preserved outside this standard-budget batch"
+  ],
+  "peer_report": "output/day10-p0-supervisor-round6-report.json",
+  "transport_review": "RESOLVED_BY_GENERATION_CHAIN",
+  "post_run_owned_process_audit": "output/day10-reader-owned-process-audit-20261016.json",
+  "post_run_private_process_count": 0
+}

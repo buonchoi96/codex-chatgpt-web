@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-A4 native observer CV/OCR source-to-node receipt consistency",
+  "classification": "RED_GREEN_LOCAL_REGISTRY_FIXTURE; LIVE_SWIFT_AND_WEB_MODEL_E2E_UNVERIFIED",
+  "baseline": {
+    "web_branch": "main",
+    "web_head": "7c797ba4fe401fccab0a7d30ea593ddb9b1960e6",
+    "swift_branch": "main",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "preexisting_dirty_worktrees_preserved": true
+  },
+  "root_cause": "The bridge validated native frame identities and READY final receipts but did not compare published OCR/CV nodes to their native source status, count or OCR source frame identity before tree projection and snapshot caching.",
+  "source_changed": "src/adapters/chatgpt-web/screen-observation.ts",
+  "test_added": "tests/screen-observation-source-fidelity.test.ts",
+  "change": "Before snapshot publication, reject CV node counts exceeding source_count, published CV nodes with non-completed CV source, and OCR nodes whose source is not completed or lacks matching frame/generation; preserve completed truncated CV reports with fewer emitted nodes than total source count.",
+  "red": {
+    "command": "bun test tests/screen-observation-source-fidelity.test.ts",
+    "pass": 1,
+    "fail": 5,
+    "failure": "Five native-source inconsistencies were accepted as valid tree receipts before the guard.",
+    "native_command_chunk_id": "c332c0"
+  },
+  "green": {
+    "focused_command": "bun test tests/screen-observation-source-fidelity.test.ts",
+    "focused_pass": 6,
+    "focused_fail": 0,
+    "focused_log": "output/day10-source-fidelity-focused-green-20261018.log",
+    "observer_command": "bun test tests/screen-observation-source-fidelity.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/mcp-stdio-screen-observer.test.ts tests/screen-tree.test.ts tests/screen-reader-pipe-framing.test.ts",
+    "observer_pass": 72,
+    "observer_fail": 0,
+    "observer_assertions": 417,
+    "typecheck_command": "bun run typecheck",
+    "typecheck_exit": 0,
+    "typecheck_log": "output/day10-source-fidelity-typecheck-20261018.log",
+    "git_diff_check_exit": 0,
+    "full_suite_command": "bun run test",
+    "full_suite_pass": 1627,
+    "full_suite_skip": 93,
+    "full_suite_fail": 2,
+    "full_suite_assertions": 11410,
+    "full_suite_log": "output/day10-source-fidelity-full-tests-20261018.log",
+    "full_suite_failure_details": [
+      "tests/codex-integration.test.ts: route install, update, switching and removal preserve a symlinked shared Codex config; Windows symlinkSync EPERM in owned temp directory",
+      "tests/codex-integration.test.ts: config compensation preserves the link and refuses redirected or invalid targets; Windows symlinkSync EPERM in owned temp directory"
+    ],
+    "failure_classification": "WINDOWS_SYMLINK_PRIVILEGE_DENIED_IN_TEMP_TEST_FIXTURE; unrelated to observer source edit; not reclassified as passing"
+  },
+  "sha256": {
+    "source": "8B1E77727595407A5C404B3133AF6725B8787AE78701A466DC6CA7C2EFBFC8D9",
+    "test": "14F0B91846C14D5A679636551F6E6C7AFD25B81B5712099203E53F83D0DF7C63",
+    "focused_log": "3B3596BFCC2D55742DCC35A36657809EE8CFEC2238D677FA7D7BB0861F31B152",
+    "typecheck_log": "8670E722A80795C2DE9002BDB4D7040F339E9BB333122E4A9F9FDC1F36BAF689",
+    "full_suite_log": "1D8EF77FD14FEB5BB3C195F73B5FB48A3707045399C6EC57893F75493B054ADB"
+  },
+  "acceptance_limitations": [
+    "The regression uses a synthetic read-only native provider through the real ScreenObservationRegistry; it is not an on-screen capture or authenticated Web-model E2E.",
+    "A present OCR/CV source count does not prove model-visible delivery, source recognition quality or native frame freshness without independent receipts.",
+    "No original blocked computer-use observation was retried. Observer image mode remains disabled and model pixels remain unavailable.",
+    "A full repository PASS cannot be claimed while the two Windows symlink EPERM cases fail."
+  ],
+  "requirements_total": 175,
+  "status_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "requirement_status_upgrades": 0,
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "9158a6a76321cf6cad2cd0ec8342653a12fb08eac46541e804297ff01449c39e",
+    "pending_safety_review": 6,
+    "retry_allowed": false,
+    "independent_review_tool_advertised": false
+  },
+  "actual_main_model_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR",
+  "subagents_spawned": 0,
+  "production_config_or_process_mutations": 0,
+  "git_reference_mutations": 0,
+  "next_safe_step": "Review source-to-node counts in actual private native stdio snapshots with independently verified foreground eligibility; obtain authorized authenticated Web-model semantic receipt when the original model-facing observer is advertised. Preserve six pending safety review prerequisites."
+}

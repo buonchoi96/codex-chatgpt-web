@@ -16,7 +16,8 @@ import {classifyChatGptToolFailure} from './tool-failure-classification';
 import { BlockedOperationLedger } from './blocked-operation-ledger';
 import {readBlockedOperationReview,SAFETY_REVIEW_CONTROL_WIRE_NAME,type BlockedOperationReviewOptions} from './blocked-operation-review';
 import {CODEX_PARALLEL_COMMAND_CONTROL_WIRE_NAME,parallelCommandBatchSchema,NativeCommandCapacity,runParallelNativeCommands,isIndependentLiteralRead,type ParallelCommand} from './parallel-native-commands';
-import {ScreenObservationRegistry,screenObserveArguments,NativeScreenObservationError,type NativeScreenProvider} from './screen-observation';
+import {ScreenObservationRegistry,screenObserveArguments,NativeScreenObservationError,NativeScreenPublishedFrameStaleError,type NativeScreenProvider} from './screen-observation';
+import {appendUnverifiedObserverCompatibility} from './legacy-observation-routing';
 
 interface ClaimedTurn {
   bindingId: string;
@@ -360,6 +361,10 @@ function execGatewayResultProgram(invocation: string[],metadataMarker?:string): 
     "    if (typeof value.image_url === \"string\") { image(value.image_url, value.detail ?? \"auto\"); return; }",
     "    if (typeof value.audio_url === \"string\") { audio(value.audio_url); return; }",
     "    if (Array.isArray(value.content)) { for (const item of value.content) emit(item); return; }",
+    // Some native connector wrappers expose multimodal blocks in content_items
+    // while content is only the string "Tool returned multimodal content."
+    // Never stringify that wrapper: it loses image items and leaks their base64.
+    "    if (Array.isArray(value.content_items)) { for (const item of value.content_items) emit(item); return; }",
     "  }",
     "  text(value);",
     "};",
@@ -483,6 +488,7 @@ export async function createChatGptMcpServer(options: {
   const blockedOperationLedger = options.blockedOperationLedger ?? new BlockedOperationLedger();
   const commandCapacity = new NativeCommandCapacity();
   const screenObservers=options.screenObserver?new ScreenObservationRegistry(options.screenObserver.provider):undefined;
+  const legacyObserverNotices=new Set<string>();
   const server = new McpServer(
     { name: contract === "safe" ? "codex-safe" : "codex-native", version: VERSION },
     contract === "safe" ? { instructions: ZERO_RISK_MCP_INSTRUCTIONS } : undefined,
@@ -659,7 +665,14 @@ export async function createChatGptMcpServer(options: {
       if(screenObservers&&(trustedNestedWireName??wireName(tool))===options.screenObserver?.grantWireName)
         screenObservers.remember(bindingId,commandOwner,restoredResponse);
       if(releaseCommand)releaseCommand.observeResult(restoredResponse);
-      else if(nativeCommand||commandCapacityReserved)commandCapacity.observeResult(commandOwner,restoredResponse);
+      else if((nativeCommand||commandCapacityReserved)&&!(commandCapacityReserved&&
+        (nativeCommand||trustedNestedWireName==='exec_command'||trustedNestedWireName==='shell_command'))){
+        // Parallel children are attributed by their batch's exact lease in
+        // runParallelNativeCommands. Owner-wide observation can consume a
+        // sibling batch's reservation when responses finish out of order.
+        // Keep owner observation for reserved nested write_stdin receipts.
+        commandCapacity.observeResult(commandOwner,restoredResponse);
+      }
       if(tool.name==='write_stdin'&&typeof payload.arguments?.session_id==='number')commandCapacity.observeResult(commandOwner,restoredResponse,payload.arguments.session_id);
       const assessment = classifyChatGptToolFailure(restoredResponse);
       if (assessment.classification === "SAFETY_STATUS_UNKNOWN_OR_BLOCKED") {
@@ -676,10 +689,21 @@ export async function createChatGptMcpServer(options: {
       }
       // Keep the exact native error, structured payload, metadata and images. Persistence
       // failure is an additional unresolved receipt, never a successful/forgotten blocker.
-      return asMcpResult(safetyLedgerFailure ? {
+      const original=safetyLedgerFailure ? {
         ...restoredResponse,
         content: [...restoredResponse.content, { type: "text", text: JSON.stringify(ledgerFailure()) }],
-      } : restoredResponse);
+      } : restoredResponse;
+      const legacyWire=trustedNestedWireName??wireName(tool);
+      const noticeKey=`${bindingId}:${legacyWire}`;
+      const annotated=assessment.classification==='NO_FAILURE'&&!safetyLedgerFailure&&!legacyObserverNotices.has(noticeKey)
+        ?appendUnverifiedObserverCompatibility(legacyWire,original):original;
+      if(annotated!==original){
+        // Rate-limit advice per current turn binding and legacy tool. A fresh
+        // binding after compaction/token rotation naturally rechecks status.
+        if(legacyObserverNotices.size>=256)legacyObserverNotices.delete(legacyObserverNotices.values().next().value!);
+        legacyObserverNotices.add(noticeKey);
+      }
+      return asMcpResult(annotated);
     } catch (error) {
       releaseCommand?.retainUncertain();
       const thrownSafetyRefusal = classifyChatGptToolFailure({ isError: true, error }).classification
@@ -986,7 +1010,7 @@ export async function createChatGptMcpServer(options: {
 
   if(contract==='native'&&screenObservers)server.registerTool('codex_screen_observe',{
     title:'Observe the delegated native screen target',
-    description:'Read the exact target authorized by a fresh Swift reader grant in this turn. One bounded native final-frame observation returns local CV/UIA/OCR metadata. Optional tree_format adds a bounded source-tagged compact/JSON tree with ephemeral observation IDs; UIA pixel correspondence remains unverified and observed patterns grant no input permission. Image delivery is UNAVAILABLE; semantic readiness and OCR may be PARTIAL. No input, screenshots, composer attachments or viewer fallback.',
+    description:'Read the exact target authorized by a fresh Swift reader grant in this turn. One bounded native final-frame observation returns local CV/UIA/OCR metadata. Optional tree_format adds a bounded source-tagged compact/JSON tree without raw provider-node duplication. In json mode, an explicit latest ack_snapshot_id plus prefer_diff may return a complete UIA-only delta. Separately opt into prefer_mixed_diff to receive UIA provider deltas alongside a complete replace-all-current-frame set of ephemeral OCR/CV nodes; otherwise full snapshots preserve correctness. Stable IDs require a valid grant and untruncated source metadata. UIA pixel correspondence remains unverified and observed patterns grant no input permission. Image delivery is UNAVAILABLE; semantic readiness and OCR may be PARTIAL. No input, screenshots, composer attachments or viewer fallback.',
     inputSchema:{...turnReferenceInput(contract),...screenObserveArguments},
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:false,openWorldHint:false},
   },async(input,extra)=>withClaimedTurn('codex_screen_observe',turnReference(contract,input),extra,async claimed=>{
@@ -1018,7 +1042,11 @@ export async function createChatGptMcpServer(options: {
     try {
       return result(await screenObservers.observe(claimed.bindingId,owner,input,validate,extra.signal,()=>{dispatched=true;}));
     } catch(error) {
-      if(dispatched)await callTurnBroker(options.brokerSocketPath,{method:'release',bindingId:claimed.bindingId},5000);
+      // An obsolete read-only frame is a normal out-of-order completion.
+      // Reject its receipt without revoking the newer, valid turn authority.
+      // Other dispatched failures retain the existing fail-closed retirement.
+      const staleFrame=error instanceof NativeScreenPublishedFrameStaleError;
+      if(dispatched&&!staleFrame)await callTurnBroker(options.brokerSocketPath,{method:'release',bindingId:claimed.bindingId},5000);
       if(error instanceof NativeScreenObservationError)
         return result({status:'error',error:{code:error.code},image_delivery_status:'UNAVAILABLE'},true);
       throw error;

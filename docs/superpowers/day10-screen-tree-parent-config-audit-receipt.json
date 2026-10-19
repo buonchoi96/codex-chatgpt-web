@@ -1,0 +1,119 @@
+{
+  "at": "2026-10-16T12:46:15.405Z",
+  "parent_spawn": {
+    "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+    "line": 16990,
+    "tool": "exec",
+    "call_id": "call_4a2de32119a5494daecea756f0566308",
+    "markers": [
+      "wait tools.multi_agent_v1__spawn_agent({model:\"gpt-6-luna\",reasoning_effort:\"high\",fork_context:false,message:`task_name: day10_co"
+    ],
+    "scope": "Actual parent spawn wrapper; schema adapts no-history to fork_context:false. Child allocation proven by turn_context separately."
+  },
+  "children": [
+    {
+      "id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+      "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl",
+      "session_meta": {
+        "line": 1,
+        "id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+        "source": {
+          "subagent": {
+            "thread_spawn": {
+              "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+              "depth": 1,
+              "agent_path": null,
+              "agent_nickname": "Huygens",
+              "agent_role": null
+            }
+          }
+        },
+        "cli_version": "0.163.0-alpha.10.2",
+        "model": null,
+        "reasoning_effort": null
+      },
+      "first_turn_context": {
+        "line": 8,
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "turn_id": "01a14341-fe17-7200-920f-611187a96248"
+      }
+    },
+    {
+      "id": "01a14341-fe53-7023-9755-4e420399e31a",
+      "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl",
+      "session_meta": {
+        "line": 1,
+        "id": "01a14341-fe53-7023-9755-4e420399e31a",
+        "source": {
+          "subagent": {
+            "thread_spawn": {
+              "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+              "depth": 1,
+              "agent_path": null,
+              "agent_nickname": "Confucius",
+              "agent_role": null
+            }
+          }
+        },
+        "cli_version": "0.163.0-alpha.10.2",
+        "model": null,
+        "reasoning_effort": null
+      },
+      "first_turn_context": {
+        "line": 8,
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "turn_id": "01a14341-ffd4-7450-9028-805bf419e046"
+      }
+    }
+  ],
+  "configuration": {
+    "path": "E:/Codex/config.toml",
+    "read_only": true,
+    "selected_fields": [
+      {
+        "line": 1,
+        "section": "",
+        "value": "model = \"chatgpt-web/gpt-6-sol\""
+      },
+      {
+        "line": 2,
+        "section": "",
+        "value": "model_reasoning_effort = \"high\""
+      },
+      {
+        "line": 111,
+        "section": "[agents]",
+        "value": "[agents]"
+      },
+      {
+        "line": 112,
+        "section": "[agents]",
+        "value": "max_depth = 2 # Managed by codex-chatgpt-web: allows nested routed Web subagents in Compatibility V1."
+      }
+    ],
+    "repo_local_config_exists": false,
+    "agent_role_directories": [
+      {
+        "path": "E:/Codex/agents",
+        "exists": false,
+        "entries": []
+      },
+      {
+        "path": ".codex/agents",
+        "exists": false,
+        "entries": []
+      }
+    ]
+  },
+  "historical_mismatch": {
+    "classification": "MODEL_OVERRIDE_NOT_PRESERVED_ON_RESUMED_FOLLOWUP",
+    "actual_initial": "gpt-6-luna/high",
+    "actual_followup": "gpt-6.1-sol/high",
+    "trigger": "Bare resume_agent plus send_input without model override; exact internal reset point unproven",
+    "permanent_fix": false,
+    "evidence": "docs/superpowers/plans/2026-10-14-subagent-model-audit.md"
+  },
+  "current_workaround": "Same two UUIDs explicit app model=gpt-6-luna thinking=high, validation-only gate; actual new native contexts verified before productive release; no bare resume/send or config edits"
+}

@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-17",
+  "phase": "P0-A2 optional screen-tree payload privacy",
+  "status": "LOCAL_MCP_FIXTURE_GREEN; LIVE_WEB_E2E_NOT_RUN",
+  "repository": "F:/Source Projects/codex-chatgpt-web",
+  "branch": "main",
+  "head": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+  "changes": [
+    "src/adapters/chatgpt-web/screen-observation.ts",
+    "tests/mcp-screen-tree.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/screen-observation.ts": "955bd5fc78e24fea6c39a5449244ee7ff17f7bd2faa3b660ba68dfb3fc2a1847",
+    "tests/mcp-screen-tree.test.ts": "d746727b938397baf1a6f4dd65f43423af043312c346869c16932eb2299192ef"
+  },
+  "defect": "When tree_format was requested, the MCP reply exposed the privacy-projected tree and an unchanged raw nodes array. The raw UIA child parent_id could identify a redacted parent.",
+  "behavior_after_fix": "Explicit compact/json/both tree modes return the validated native receipt metadata and projected tree without duplicating raw nodes. Calls without tree_format still return the original native nodes for compatibility. No additional observation, image delivery or input occurs.",
+  "tests": {
+    "red": "bun test tests/mcp-screen-tree.test.ts: 9 pass, 2 fail, as expected before the source fix",
+    "green": "bun test tests/mcp-screen-tree.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts: 34 pass, 0 fail, 197 assertions",
+    "typecheck": "bun run typecheck: exit 0",
+    "diff_check": "git diff --check: exit 0"
+  },
+  "execution": {
+    "runtime": "Windows PowerShell; Bun 1.4.0; Node.js 24.20.0",
+    "model_variant_and_effort": "UNVERIFIED: current connector exposes no actual Sol/Web/High model metadata",
+    "subagents_created": 0,
+    "native_capture_calls": 0,
+    "live_web_model_calls": 0,
+    "production_or_configuration_changes": 0,
+    "git_ref_changes": 0,
+    "swift_source_changes": 0
+  },
+  "acceptance": {
+    "UI-P0-05": "PARTIAL",
+    "VIEW-P0-04": "PARTIAL",
+    "remaining": "Live scoped observer, frame acknowledgement and safe diffs, target/epoch invalidation, multi-target readiness, model-visible semantic acceptance and image relay host gate remain unverified"
+  }
+}

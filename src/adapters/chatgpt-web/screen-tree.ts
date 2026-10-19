@@ -13,6 +13,9 @@ export interface ScreenTreeNodeInput {
   redacted?:boolean;
   patterns?:readonly string[];
   confidence?:number|null;
+  is_enabled?:boolean;
+  is_offscreen?:boolean;
+  is_focused?:boolean;
 }
 
 export interface ScreenTreeInput {
@@ -46,6 +49,9 @@ export interface ProjectedScreenTreeNode {
   confidence?:number|null;
   confidence_status?:'unavailable';
   pixel_correspondence?:'unverified';
+  is_enabled?:boolean;
+  is_offscreen?:boolean;
+  is_focused?:boolean;
 }
 
 export interface ProjectedScreenTree {
@@ -68,6 +74,7 @@ export interface ProjectedScreenTree {
 
 interface PreparedNode {index:number;node:ScreenTreeNodeInput;depth:number;parentIndex?:number;parentProblem?:'unknown_provider_parent'|'ambiguous_provider_parent'}
 const SOURCES:readonly ScreenTreeSource[]=['cv','ocr','uia'];
+const UIA_STATE_FIELDS=['is_enabled','is_offscreen','is_focused'] as const;
 const MAX_NODES=200,DEFAULT_MAX_BYTES=16*1024,MAX_BYTES=32*1024,MAX_DEPTH=8,MIN_BYTES=256;
 
 function invalidInput():never {throw new Error('SCREEN_TREE_INPUT_INVALID')}
@@ -94,6 +101,8 @@ function validateInput(input:ScreenTreeInput):void {
     if(node.redacted!==undefined&&typeof node.redacted!=='boolean')invalidInput();
     if(node.patterns!==undefined&&(!Array.isArray(node.patterns)||node.patterns.length>7||node.patterns.some(pattern=>typeof pattern!=='string'||pattern.length>64)))invalidInput();
     if(node.confidence!==undefined&&node.confidence!==null&&(!finite(node.confidence)||node.confidence<0||node.confidence>1))invalidInput();
+    for(const key of UIA_STATE_FIELDS){const value=node[key];
+      if(value!==undefined&&(node.source!=='uia'||typeof value!=='boolean'))invalidInput();}
   }
 }
 
@@ -213,6 +222,8 @@ function compactText(projection:Omit<ProjectedScreenTree,'compact'>,nodes:Projec
       if(node.confidence_status)parts.push(`confidence=${quote(node.confidence_status)}`);
       else if(node.confidence!==undefined)parts.push(`confidence=${node.confidence===null?'null':node.confidence}`);
       if(node.pixel_correspondence)parts.push(`pixel_correspondence=${quote(node.pixel_correspondence)}`);
+      if(node.source==='uia')for(const key of UIA_STATE_FIELDS)
+        if(node[key]!==undefined)parts.push(`${key}=${node[key]}`);
       if(node.patterns)parts.push(`patterns=[${node.patterns.map(quote).join(',')}]`);
       if(node.redacted)parts.push('redacted=true');
       lines.push(parts.join(' '));
@@ -241,7 +252,12 @@ function makeNode(item:PreparedNode,ephemeralId:string,parentEphemeralId:string|
   if(node.patterns!==undefined)result.patterns=[...node.patterns];
   if(node.source==='ocr'){result.confidence=null;result.confidence_status='unavailable';}
   else if(node.confidence!==undefined)result.confidence=node.confidence;
-  if(node.source==='uia')result.pixel_correspondence='unverified';
+  if(node.source==='uia'){
+    result.pixel_correspondence='unverified';
+    if(node.is_enabled!==undefined)result.is_enabled=node.is_enabled;
+    if(node.is_offscreen!==undefined)result.is_offscreen=node.is_offscreen;
+    if(node.is_focused!==undefined)result.is_focused=node.is_focused;
+  }
   return result;
 }
 

@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-17",
+  "source": "current Codex unresolved-operation advisory supplied to the backend",
+  "advisory_only": true,
+  "independent_native_safety_review": "UNAVAILABLE_IN_CURRENT_TOOL_REGISTRY",
+  "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "snapshot_sha256": "9158a6a76321cf6cad2cd0ec8342653a12fb08eac46541e804297ff01449c39e",
+  "page": {"offset": 0, "limit": 20, "complete_as_advertised": true},
+  "unresolved_count_advertised": 6,
+  "other_scope_unresolved_count_advertised": 0,
+  "entries": [
+    {"blocker_id": "blocked_6c8834d2-a5d0-4d34-a124-e2838fa82e95", "at": "2026-10-15T07:23:00.117Z"},
+    {"blocker_id": "blocked_6eb314a2-9b7e-43ac-b6bf-4386ece0eb2f", "at": "2026-10-15T08:05:09.004Z"},
+    {"blocker_id": "blocked_ac3166d4-4dd0-4bd1-bf95-82b4430b909b", "at": "2026-10-15T08:25:47.927Z"},
+    {"blocker_id": "blocked_3e05be46-4e38-446f-9021-ea365d49642c", "at": "2026-10-15T08:30:37.770Z"},
+    {"blocker_id": "blocked_8c2e193e-fb90-4ce3-8a2f-6d32877517d3", "at": "2026-10-15T08:32:50.279Z"},
+    {"blocker_id": "blocked_b5761f43-8204-4c6c-95e1-6d2a216cbc6a", "at": "2026-10-16T06:32:24.752Z"}
+  ],
+  "all_entries_share": {
+    "requirement": "UNMAPPED_GOAL_PREREQUISITE_REVIEW_REQUIRED",
+    "requirement_sha256": "6c00e5709dddfa728b868115ca14366d6ea79affd9694dc97aece9d845eb8755",
+    "tool": "mcp__computer_use_swift__desktop_observe",
+    "classification": "SAFETY_STATUS_UNDETERMINED",
+    "dispatch_state": "unknown",
+    "execution_receipt": "refusal_returned",
+    "resolution": "PENDING_SAFETY_REVIEW",
+    "attempts_per_blocker": 1
+  },
+  "review_status": "review_required",
+  "retry_allowed": false,
+  "requirements_accepted_from_advisory": 0,
+  "resolution_updates": 0,
+  "next_action": "Preserve pending prerequisites until original native review path can supply independent read-only review and execution receipts; no alternative controller or replay."
+}

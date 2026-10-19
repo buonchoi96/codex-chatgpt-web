@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-16T12:42:22.852Z",
+  "model": "gpt-6-luna",
+  "effort": "high",
+  "new_identities": 0,
+  "bare_resume": false,
+  "validation_only_before_actual_context": true,
+  "actors": [
+    {
+      "agent_id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+      "role": "implementation",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl",
+      "line": 3399,
+      "turn_id": "01a144bb-995f-7e80-a670-fc7fb48084cb",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "collaboration_model": "gpt-6-luna",
+      "collaboration_effort": "high",
+      "scope": "danger-full-access/never"
+    },
+    {
+      "agent_id": "01a14341-fe53-7023-9755-4e420399e31a",
+      "role": "supervisor",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl",
+      "line": 3540,
+      "turn_id": "01a144bb-a03f-7a83-b928-cb1a6ead0616",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "collaboration_model": "gpt-6-luna",
+      "collaboration_effort": "high",
+      "scope": "danger-full-access/never"
+    }
+  ],
+  "productive_gate_opened_after_validation": true
+}

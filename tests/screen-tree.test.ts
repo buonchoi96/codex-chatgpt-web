@@ -8,7 +8,8 @@ test('projects mixed sources into one viewport-relative node set and matching co
     {source:'cv',id:'cv-α',bounds:{x:15,y:40,width:30,height:60},name:'invented label',confidence:0.83},
     {source:'ocr',id:'ocr-1',bounds:{x:20,y:30,width:20,height:10},name:'Résumé "one"',confidence:0.92},
     {source:'uia',id:'uia-root',bounds:{x:11,y:21,width:50,height:80},name:'Main',role:'Window'},
-    {source:'uia',id:'uia-child',parent_id:'uia-root',bounds:{x:12,y:22,width:20,height:12},name:'Save',role:'button',patterns:['Invoke']},
+    {source:'uia',id:'uia-child',parent_id:'uia-root',bounds:{x:12,y:22,width:20,height:12},name:'Save',role:'button',patterns:['Invoke'],
+      is_enabled:true,is_offscreen:false,is_focused:true},
   ],sources:{
     cv:{status:'ready',source_count:1,truncated:false},
     uia:{status:'partial',partial:false,temporal_relation:'after_final_frame',pixel_correspondence:'unverified'},
@@ -27,11 +28,13 @@ test('projects mixed sources into one viewport-relative node set and matching co
   expect(nodes[1]).toMatchObject({source:'ocr',name:'Résumé "one"',confidence:null,confidence_status:'unavailable'});
   expect(nodes[2].parent).toEqual({status:'none'});
   expect(nodes[3]).toMatchObject({source:'uia',provider_id:'uia-child',provider_parent_id:'uia-root',
-    parent:{status:'linked',ephemeral_id:nodes[2].ephemeral_id},pixel_correspondence:'unverified',patterns:['Invoke']});
+    parent:{status:'linked',ephemeral_id:nodes[2].ephemeral_id},pixel_correspondence:'unverified',patterns:['Invoke'],
+    is_enabled:true,is_offscreen:false,is_focused:true});
   expect(result.sources?.uia).toMatchObject({temporal_relation:'after_final_frame',pixel_correspondence:'unverified'});
   expect(result.compact).toContain('[cv]');
   expect(result.compact).toContain('[ocr]');
   expect(result.compact).toContain('[uia]');
+  expect(result.compact).toContain('is_enabled=true is_offscreen=false is_focused=true');
   expect(result.compact).toContain('Résumé \\"one\\"');
   for(const node of nodes)expect(result.compact).toContain(node.ephemeral_id);
 });
@@ -50,6 +53,13 @@ test('does not infer UIA parents from unknown, duplicate, or non-UIA provider ID
   expect(result.nodes?.[4].parent).toEqual({status:'unresolved',reason:'unknown_provider_parent'});
   expect(result.nodes?.[5].parent).toEqual({status:'unresolved',reason:'unknown_provider_parent'});
   expect(result.nodes?.slice(3).every(node=>node.depth===0)).toBe(true);
+});
+
+test('rejects forged non-UIA focus flags and malformed UIA state fields',()=>{
+  const input=(node:any):ScreenTreeInput=>({region:viewport,frame_id:1,target_generation:1,nodes:[node]});
+  const bounds={x:10,y:20,width:10,height:10};
+  expect(()=>projectScreenTree(input({source:'ocr',name:'text',bounds,is_focused:true}),'json')).toThrow('SCREEN_TREE_INPUT_INVALID');
+  expect(()=>projectScreenTree(input({source:'uia',id:'control',bounds,is_enabled:'yes'}),'json')).toThrow('SCREEN_TREE_INPUT_INVALID');
 });
 
 test('fails boundedly when unambiguous UIA parent links form a cycle',()=>{

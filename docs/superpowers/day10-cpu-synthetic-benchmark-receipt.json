@@ -1,0 +1,72 @@
+{
+  "recorded_at": "2026-10-16T00:54:36.627Z",
+  "classification": "SYNTHETIC_CV_ONLY_NO_SCALING_CLAIM",
+  "metrics": {
+    "kind": "synthetic-cv-worker-comparison",
+    "capture": "NOT_RUN",
+    "uia": "NOT_RUN",
+    "ocr": "NOT_RUN",
+    "model_latency": "NOT_RUN",
+    "target_fps": "NOT_MEASURABLE",
+    "eight_command_load": "NOT_RUN",
+    "same_fixture": true,
+    "system_logical_reported": 12,
+    "cpu_available_logical": null,
+    "cpu_budget_logical": 1,
+    "cpu_reserved": 0,
+    "worker_budget": 1,
+    "allocation_uncertain": true,
+    "allocation_reasons": [
+      "job_ancestor_limits_unverified",
+      "unresolved_allocation_safe_one_worker"
+    ],
+    "single_worker": {
+      "measured_frames": 100,
+      "warmup_frames": 10,
+      "cv_join_ms": {
+        "mean": 4.73993,
+        "p50": 4.7786,
+        "p90": 4.8852,
+        "p95": 4.9883,
+        "p99": 5.0676
+      },
+      "process_cpu_ms_including_fixture_generation": 750,
+      "wall_ms_including_fixture_generation": 746.867,
+      "process_peak_rss_bytes_cumulative": 15654912,
+      "worker_threads": 1,
+      "active_peak": 1
+    },
+    "auto": {
+      "measured_frames": 100,
+      "warmup_frames": 10,
+      "cv_join_ms": {
+        "mean": 4.57041,
+        "p50": 4.512,
+        "p90": 4.8213,
+        "p95": 4.8491,
+        "p99": 4.9298
+      },
+      "process_cpu_ms_including_fixture_generation": 687.5,
+      "wall_ms_including_fixture_generation": 688.932,
+      "process_peak_rss_bytes_cumulative": 15708160,
+      "worker_threads": 1,
+      "active_peak": 1
+    }
+  },
+  "report": "output/day10-kant-luna-replacement-20261016-report.md",
+  "raw_log": "output/day10-kant-luna-replacement-20261016-benchmark.log",
+  "raw_sha256": "144eec30a79f2e70dbc682db69164101c441f05acc5f8e3d0e97b8dcb54bbb7f",
+  "source_sha256": {
+    "native/tests/observer_analysis_bench.cpp": "9a81a5e48a27e99b029ad19442df4be3c5039831475b01b910f93f157311c33e",
+    "native/src/observer_cpu.cpp": "c60f383813ddb6aad447eb92d4a4b4590d1c7b09782db6f1fdc762b64e7e2d88",
+    "native/src/observer_frame.cpp": "52d763216e38ab7dcd4f32dc6fb094c04b2f41f3f7e6f6d5bed4c678e8191e5b",
+    "native/include/observer_cpu.hpp": "ad71541344b37e9cb0d01ac01ae957e8941b171b2e69ec8034b4a55878ca5788",
+    "native/include/observer_frame.hpp": "6bc63b09eec0ccb49b34167913e5da252b8ede5168840ecc63d1794f3293b7b2"
+  },
+  "compile_initial_exit": 1,
+  "compile_windows10_target_exit": 0,
+  "run_count": 1,
+  "run_exit": 0,
+  "production_changed": false,
+  "observer_image_mode": "DISABLED"
+}

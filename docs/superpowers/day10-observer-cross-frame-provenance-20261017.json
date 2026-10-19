@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-17",
+  "kind": "observer_same_frame_capture_ocr_receipt_guard_and_grant_rotation",
+  "classification": "RED_GREEN_LOCAL_MCP_REGRESSION_WITH_PRIVATE_WINDOWS_FIXTURES",
+  "problem": "Native observer validation checked individual OCR/CV node frame IDs, but did not compare optional nested capture and sources.ocr frame/generation metadata with the final published frame. Model-facing tree output could therefore describe inconsistent frame provenance.",
+  "red": {
+    "test": "tests/mcp-screen-tree.test.ts",
+    "command": "bun test tests/mcp-screen-tree.test.ts",
+    "result": "17 pass, 2 fail, 164 assertions",
+    "log": "output/day10-crossframe-source-red-20261017.log",
+    "log_sha256": "1E956CB79F0BD5CCFDE58FC1404EA2F6698A0DDAA3DB69482211FDA1A0B06AA7",
+    "failure": "MCP returned successful tree for capture.frame_id=8 and sources.ocr.frame_id=8 while published final frame_id was 7."
+  },
+  "fix": "Validate capture frame, generation, viewport, dimensions and DPI, and validate OCR-source frame/generation pairing and identity before publishing any frame or ACK snapshot. Return an explicit protocol error for mismatches.",
+  "regressions": [
+    "Capture metadata from another frame is refused without a published tree.",
+    "OCR source metadata from another frame is refused without a published tree.",
+    "Capture metadata matching the actual frame and authorized viewport is accepted.",
+    "Delayed old-grant observation cannot retire the new grant's acknowledged JSON tree or publish old-frame data."
+  ],
+  "validation": {
+    "command": "bun test tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-reader-pipe-framing.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "runner": "Bun 1.4.0, Windows, isolated MCP transport and owned named-pipe fixtures",
+    "tests_passed": 61,
+    "tests_failed": 0,
+    "assertions": 372,
+    "files": 8,
+    "test_log": "output/day10-crossframe-source-guard-final-20261017.log",
+    "test_log_sha256": "2087E5BBCA8D7061087659D26B112FC7F202D2BCDD3CE3A6D325CE6BA45DFA3B",
+    "typecheck": "PASS",
+    "typecheck_log": "output/day10-crossframe-source-guard-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670E722A80795C2DE9002BDB4D7040F339E9BB333122E4A9F9FDC1F36BAF689",
+    "git_diff_check": "PASS"
+  },
+  "files": {
+    "source": "src/adapters/chatgpt-web/screen-observation.ts",
+    "source_sha256": "DA4D9B7239B2B2CB254EA9EC51A59A3241C387E6C1039E08FDAA8D574F0B3253",
+    "mcp_test": "tests/mcp-screen-tree.test.ts",
+    "mcp_test_sha256": "41F7B2695C4FA33A3A679A6EB0A99CBDAC59F79E3E86463B64149D7D6D3EC17F",
+    "ordering_test": "tests/screen-observation-ordering.test.ts",
+    "ordering_test_sha256": "13E032212C97BF06977824747018F9206C5AB14FB50BA5BB54BC321C64262DEF"
+  },
+  "limitations": "The red/green tests are isolated local MCP/provider fixtures. The native Swift runtime independently checks OCR provenance, but a real post-fix Swift observer round and authenticated GPT Web semantic/pixel interpretation have not been performed. Do not promote VIEW-P0-03 or VIEW-P0-10 to PASS on this evidence alone.",
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "pending": 6,
+    "retry_allowed": false,
+    "independent_review": "NOT_ADVERTISED_IN_CURRENT_CONNECTOR"
+  },
+  "goal_status": "ACTIVE",
+  "model_selection": "NOT_VERIFIED_AS_GPT_6_SOL_WEB_HIGH",
+  "subagents_spawned": 0,
+  "production_changes": 0,
+  "git_reference_changes": 0,
+  "web_head": "e530f5b3c62d1d8a563266c75b6d424aaca0de64",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "matrix_status_upgrades": 0,
+  "full_requirement_scope": 175
+}

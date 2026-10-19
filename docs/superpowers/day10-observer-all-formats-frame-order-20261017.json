@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-17",
+  "kind": "native-screen-observation-monotonic-published-frames-across-all-formats",
+  "classification": "RED_GREEN_LOCAL_REGISTRY_WITH_NATIVE_RETEST_PRECONDITION_FAILURE",
+  "web_head": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "new_source": {
+    "path": "src/adapters/chatgpt-web/screen-observation.ts",
+    "sha256": "62feef78f0e4567182bb772e7d0160c79ce3dd54bd73337782f0d6172d49decb",
+    "change": "Per-grant published-frame high-water prevents older frames in legacy, compact, both and JSON; updated after final cancellation/grant checks and cleared on grant expiration or renewal."
+  },
+  "regressions": {
+    "test": "tests/screen-observation-ordering.test.ts",
+    "test_sha256": "6b0ce1c637c376b74ba61db50f05d75a2c7f1050b75d3f3bef8b53be438ee77a",
+    "red": {"passed": 1, "failed": 4, "expect_calls": 17, "exec_chunk_id": "4af492"},
+    "coverage": [
+      "Out-of-order legacy result rejected after newer JSON frame",
+      "Out-of-order compact result rejected after newer JSON frame",
+      "Out-of-order both result rejected after newer JSON frame",
+      "Out-of-order JSON result retains prior rejection behavior",
+      "Out-of-order legacy-only result rejected without snapshot ACK cache",
+      "Older target generation rejected even with larger numeric frame ID",
+      "Fresh reader grant permits new target epoch and frame-ID reset",
+      "Cancelled future frame ID 100 does not retire delivered frame 7, allowing subsequent frame 8 and verified ACK diff"
+    ],
+    "extended_cancel_regression": "tests/screen-observation-publication.test.ts",
+    "extended_cancel_sha256": "c0a428bdaec78673be89698c889f518a19bc119dacceb856d719a87af1d2abda"
+  },
+  "verification": {
+    "command": "bun test tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/screen-reader-pipe-framing.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "tests_passed": 54,
+    "tests_failed": 0,
+    "assertions": 342,
+    "files": 8,
+    "test_log": "output/day10-screen-observer-ordering-final-20261017.log",
+    "test_log_sha256": "b5dfd803bb43c180090bb9f0857c1630bd00a56d5b81e8cd95d67ca86463553d",
+    "typecheck_exit": 0,
+    "typecheck_log": "output/day10-screen-observer-ordering-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689",
+    "git_diff_check_exit": 0
+  },
+  "post_change_native_integration_attempt": {
+    "status": "FAIL_BEFORE_OBSERVER",
+    "failure_code": "FOCUS_FAILED",
+    "failure_message": "Native runtime did not confirm target focus",
+    "failed_action": "swift.session_status(enable) on private rendered fixture window",
+    "stage": "private session target-focus precondition",
+    "native_screen_observe_calls": 0,
+    "native_input_sequences": 0,
+    "image_encodes": 0,
+    "raw_result": "output/day10-reader-mixed-chain-1792239979837/results.json",
+    "raw_result_sha256": "88cd55207445ab28449ad5b64c48c100848e5bdc622269145eb0fc99f32b5c6e",
+    "runtime_log": "output/day10-screen-observer-ordering-native-retest-20261017.log",
+    "runtime_log_sha256": "36175ae3f55ac4f8570fee4fdb5191055c4fcecf7041666b00a6bdf527424ae0",
+    "cleanup": {"swift_stdio": true, "fixture": true, "native": true},
+    "reason": "Windows did not confirm foreground activation in this attempt. No evidence of observer implementation failure or platform safety denial.",
+    "rerun": "NOT_PERFORMED_PENDING_CHANGED_FOCUS_PRECONDITION"
+  },
+  "previous_native_mixed_ack_receipt": "docs/superpowers/day10-native-mixed-diff-20261017.json",
+  "authenticated_web_model_observation": "NOT_RUN",
+  "actual_main_model_and_effort": "UNVERIFIED",
+  "safety": {
+    "pending_scope_entries": 6,
+    "receipt": "docs/superpowers/day10-scoped-safety-advisory-20261017.json",
+    "original_refused_observations_retried": 0,
+    "current_refusal": "NONE; native retest had ordinary focus-precondition failure"
+  },
+  "subagents_created": 0,
+  "production_or_global_config_mutations": 0,
+  "git_reference_mutations": 0,
+  "requirements_promoted": 0,
+  "full_scope": 175,
+  "counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "next_safe_step": "With a separately verified private interactive focus precondition, rerun the same owned native fixture once; meanwhile continue independent observer target/cancellation/provider-timeout and CPU allocation tests."
+}

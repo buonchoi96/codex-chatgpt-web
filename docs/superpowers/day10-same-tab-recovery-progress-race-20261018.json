@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-E same-tab recovery ownership/progress race regression and verification",
+  "goal_status": "ACTIVE",
+  "preceding_turn_classification": "PROGRESS: three distinct RED regression cases and their source fixes; final post-formatting verification was outstanding",
+  "workspace": {
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+    "web": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "existing_dirty_worktrees_preserved": true,
+    "git_ref_changes": 0,
+    "production_or_global_config_changes": 0
+  },
+  "implementation_from_previous_goal_turn": {
+    "source": "src/adapters/chatgpt-web/same-tab-recovery.ts",
+    "tests": "tests/same-tab-recovery.test.ts",
+    "changes": [
+      "Revalidate verifiedStall on the second ownership/progress observation before stopping a still-active generation",
+      "Charge the two-attempt budget when initiating Stop or Send, without charging abandoned non-mutating checks",
+      "Skip Stop when the second observation proves the generation ended naturally; never synthesize Stop-confirmed timestamp without Stop"
+    ],
+    "red_logs": [
+      "output/day10-recovery-progress-race-red-20261018.log",
+      "output/day10-recovery-budget-red-20261018.log",
+      "output/day10-recovery-double-stop-red-20261018.log"
+    ]
+  },
+  "verification_this_turn": {
+    "focused_previous_turn": "14 PASS / 0 FAIL / 75 assertions, bun test tests/same-tab-recovery.test.ts",
+    "seven_file_command": "bun test tests/same-tab-recovery.test.ts tests/same-tab-recovery-integration.test.ts tests/same-tab-recovery-dom.test.ts tests/recovery-watchdog.test.ts tests/recovery-history-wait.test.ts tests/live-steering.test.ts tests/live-steering-adapter.test.ts",
+    "seven_file_result": "37 PASS / 3 SKIP / 0 FAIL / 211 assertions across 7 files",
+    "seven_file_log": "output/day10-recovery-progress-race-seven-file-rerun-20261018.log",
+    "typecheck_command": "bun run typecheck",
+    "typecheck_result": "PASS / exit 0",
+    "git_diff_check": "PASS; line-ending LF to CRLF warnings only",
+    "earlier_bun_crash": "Previous seven-file rerun panicked with Bun v1.4.0 Windows segmentation fault and exit 3; subsequent independent seven-file rerun completed. Root cause of intermittent crash unconfirmed."
+  },
+  "self_review": {
+    "reviewed": "Rechecked progress before Stop; guarded revision, owner, tool and approval predicates; natural-completion path skips Stop; mutation budget not spent on abandoned reads",
+    "scope_limit": "Deterministic source/adapter test evidence; skips include headless/real owned DOM tests. No current authorized live browser or account-bound same-tab E2E.",
+    "unresolved": [
+      "Confirm any caller-specific attempt accounting expectations in genuine DEV runtime",
+      "Investigate intermittent Bun crash if reproduced",
+      "Prove live owned same-tab Stop/Send exactly once with verified browser ownership"
+    ]
+  },
+  "safety": {
+    "scoped_snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578",
+    "pending_original_desktop_observe_refusals": 10,
+    "native_review_interface": "NOT_ADVERTISED_IN_CURRENT_CONNECTOR",
+    "original_refused_operations_retried": 0,
+    "current_requirement_impact": "PENDING_SAFETY_REVIEW; UI-facing E2E prerequisites not proven by the local tests"
+  },
+  "matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0},
+  "agents": {"spawned": 0, "actual_main_model_and_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR"},
+  "next_safe_step": "Continue with an independently reproducible P0-A/E gap; preserve the 272000/258400 context contract and require real owned-browser proof before upgrading REC gates."
+}

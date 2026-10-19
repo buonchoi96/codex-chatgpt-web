@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "priority": "P0-D",
+  "phase": "Fail-closed ZIP asset-inventory selection",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "source_files": [
+    "src/adapters/chatgpt-web/transport-selector.ts",
+    "tests/transport-selector.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/transport-selector.ts": "69A7AF3B495604162E2C11FD9EF086B7CED8F94128A59738C9A4C1426C53E40E",
+    "tests/transport-selector.test.ts": "EF04A93199529DCE0B71F319748EBE12286DACEBBD700D315C0F7014C9CD0743"
+  },
+  "defect": "ZIP transport selector trusted archive.eligible without validating that image and skill counts matched all original attachments; an eleven-image archive could be selected for twelve historical images.",
+  "fix": "Require exact MIME-classified image/skill counts, complete supported attachment types and exact total before selecting ZIP; do not alter inline, retained-delta, account-cap or native compact thresholds.",
+  "red": "12 PASS / 1 FAIL / 86 assertions; undercounted eligible ZIP incorrectly selected instead of BLOCK",
+  "green": "168 PASS / 0 FAIL / 1039 assertions across transport-selector.test.ts, browser-worker-contract.test.ts and unified-context-policy.test.ts",
+  "typecheck": "PASS / exit 0",
+  "git_diff_check": "PASS / exit 0",
+  "test_fixture_reconciliation": "Replaced a dummy 0-image ZIP declaration with four actual image assets to match the existing inline-rejection test.",
+  "limitations": {
+    "real_browser_zip_ingestion_e2e": "NOT_RUN",
+    "model_recall_272K": "RECALL_272K_UNVERIFIED",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1681 PASS / 93 SKIP / 2 Windows symlinkSync EPERM FAIL"
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "status": "PENDING_SAFETY_REVIEW",
+    "blocked_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0,
+  "requested_model_effort": "GPT-6 Sol (Web) High",
+  "actual_model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR"
+}
