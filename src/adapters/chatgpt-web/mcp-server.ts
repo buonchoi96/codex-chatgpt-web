@@ -50,6 +50,9 @@ const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
 ]);
 
 const turnTokenSchema = z.string().min(20).max(256);
+const nativeTurnTokenSchema = z.string().regex(/^turn_[A-Za-z0-9_-]{32}$/,
+  "Copy turn_token exactly from the current request: turn_ followed by 32 case-sensitive characters. Do not guess or reuse an earlier token.")
+  .describe("Opaque capability for this request. Copy the complete turn_token from the current request unchanged, including case, hyphens and underscores. Never infer it from another turn or from an error.");
 const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
 const safetyReviewShape={offset:z.number().int().min(0).max(10_000).optional(),
   limit:z.number().int().min(1).max(50).optional(),snapshot_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()};
@@ -72,7 +75,7 @@ const ZERO_RISK_MCP_INSTRUCTIONS = [
 function turnReferenceInput(contract: ChatGptMcpContract): Record<string, z.ZodString> {
   return contract === "safe"
     ? { request_id: turnTokenSchema }
-    : { turn_token: turnTokenSchema };
+    : { turn_token: nativeTurnTokenSchema };
 }
 
 function turnReference(contract: ChatGptMcpContract, input: object): string {

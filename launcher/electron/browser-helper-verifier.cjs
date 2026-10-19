@@ -47,11 +47,12 @@ async function stopChild(child) {
   }
 }
 
-async function runBrowserHelperOperation({ helper, descriptorPath, appName, expectedConnectorTunnelId, operation, payload = {}, logger }) {
+async function runBrowserHelperOperation({ helper, descriptorPath, appName, expectedConnectorTunnelId, useSavedChats = false, operation, payload = {}, logger }) {
   if (!helper || typeof helper.executable !== "string" || typeof helper.script !== "string") {
     throw new Error("Browser helper verification command is invalid");
   }
-  if (typeof descriptorPath !== "string" || !descriptorPath || typeof appName !== "string" || !appName) {
+  if (typeof descriptorPath !== "string" || !descriptorPath || typeof appName !== "string" || !appName
+    || typeof useSavedChats !== "boolean") {
     throw new Error("Browser helper verification config is invalid");
   }
   if (!["verify", "inspect", "smoke", "limits"].includes(operation)) {
@@ -112,7 +113,7 @@ async function runBrowserHelperOperation({ helper, descriptorPath, appName, expe
           type: operation,
           id,
           config: {
-            appName, browserHostDescriptorPath: descriptorPath,
+            appName, browserHostDescriptorPath: descriptorPath, useSavedChats,
             ...(expectedConnectorTunnelId !== undefined ? { expectedConnectorTunnelId } : {}),
           },
         }).catch(error => finish(error instanceof Error ? error : new Error(String(error))));
