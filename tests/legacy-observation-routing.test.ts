@@ -12,7 +12,9 @@ const ns='mcp__computer_use_swift';
 const names=['desktop_observe','game_observe','desktop_execute_and_observe','game_execute_and_observe'] as const;
 
 async function fixture(run:(ctx:{call:(name:string,result:BrokerToolResult)=>Promise<{response:Awaited<ReturnType<Client['callTool']>>;dispatched:number}>})=>Promise<void>){
-  const path=defaultBrokerEndpoint(join(tmpdir(),`cgw-legacy-${randomUUID()}`));
+  // macOS Unix domain sockets have a short fixed sun_path; use a compact temp root.
+  const socketRoot=process.platform==="win32"?tmpdir():"/tmp";
+  const path=defaultBrokerEndpoint(join(socketRoot,`cgw-lg-${randomUUID()}`));
   const broker=TurnBroker.forSocket(path);
   const token=await broker.register({cwd:process.cwd(),roots:[process.cwd()],writableRoots:[],
     sandboxPolicy:{type:'readOnly',networkAccess:false},
