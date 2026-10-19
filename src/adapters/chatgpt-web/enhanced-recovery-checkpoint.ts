@@ -14,8 +14,11 @@ export const ENHANCED_RECOVERY_CHECKPOINT_MAX_SUMMARY_TOKENS = 8_000;
 // A transport-recovery cadence only; Codex native auto-compact stays at 258K.
 // Reserve margin for an asynchronous subagent follow-up that may cancel the
 // active accepted browser turn before that subagent emits a final answer.
-export const ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS = 16_000;
-export const ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS = 48_000;
+// Start durable recovery earlier than the browser's measured ~71K budget.
+// This affects optional, tool-result-backed Web recovery checkpoints only;
+// Codex's native 272K context and 258K auto-compact thresholds do not change.
+export const ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS = 8_000;
+export const ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS = 32_000;
 
 export type EnhancedCheckpointAdmissionReason =
   | "ready" | "missing_thread" | "no_complete_tool_boundary" | "below_transport_checkpoint_cadence";
