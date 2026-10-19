@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import type { Locator } from "playwright-core";
-import { ChatGptBrowserWorker, ChatGptCompletionTracker, ChatGptVisibleTraceTracker, CHATGPT_COMPLETION_SETTLE_MS } from "../src/adapters/chatgpt-web/browser-worker";
+import { ChatGptBrowserWorker, ChatGptBrowserObservationTimeoutError, ChatGptCompletionTracker, ChatGptVisibleTraceTracker, CHATGPT_COMPLETION_SETTLE_MS } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer, ChatGptMarkdownConsistencyError, type ChatGptMarkdownSegment } from "../src/adapters/chatgpt-web/markdown";
 
 const smokeHtml = readFileSync(new URL("./fixtures/chatgpt-dil-smoke.html", import.meta.url), "utf8");
@@ -722,4 +722,26 @@ test("repeated text cannot rebind a known node to another committed source range
   expect(buffer.observe(before!.markdownSegments, 0)).toBe("Repeated.\n\nRepeated.");
   expect(buffer.observe(shifted!.markdownSegments, 1)).toBe("");
   expect(() => buffer.finish()).toThrow(ChatGptMarkdownConsistencyError);
+});
+
+test("slow response observation does not masquerade as a disappeared assistant turn", async () => {
+  const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+  const timeout = new Error("page.evaluate: Timeout 5000ms exceeded");
+  timeout.name = "TimeoutError";
+  const locator = {
+    evaluate: async () => { throw timeout; },
+    page: () => ({ isClosed: () => false }),
+  };
+  await expect(worker.responseDomSnapshot(locator))
+    .rejects.toBeInstanceOf(ChatGptBrowserObservationTimeoutError);
+});
+
+test("detached response locator remains absent for strict ownership rebind", async () => {
+  const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+  const locator = {
+    evaluate: async () => { throw new Error("Element is not attached to the DOM"); },
+    page: () => ({ isClosed: () => false }),
+  };
+  const observation = await worker.responseDomSnapshot(locator);
+  expect(observation.responsePresent).toBeFalse();
 });
