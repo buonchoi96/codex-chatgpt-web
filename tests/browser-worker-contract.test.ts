@@ -1681,7 +1681,7 @@ test("retained Temporary Chat uses only its exact selected connector pill when t
   const checkpoints: string[] = [];
   const composer = {};
   const page = {
-    url: () => "https://chatgpt.com/c/retained-thread?temporary-chat=true",
+    url: () => "https://chatgpt.com/?temporary-chat=true",
     getByRole: () => { throw new Error("existing thread must not depend on a fresh-chat personalization control"); },
     getByText: () => ({ exactConnectorLabel: true }),
     locator: () => ({ filter: () => ({}) }),
@@ -1698,13 +1698,13 @@ test("retained Temporary Chat uses only its exact selected connector pill when t
     },
     attachedPromptText: async () => "",
   };
-  await expect(selectConnector.call(owner, page, async c => { checkpoints.push(c); }))
+  await expect(selectConnector.call(owner, page, async c => { checkpoints.push(c); }, false, { triggerAttempts: 0 }, undefined, true))
     .resolves.toBe(composer);
   expect(checkpoints).toEqual(["retained-connector-exact-pill"]);
 
   await expect(selectConnector.call({
     ...owner, attachedPromptText: async () => "unsent user draft",
-  }, page)).rejects.toMatchObject({
+  }, page, undefined, false, { triggerAttempts: 0 }, undefined, true)).rejects.toMatchObject({
     code: "prompt_attachment_integrity",
     retryable: false,
   });
