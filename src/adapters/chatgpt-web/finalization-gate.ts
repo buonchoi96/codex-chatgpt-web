@@ -27,3 +27,29 @@ export async function awaitFinalBrokerRetirement(
     if (timer) clearTimeout(timer);
   }
 }
+
+import type { AdapterEvent } from "../../types";
+
+/**
+ * The browser's completed answer and the native Responses event journal are
+ * separate durability boundaries. A drained ChatGptTextFeed is not proof that
+ * its final suffix entered the event journal. Do not send response.completed
+ * until the full, ordered final answer has been journaled.
+ *
+ * Divergence is a terminal integrity error: a mismatching prefix cannot be
+ * repaired by duplicating or rewriting earlier stream content.
+ */
+export function pendingJournaledFinalAnswerSuffix(
+  events: readonly AdapterEvent[],
+  completedAnswer: string,
+): string {
+  const recorded = events.flatMap(event => event.type === "text_delta"
+    && event.phase === "final_answer" ? [event.text] : []).join("");
+  if (!completedAnswer.startsWith(recorded)) {
+    throw new ChatGptWebAdapterError(
+      "ChatGPT final-answer event journal diverged from the completed browser answer",
+      { status: 502, errorType: "server_error", code: "browser_stream_inconsistent", retryable: false },
+    );
+  }
+  return completedAnswer.slice(recorded.length);
+}
