@@ -25,6 +25,39 @@ jobs:
             echo "::notice::Main moved since green CI; do not release stale sources"
             exit 0
           fi
+          # Retire only this verified, obsolete pre-merge snapshot. Its Day 10
+          # successor is already an ancestor of main; never delete an updated branch.
+          backup_ref="backup/local-pre-v6.1.11-20261019-192006"
+          backup_sha="$(gh api "repos/$GH_REPO/git/ref/heads/$backup_ref" --jq '.object.sha' 2>/dev/null | grep -E '^[0-9a-f]{40}
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "::notice::Official release already exists; leaving published release untouched"
+            exit 0
+          fi
+          # Preserve every previous release, tag and asset; alter only GitHub Release's pre-release flag.
+          mapfile -t previous_tags < <(gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName')
+          for previous in "${previous_tags[@]}"; do
+            [[ "$previous" == "$tag" ]] && continue
+            echo "Mark previous release as prerelease: $previous"
+            gh release edit "$previous" --repo "$GH_REPO" --prerelease --latest=false
+          done
+          # A missing ref may print JSON 404 on stdout; only a 40-character Git SHA is valid.
+          existing_tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)"
+          if [[ -n "$existing_tag_sha" ]]; then
+            if [[ "$existing_tag_sha" != "$VERIFIED_SHA" ]]; then
+              echo "::error::Tag $tag points to unexpected revision $existing_tag_sha"
+              exit 1
+            fi
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$tag" -f "sha=$VERIFIED_SHA" >/dev/null
+          fi
+          # GITHUB_TOKEN-created git tags do not trigger push workflows.
+          # Explicit workflow_dispatch on the exact immutable tag builds the real release.
+          gh workflow run release.yml --repo "$GH_REPO" --ref "$tag"
+ || true)"
+          if [[ "$backup_sha" == "cfe8e049936d5b541008bd14794df69e737a9839" ]]; then
+            gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$backup_ref" >/dev/null
+            echo "Deleted verified obsolete merge backup branch: $backup_ref"
+          fi
           tag="v6.1.11"
           if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
             echo "::notice::Official release already exists; leaving published release untouched"
