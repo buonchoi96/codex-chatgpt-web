@@ -2526,6 +2526,7 @@ test("image attachment readiness uses exact file tiles and not localized remove-
     },
     locator: (selector: string) => {
       if (selector.startsWith(".composer-attachment-surface")) return {};
+      if (selector === 'input[data-testid="upload-photos-input"], input[type="file"][multiple]:not([accept])') return input;
       expect(selector).toBe(CHATGPT_SEND_BUTTON_SELECTOR);
       return send;
     },
@@ -2557,7 +2558,6 @@ test("image attachment readiness uses exact file tiles and not localized remove-
         : method === "Network.streamResourceContent" ? { bufferedData: Buffer.from(JSON.stringify({ event: "file.processing.completed" }) + "\n").toString("base64") } : {},
     }) }),
     locator: (selector: string) => {
-      if (selector === 'input[data-testid="upload-photos-input"], form[data-chatgpt-composer] input[type="file"][multiple]:not([accept])') return input;
       if (selector === '[role="alert"]') {
         return { allInnerTexts: async () => [] };
       }
@@ -3433,6 +3433,7 @@ function toolConfirmationPage(options: {
     : '[role="dialog"]';
   const hiddenDialog = {
     filter: () => hiddenDialog,
+    last: () => hiddenDialog,
     count: async () => 0,
     isVisible: async () => false,
   };
