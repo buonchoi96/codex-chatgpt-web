@@ -28,6 +28,16 @@ const {
 } = require("./browser-state.cjs");
 
 const TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
+// Issue #864: this changes only a fresh, owned Temporary Chat WebContents,
+// never the Electron session, global Chromium user agent or Codex API headers.
+function androidTemporaryChatUserAgent(desktopUserAgent) {
+  const chrome = /\bChrome\/(\d+\.\d+\.\d+\.\d+)\b/.exec(desktopUserAgent);
+  if (!chrome) throw new Error("Cannot derive Android Temporary Chat User-Agent from this Chromium build");
+  return `Mozilla/5.0 (Linux; Android 13; SM-A235F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome[1]} Mobile Safari/537.36`;
+}
+function shouldUseAndroidTemporaryChatUserAgent(temporaryChat, optIn, platform = process.platform) {
+  return temporaryChat === true && optIn === true && platform === "win32";
+}
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const IDLE_BROWSER_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
 const PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS = 10_000;
@@ -332,6 +342,7 @@ class BrowserHost {
     clipboardApi = clipboard,
     getBrowserInteractionMode = () => "automatic",
     getUseSavedChats = () => true,
+    getTemporaryChatAndroidUserAgent = () => false,
   }) {
     if (typeof getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
@@ -362,6 +373,8 @@ class BrowserHost {
     this.clipboard = clipboardApi;
     this.getBrowserInteractionMode = getBrowserInteractionMode;
     this.getUseSavedChats = getUseSavedChats;
+    this.getTemporaryChatAndroidUserAgent = getTemporaryChatAndroidUserAgent;
+    this.homeDesktopUserAgent = null;
     this.runBrowserHelperOperation = runBrowserHelperOperation;
     this.verifyConnectorWithBrowserHelper = verifyConnectorWithBrowserHelper;
     this.surfaceId = randomBytes(24).toString("base64url");
@@ -621,6 +634,14 @@ class BrowserHost {
     this.presentTurnView(tab, false);
     view.webContents.setZoomFactor(this.state.zoomFactor);
     this.bindShellZoomShortcuts(view.webContents);
+    if (shouldUseAndroidTemporaryChatUserAgent(
+      !this.getUseSavedChats(), this.getTemporaryChatAndroidUserAgent(),
+    )) {
+      // Each turn already owns a fresh WebContentsView. Override before its
+      // first ChatGPT navigation; destroying the view restores desktop defaults.
+      view.webContents.setUserAgent(androidTemporaryChatUserAgent(view.webContents.getUserAgent()));
+      this.logger.info("browser.temporary_chat_user_agent", { uaClass: "android-mobile", scope: "new-turn-view" });
+    }
     this.bindTurnContents(tab);
     await this.initializeTurnTab(tab, signal);
     return tab;
@@ -1333,6 +1354,18 @@ class BrowserHost {
   }
 
   async refreshChatGptHomeDocument(useSavedChats = false) {
+    const contents = this.view.webContents;
+    const enableAndroid = shouldUseAndroidTemporaryChatUserAgent(
+      !useSavedChats, this.getTemporaryChatAndroidUserAgent?.() === true,
+    );
+    if (enableAndroid) {
+      if (!this.homeDesktopUserAgent) this.homeDesktopUserAgent = contents.getUserAgent();
+      contents.setUserAgent(androidTemporaryChatUserAgent(this.homeDesktopUserAgent));
+      this.logger.info("browser.temporary_chat_user_agent", { uaClass: "android-mobile", scope: "home-verification" });
+    } else if (this.homeDesktopUserAgent) {
+      contents.setUserAgent(this.homeDesktopUserAgent);
+      this.homeDesktopUserAgent = null;
+    }
     // A navigation from the idle host already creates a fresh ChatGPT document. Reload only an
     // existing new-chat document in the selected mode so the helper sees one fresh catalog.
     const targetUrl = useSavedChats ? `${CHATGPT_ORIGIN}/` : TEMPORARY_CHAT_URL;
@@ -3349,6 +3382,8 @@ module.exports = {
   allowedAuthUrl,
   BrowserHost,
   BrowserTurnCancelledError,
+  androidTemporaryChatUserAgent,
+  shouldUseAndroidTemporaryChatUserAgent,
   CHATGPT_VIEWPORT_CSS,
   IDLE_BROWSER_URL,
   isChatGptCloudflareChallengeResponse,

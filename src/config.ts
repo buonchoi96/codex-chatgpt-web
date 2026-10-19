@@ -123,6 +123,8 @@ export interface AppConfig {
   experimentalSkillAttachments: boolean;
   experimentalFreshConversationPerTurn: boolean;
   useSavedChats: boolean;
+  /** Opt-in Android UA for Windows Temporary Chat only (upstream #864). */
+  temporaryChatAndroidUserAgent: boolean;
   /** Explicitly install the additional Pro-sized model row while Zero Risk is active. */
   zeroRiskProEnabled: boolean;
   /** Optional adapter-silence budget for the Responses watchdog. */
@@ -258,6 +260,7 @@ export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
     experimentalSkillAttachments: false,
     experimentalFreshConversationPerTurn: false,
     useSavedChats: true,
+    temporaryChatAndroidUserAgent: false,
     zeroRiskProEnabled: false,
     autoApproveToolCalls: false,
     controlToken: randomBytes(32).toString("base64url"),
@@ -566,6 +569,11 @@ function parseConfig(value: unknown, path: string): AppConfig {
     throw new Error(`Invalid useSavedChats in ${path}`);
   }
   const useSavedChats = parsed.useSavedChats !== false;
+  if (parsed.temporaryChatAndroidUserAgent !== undefined
+    && typeof parsed.temporaryChatAndroidUserAgent !== "boolean") {
+    throw new Error(`Invalid temporaryChatAndroidUserAgent in ${path}`);
+  }
+  const temporaryChatAndroidUserAgent = parsed.temporaryChatAndroidUserAgent === true;
   if (browserInteractionMode === "manual" && experimentalSkillAttachments) {
     throw new Error(`Zero Risk does not support Skills as files in ${path}`);
   }
@@ -594,6 +602,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
     experimentalSkillAttachments,
     experimentalFreshConversationPerTurn,
     useSavedChats,
+    temporaryChatAndroidUserAgent,
     zeroRiskProEnabled,
     ...(nativeScreenObserver ? { nativeScreenObserver } : {}),
   } as AppConfig;
@@ -654,6 +663,7 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
       experimentalSkillAttachments: manual ? false : config.experimentalSkillAttachments,
       experimentalFreshConversationPerTurn: !manual && config.experimentalFreshConversationPerTurn === true,
       useSavedChats: config.useSavedChats === true,
+      temporaryChatAndroidUserAgent: config.temporaryChatAndroidUserAgent === true,
       ...(config.stallTimeoutSec !== undefined ? { stallTimeoutSec: config.stallTimeoutSec } : {}),
       autoApproveToolCalls: manual ? false : config.autoApproveToolCalls,
     },

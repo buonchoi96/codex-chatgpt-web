@@ -1533,6 +1533,7 @@ export interface ResolvedBrowserConfig {
   headed: boolean;
   autoApproveToolCalls: boolean;
   useSavedChats: boolean;
+  temporaryChatAndroidUserAgent: boolean;
 }
 
 export function chatGptTurnIsComplete(state: {
@@ -2306,12 +2307,25 @@ class ChatGptBrowserDiagnostics {
   }
 }
 
+/** Isolated managed Chrome context UA, not a network/API header override.
+ * Launcher-owned Electron views select their UA before navigation independently. */
+export function androidTemporaryChatUserAgentForVersion(chromeVersion: string): string {
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(chromeVersion)) {
+    throw new Error("Android Temporary Chat workaround requires a verifiable Chromium version");
+  }
+  return `Mozilla/5.0 (Linux; Android 13; SM-A235F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Mobile Safari/537.36`;
+}
+
 export function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBrowserConfig {
   const configured = provider.chatgptWeb ?? {};
   const appName = configured.appName?.trim() || CHATGPT_CONNECTOR_NAME;
   const expectedConnectorTunnelId = configured.expectedConnectorTunnelId;
   if (expectedConnectorTunnelId !== undefined && !/^tunnel_[a-f0-9]{32}$/.test(expectedConnectorTunnelId)) {
     throw new Error("ChatGPT connector tunnel identity is invalid");
+  }
+  if (configured.temporaryChatAndroidUserAgent !== undefined
+    && typeof configured.temporaryChatAndroidUserAgent !== "boolean") {
+    throw new Error("ChatGPT Temporary Chat Android User-Agent flag must be a boolean");
   }
   const browserHost = configured.browserHost ?? "managed-chrome";
   const browserHostDescriptorPath = configured.browserHostDescriptorPath?.trim();
@@ -2352,6 +2366,7 @@ export function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBro
     headed: configured.headed !== false,
     autoApproveToolCalls: configured.autoApproveToolCalls === true,
     useSavedChats: configured.useSavedChats === true,
+    temporaryChatAndroidUserAgent: configured.temporaryChatAndroidUserAgent === true,
   };
 }
 
@@ -2734,7 +2749,13 @@ export class ChatGptBrowserWorker {
       executablePath: this.config.chromeExecutablePath,
       headless: !this.config.headed,
     });
-    this.context = await this.browser.newContext({ storageState: this.config.storageStatePath });
+    const userAgent = this.config.temporaryChatAndroidUserAgent && !this.config.useSavedChats && process.platform === "win32"
+      ? androidTemporaryChatUserAgentForVersion(this.browser.version()) : undefined;
+    this.context = await this.browser.newContext({
+      storageState: this.config.storageStatePath,
+      ...(userAgent ? { userAgent } : {}),
+    });
+    if (userAgent) console.info("[chatgpt-web] temporary_chat_user_agent " + JSON.stringify({ uaClass: "android-mobile", scope: "managed-context" }));
     this.page = await this.context.newPage();
     return this.page;
   }
@@ -2752,7 +2773,13 @@ export class ChatGptBrowserWorker {
         executablePath: this.config.chromeExecutablePath,
         headless: !this.config.headed,
       });
-      const context = await browser.newContext({ storageState: this.config.storageStatePath });
+      const userAgent = this.config.temporaryChatAndroidUserAgent && !this.config.useSavedChats && process.platform === "win32"
+        ? androidTemporaryChatUserAgentForVersion(browser.version()) : undefined;
+      const context = await browser.newContext({
+        storageState: this.config.storageStatePath,
+        ...(userAgent ? { userAgent } : {}),
+      });
+      if (userAgent) console.info("[chatgpt-web] temporary_chat_user_agent " + JSON.stringify({ uaClass: "android-mobile", scope: "managed-context" }));
       this.browser = browser;
       this.context = context;
       return { browser, context };
