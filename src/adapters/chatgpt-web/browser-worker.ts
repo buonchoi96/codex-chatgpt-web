@@ -1533,7 +1533,7 @@ export interface ResolvedBrowserConfig {
   headed: boolean;
   autoApproveToolCalls: boolean;
   useSavedChats: boolean;
-  temporaryChatAndroidUserAgent: boolean;
+  temporaryChatAndroidUserAgent?: boolean;
 }
 
 export function chatGptTurnIsComplete(state: {
