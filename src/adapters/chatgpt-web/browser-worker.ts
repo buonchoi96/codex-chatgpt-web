@@ -4011,6 +4011,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     attemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 },
     abortSignal?: AbortSignal,
+    retainedConversation = false,
   ): Promise<Locator> {
     throwIfPromptAttachmentAborted(abortSignal);
     const expectedConnectorId = await withBrowserTurnAbort(assertChatGptConnectorRoute(
@@ -4032,8 +4033,9 @@ export class ChatGptBrowserWorker {
     // connector pill in the ACTIVE empty composer is stronger, conversation-local
     // evidence than the absent picker. The configured connector route was already
     // checked above; never infer access from text or a retained boolean alone.
-    if (temporaryChat && connectorPageUrl.pathname.startsWith("/c/")
-      && connectorPageUrl.pathname.length > 3) {
+    if (temporaryChat && (retainedConversation
+      || (connectorPageUrl.pathname.startsWith("/c/")
+        && connectorPageUrl.pathname.length > 3))) {
       composer = await this.activeComposer(page, 30_000, abortSignal);
       if (await this.connectorIsSelected(composer, abortSignal, expectedConnectorId)) {
         const existingDraft = await this.attachedPromptText(page, abortSignal);
@@ -4255,6 +4257,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     requireThink = false,
+    retainedConversation = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
     await throwIfChatGptRateLimitDialog(page);
@@ -4284,6 +4287,7 @@ export class ChatGptBrowserWorker {
         catalogRefreshAvailable,
         connectorAttemptBudget,
         abortSignal,
+        retainedConversation,
       );
       // selectConnector owns and rolls back every mutation until it returns. From this point the
       // attachment owns the selected pill and prompt text as one transaction.
@@ -4601,6 +4605,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     requireThink = false,
+    retainedConversation = false,
   ): Promise<void> {
     let retryAvailable = compaction;
     for (;;) {
@@ -4614,6 +4619,7 @@ export class ChatGptBrowserWorker {
           catalogRefreshAvailable,
           connectorAttemptBudget,
           requireThink,
+          retainedConversation,
         );
         return;
       } catch (error) {
@@ -6165,6 +6171,7 @@ export class ChatGptBrowserWorker {
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
                 mode.thinkEnabled,
+                reuseConversation,
               );
             },
             chatGptSuspensionClock,
