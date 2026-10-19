@@ -54,14 +54,18 @@ test("Android Temporary Chat split model 6 and High labels require an exact chec
   // The user-provided Android screenshot has High selected on a 0..3 slider;
   // the advanced model picker renders the separate, abbreviated name "6".
   expect(chatGptModelFamilyMatches(["6", "High"], "6", "high", true)).toBe(true);
+  expect(chatGptModelFamilyMatches(["GPT-6", "High"], "6", "high", true)).toBe(true);
+  expect(chatGptModelFamilyMatches(["High, 3 of 4.", "GPT-6"], "6", "high", true)).toBe(true);
   expect(chatGptModelFamilyMatches(["High, 3 of 4.", "6"], "6", "high", true)).toBe(true);
   expect(chatGptModelFamilyMatches(["High"], "6", "high", true)).toBe(true);
   // The same visible High label without selected-model radio proof is unsafe.
   expect(chatGptModelFamilyMatches(["6", "High"], "6", "high")).toBe(false);
+  expect(chatGptModelFamilyMatches(["GPT-6", "High"], "6", "high")).toBe(false);
   expect(chatGptModelFamilyMatches(["High"], "6", "high")).toBe(false);
   for (const mismatch of [
     ["5.6", "High"], ["6.1", "High"], ["7", "High"],
     ["6", "Medium"], ["6", "Extra High"], ["6", "Pro"],
+    ["GPT-6.1", "High"], ["GPT-5.6 Sol", "High"], ["GPT-6 Pro", "High"],
     ["6 Medium, 2 of 4.", "High"],
   ]) expect(chatGptModelFamilyMatches(mismatch, "6", "high", true)).toBe(false);
   expect(chatGptModelFamilyMatches([], "6", "high", true)).toBe(false);
@@ -85,10 +89,17 @@ test("Android compact GPT-6 radio plus owned High slider passes confirmation wit
   }) as unknown as Parameters<typeof assertChatGptModelFamily>[0];
 
   await expect(assertChatGptModelFamily(makeMenu("6"), "6", "high", 2)).resolves.toBeUndefined();
+  // Live issue #864 screenshot: a checked GPT-6 radio and a separately
+  // selected High slider in the Android-UA Temporary Chat frontend.
+  await expect(assertChatGptModelFamily(makeMenu("GPT-6"), "6", "high", 2)).resolves.toBeUndefined();
   await expect(assertChatGptModelFamily(makeMenu("Latest"), "6", "high", 2))
     .rejects.toThrow("could not be selected and verified");
   await expect(assertChatGptModelFamily(makeMenu("6", "Medium"), "6", "high", 2))
     .rejects.toThrow("could not be selected and verified");
   await expect(assertChatGptModelFamily(makeMenu("5.6"), "6", "high", 2))
     .rejects.toThrow("could not be selected and verified");
+  for (const wrong of ["GPT-5.6 Sol", "GPT-6.1", "GPT-7", "GPT-6 Pro"]) {
+    await expect(assertChatGptModelFamily(makeMenu(wrong), "6", "high", 2))
+      .rejects.toThrow("could not be selected and verified");
+  }
 });
