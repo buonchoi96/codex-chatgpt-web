@@ -3870,63 +3870,6 @@ export class ChatGptBrowserWorker {
     return matches;
   }
 
-  private async expandedUserMessageContent(group: Locator, signal?: AbortSignal): Promise<Locator | undefined> {
-    const bubble = group.locator("[data-user-message-bubble]");
-    if (await bubble.count() !== 1) return undefined;
-    // Inline links have their own search targets. Only the outer message target
-    // identifies the complete user content.
-    const content = bubble.locator("[data-search-result-target]:not([data-search-result-target] [data-search-result-target])");
-    if (await content.count() !== 1) return undefined;
-    // Captured on 2026-10-15: long messages are truncated in the DOM, not just
-    // clipped by CSS. Expand the message using its semantic control in any locale.
-    const expand = bubble.locator('button[type="button"][aria-expanded][data-thread-find-skip="true"][data-markdown-copy="exclude"]');
-    const count = await expand.count();
-    if (count > 1) return undefined;
-    if (count !== 1 || await expand.getAttribute("aria-expanded") !== "false") return read(content);
-    // Expanding a large historical message can move the viewport far enough to
-    // unmount the active answer. Read it temporarily, then restore the same view.
-    const view = await group.evaluateHandle(element => {
-      const scroll: { node: Element; top: number; left: number; bottom: boolean }[] = [];
-      for (let node: Element | null = element.parentElement; node; node = node.parentElement) {
-        if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
-          scroll.push({ node, top: node.scrollTop, left: node.scrollLeft,
-            bottom: node.scrollHeight - node.clientHeight - node.scrollTop <= 1 });
-        }
-      }
-      return { scroll, focus: document.activeElement };
-    });
-    try {
-      await expand.evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
-      await expand.press("Enter", { signal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
-      await expand.locator('xpath=self::*[@aria-expanded="true"]').waitFor({
-        state: "attached", signal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-      });
-      return await read(content);
-    } finally {
-      // Cleanup owns a separate bounded window even when the read was cancelled.
-      try {
-        if (await expand.count() !== 1) throw new Error("ChatGPT removed the message expansion control during verification");
-        if (await expand.getAttribute("aria-expanded") === "true") {
-          await expand.evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
-          await expand.press("Enter", { timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
-          await expand.locator('xpath=self::*[@aria-expanded="false"]').waitFor({
-            state: "attached", timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-          });
-        }
-      } finally {
-        try {
-          await withChatGptBrowserObservationTimeout(view.evaluate(async saved => {
-            if (saved.focus instanceof HTMLElement && saved.focus.isConnected) saved.focus.focus({ preventScroll: true });
-            for (const { node, top, left, bottom } of saved.scroll) {
-              if (node.isConnected) node.scrollTo({ left, top: bottom ? node.scrollHeight - node.clientHeight : top, behavior: "instant" });
-            }
-            await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-          }));
-        } finally { await view.dispose(); }
-      }
-    }
-  }
-
   private async userMessageMatchesSubmission(group: Locator, submitted: string, signal?: AbortSignal, turnToken?: string): Promise<boolean> {
     return (await this.withExpandedUserMessage(group, async content => {
       if (turnToken !== undefined) {
@@ -5471,7 +5414,18 @@ export class ChatGptBrowserWorker {
       stoppedThinkingLabels: [...CHATGPT_STOPPED_THINKING_LABELS],
       knownKey: cache?.key,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
-    }, { timeout: 2_000 }).catch(() => undefined);
+    }, { timeout: CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS }).catch(error => {
+      // A busy 500K-character conversation can stall Playwright's DOM projection.
+      // A timeout is NOT evidence that the response was unmounted. Propagate it to
+      // the existing same-surface reconnect path without replaying the accepted Send.
+      if (error instanceof Error && (error.name === "TimeoutError"
+        || error instanceof ChatGptBrowserObservationTimeoutError)) {
+        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS);
+      }
+      // A detached locator during React remount remains a missing response:
+      // the caller will reconcile the exact assistant/user turn binding.
+      return undefined;
+    });
     if (observed?.extractionError) throw new Error(observed.extractionError);
     if (!observed) {
       if (responseTurn.page().isClosed()) {
@@ -6384,6 +6338,9 @@ export class ChatGptBrowserWorker {
         nativeToolCallsInFlight: false, approvalPending: false };
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
+      // A response may be temporarily unmounted during a long-lived ChatGPT page remount.
+      // Permit one same-surface reconnect per disappearance episode, never a new Send.
+      let missingDomReconnectAttempted = false;
       let internalObservationFaults = 0;
       let observedThisIteration = false;
       let completionFenceRevision: number | undefined;
@@ -6738,7 +6695,34 @@ export class ChatGptBrowserWorker {
           continue;
         }
 
-        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+        let snapshot: ChatGptResponseDomSnapshot;
+        try {
+          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+        } catch (error) {
+          if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
+          consecutiveObservationRebinds += 1;
+          if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS) {
+            throw new Error(
+              `ChatGPT response observation remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-surface rebinds`,
+              { cause: error },
+            );
+          }
+          await rebindLauncherPage(consecutiveObservationRebinds, error, turn.abortSignal);
+          submissionBaseline = {
+            ...submissionBaseline,
+            userTurns: page.locator(CHATGPT_USER_TURN_SELECTOR),
+            responseTurns: page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR),
+            domCache: {},
+          };
+          responseTurn = {
+            ...responseTurn,
+            locator: page.locator(chatGptAssistantTurnSelector(responseTurn.identity)),
+          };
+          responseDomCache.key = undefined;
+          responseDomCache.snapshot = undefined;
+          await diagnostics.capture(page, "response-observation-timeout-rebound");
+          continue;
+        }
         if (!snapshot.responsePresent) {
           try {
             const rebound = await withChatGptBrowserObservationTimeout(
@@ -6785,7 +6769,10 @@ export class ChatGptBrowserWorker {
         const interruptedNetworkVisible = await chatGptInterruptedNetworkVisible(page);
         const watchedErrorVisible = Boolean(redError || deliveryTimeoutVisible || interruptedNetworkVisible);
         if (!watchedErrorVisible && snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
-        if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
+        if (snapshot.responsePresent) {
+          consecutiveObservationRebinds = 0;
+          missingDomReconnectAttempted = false;
+        }
         // The page was read successfully, so the fault budget is genuinely consecutive even when
         // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
         internalObservationFaults = 0;
@@ -6974,6 +6961,34 @@ export class ChatGptBrowserWorker {
             externalProgressLive,
             responseStreamActive,
           });
+          if (domError === "ChatGPT response DOM disappeared while the browser turn was active"
+            && !missingDomReconnectAttempted && launcherSurfaceId) {
+            // The old accepted Send is immutable. Reattach only the observer to its
+            // existing launcher surface and recheck the same turn identity after grace.
+            missingDomReconnectAttempted = true;
+            console.warn(`[chatgpt-web] response_dom_remount_probe ${JSON.stringify({
+              traceId: turn.traceId, reason: "owned_assistant_unmounted",
+              acceptedSend: finalSubmissionEvidence !== undefined, newSend: false,
+            })}`);
+            await rebindLauncherPage(1,
+              new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS),
+              turn.abortSignal);
+            submissionBaseline = {
+              ...submissionBaseline,
+              userTurns: page.locator(CHATGPT_USER_TURN_SELECTOR),
+              responseTurns: page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR),
+              domCache: {},
+            };
+            responseTurn = {
+              ...responseTurn,
+              locator: page.locator(chatGptAssistantTurnSelector(responseTurn.identity)),
+            };
+            responseDomCache.key = undefined;
+            responseDomCache.snapshot = undefined;
+            domHealthTracker.suspendForProgress();
+            await diagnostics.capture(page, "response-dom-remount-probe");
+            continue;
+          }
           if (domError) throw chatGptResponseIncompleteError(domError);
         }
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
