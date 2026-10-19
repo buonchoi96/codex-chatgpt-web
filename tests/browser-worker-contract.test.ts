@@ -1677,6 +1677,39 @@ test("repeated connector verification reuses its selected pill before clearing t
   expect(checkpoints).toEqual(["personalization-already-enabled", "connector-already-selected"]);
 });
 
+test("retained Temporary Chat uses only its exact selected connector pill when the fresh menu disappears", async () => {
+  const checkpoints: string[] = [];
+  const composer = {};
+  const page = {
+    url: () => "https://chatgpt.com/c/retained-thread?temporary-chat=true",
+    getByRole: () => { throw new Error("existing thread must not depend on a fresh-chat personalization control"); },
+    getByText: () => ({ exactConnectorLabel: true }),
+    locator: () => ({ filter: () => ({}) }),
+  };
+  const selectConnector = (ChatGptBrowserWorker.prototype as unknown as {
+    selectConnector(page: unknown, capture?: (checkpoint: string) => Promise<void>): Promise<unknown>;
+  }).selectConnector;
+  const owner = {
+    config: { appName: "Codex Native2 DEV" },
+    activeComposer: async () => composer,
+    connectorIsSelected: async (selected: unknown) => {
+      expect(selected).toBe(composer);
+      return true; // Simulates a verified matching connector ID, not merely a text label.
+    },
+    attachedPromptText: async () => "",
+  };
+  await expect(selectConnector.call(owner, page, async c => { checkpoints.push(c); }))
+    .resolves.toBe(composer);
+  expect(checkpoints).toEqual(["retained-connector-exact-pill"]);
+
+  await expect(selectConnector.call({
+    ...owner, attachedPromptText: async () => "unsent user draft",
+  }, page)).rejects.toMatchObject({
+    code: "prompt_attachment_integrity",
+    retryable: false,
+  });
+});
+
 test("connector selection retriggers the complete mention after a fresh-page hydration miss", async () => {
   const calls: string[] = [];
   let menuAttempt = 0;
