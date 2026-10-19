@@ -87,7 +87,8 @@ test("reports a genuinely rejected edit as a failure", () => {
   expect(insertPlainTextIntoComposer(composer, "staged part")).toBeFalse();
 });
 
-test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a selected connector never appends a new request to an old draft", async () => {
+for (const modern of [false, true]) for (const stale of [false, true]) {
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)(`a selected connector never appends a new request to an old draft (modern=${modern}, stale=${stale})`, async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
   try {
     const page = await browser.newPage();
@@ -95,11 +96,10 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a selected connector never a
       config: { appName: "Codex Native2" },
     });
     const prompt = "Task context\n".repeat(5_000) + "\nrequest_id: current";
-    for (const modern of [false, true]) {
       const pill = modern
         ? '<span app-mention-path="app://fixture" app-mention-display-name="Codex Native2" contenteditable="false">Codex Native2</span>'
         : '<span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span>';
-      for (const staleDraft of ["", prompt.replace("current", "earlier")]) {
+        const staleDraft = stale ? prompt.replace("current", "earlier") : "";
         await page.setContent(`<form><div id="prompt-textarea" contenteditable="true" style="min-height:40px"></div></form>
           <div id="mention-menu" hidden><div class="__menu-item" tabindex="0" data-highlighted><span>Codex Native2</span></div></div>`);
         await page.locator("#prompt-textarea").evaluate((element, { pill, staleDraft }) => {
@@ -114,10 +114,30 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a selected connector never a
             menu.hidden = true;
           });
         }, { pill, staleDraft });
-        await worker.attachPrompt(page, prompt, true);
+        console.info(`[composer-fixture] modern=${modern} stale=${Boolean(staleDraft)} phase=attach-start`);
+        await worker.attachPrompt(page, prompt, true, async (checkpoint: string) => {
+          console.info(`[composer-fixture] modern=${modern} stale=${Boolean(staleDraft)} phase=${checkpoint}`);
+        });
+        console.info(`[composer-fixture] modern=${modern} stale=${Boolean(staleDraft)} phase=attach-complete`);
         expect(await worker.attachedPromptText(page)).toBe(prompt);
+        console.info(`[composer-fixture] modern=${modern} stale=${stale} phase=readback-complete`);
         expect(await worker.connectorIsSelected(page.locator("#prompt-textarea"))).toBeTrue();
-      }
-    }
+        console.info(`[composer-fixture] modern=${modern} stale=${stale} phase=selected-proof-complete`);
   } finally { await browser.close(); }
 }, 45_000);
+}
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("bulk plain-text editing preserves literal markup and Unicode without creating active nodes", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<div id="prompt-textarea" contenteditable="true"><span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span></div>');
+    const prompt = 'Task context\n'.repeat(5_000) + '\n<script>window.injected=true</script> & <img src=x onerror="window.injected=true"> ```code``` 日本語\n\nfinal line';
+    expect(await page.locator('#prompt-textarea').evaluate(insertPlainTextIntoComposer, ` ${prompt}`)).toBeTrue();
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    expect(await worker.attachedPromptText(page)).toBe(prompt);
+    expect(await page.locator('#prompt-textarea script, #prompt-textarea img').count()).toBe(0);
+    expect(await page.evaluate(() => (window as any).injected)).toBeUndefined();
+    expect(await page.locator('[data-id="plugin:fixture"]').count()).toBe(1);
+  } finally { await browser.close(); }
+}, 30_000);

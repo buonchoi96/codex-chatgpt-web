@@ -3,7 +3,7 @@ import { defaultConfig } from "../src/config";
 import {
   CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE,
   availableChatGptWebModelRoutes,
-  resolveChatGptWebContextLimits,
+  resolveChatGptWebCatalogContextLimits as resolveChatGptWebContextLimits,
 } from "../src/chatgpt-web-models";
 import { modelsRequest } from "../src/server";
 
@@ -161,10 +161,10 @@ test("Zero Risk returns one generic Web row without using scanned capabilities",
     upgrade: null,
     default_reasoning_level: "low",
     input_modalities: ["text"],
-    context_window: 123_000,
-    max_context_window: 123_000,
-    effective_context_window_percent: 78,
-    auto_compact_token_limit: 96_000,
+    context_window: 302_223,
+    max_context_window: 302_223,
+    effective_context_window_percent: 90,
+    auto_compact_token_limit: 258_400,
     additional_speed_tiers: [],
     service_tiers: [],
     default_service_tier: null,

@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C second regression: native session ownership across batches",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "source_files": [
+    "src/adapters/chatgpt-web/parallel-native-commands.ts",
+    "tests/parallel-native-capacity.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/parallel-native-commands.ts": "AA60CBD6FFF294F44C316C2D7671AD52F052ADF2D2FF107782C33FD71522C1F3",
+    "tests/parallel-native-capacity.test.ts": "CBE0A12DD57EB11852AA22E35BC1AED06D2B61EA713B4E23FBE3EEE1141A3A93"
+  },
+  "failure_mode": "A live native session identifier returned to a second batch was accepted because the capacity manager checked only session presence, not ownership by that batch's lease.",
+  "fix": "When an observed live session already exists, refuse a receipt that belongs to a different outstanding NativeCommandLease, retain the unresolved child capacity, and preserve idempotent observations of the original lease.",
+  "test_evidence": {
+    "red": "70 PASS / 1 FAIL / 94 assertions; duplicate live session from another batch was incorrectly accepted",
+    "green": "91 PASS / 0 FAIL / 329 assertions across tests/parallel-native-capacity.test.ts and tests/parallel-native-commands.test.ts",
+    "typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1681 PASS / 93 SKIP / 2 Windows symlinkSync EPERM FAIL"
+  },
+  "limitations": {
+    "native_parallel_exec_advertised": false,
+    "real_native_parallel_e2e": "NOT_RUN",
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "safety_review_tool_advertised": false
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

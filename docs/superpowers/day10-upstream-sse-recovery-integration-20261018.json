@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-E compatibility of restored recovery code with updated native SSE terminal transport",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "covered_tests": [
+    "tests/bridge-platform.test.ts",
+    "tests/http-sse-terminal.test.ts",
+    "tests/same-tab-recovery.test.ts",
+    "tests/recovery-watchdog.test.ts"
+  ],
+  "test_evidence": {
+    "focused_result": "35 PASS / 0 FAIL / 158 assertions",
+    "exit_code": 0,
+    "native_host_final_answer_e2e": "NOT_RUN",
+    "live_browser_recovery_e2e": "NOT_RUN",
+    "full_suite_this_phase": "NOT_RUN"
+  },
+  "limitations": {
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "actual_web_backend_terminal_receipt": "NOT_RUN",
+    "acceptance_upgrade": false
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

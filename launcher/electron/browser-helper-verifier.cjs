@@ -47,7 +47,7 @@ async function stopChild(child) {
   }
 }
 
-async function runBrowserHelperOperation({ helper, descriptorPath, appName, useSavedChats = false, operation, payload = {}, logger }) {
+async function runBrowserHelperOperation({ helper, descriptorPath, appName, expectedConnectorTunnelId, useSavedChats = false, operation, payload = {}, logger }) {
   if (!helper || typeof helper.executable !== "string" || typeof helper.script !== "string") {
     throw new Error("Browser helper verification command is invalid");
   }
@@ -112,7 +112,10 @@ async function runBrowserHelperOperation({ helper, descriptorPath, appName, useS
           ...payload,
           type: operation,
           id,
-          config: { appName, browserHostDescriptorPath: descriptorPath, useSavedChats },
+          config: {
+            appName, browserHostDescriptorPath: descriptorPath, useSavedChats,
+            ...(expectedConnectorTunnelId !== undefined ? { expectedConnectorTunnelId } : {}),
+          },
         }).catch(error => finish(error instanceof Error ? error : new Error(String(error))));
         return;
       }

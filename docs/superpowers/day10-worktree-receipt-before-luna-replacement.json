@@ -1,0 +1,181 @@
+{
+  "recorded_at": "2026-10-15T20:24:49.047Z",
+  "repository": "F:\\Source Projects\\codex-chatgpt-web",
+  "branch": "main",
+  "head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+  "tracked_diff_sha256": "04ce1c63c4af46241182a0fdc2c43874b1b5ccceeec2a967fe5befb8b0ead9e3",
+  "files": [
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-ledger.ts",
+      "sha256": "83cee628af26f5c3c29268084c156929da4934bdb1f9bc4f24e52ffe6cc5427f"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-review.ts",
+      "sha256": "962be5cb97db4779a5be3ced676219600b1cb575f1f523f14a4517e1f3ab7f79"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/browser-worker.ts",
+      "sha256": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/codex-rollout-environment.ts",
+      "sha256": "95668c0073e47f755657575a886391edef31e65b9356a061459cd95d4eee5b13"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/compaction-continuation.ts",
+      "sha256": "b980a0c86330a11deebecf974d89e47c1f68f135982e36cd01dad1dd61f46e88"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/environment.ts",
+      "sha256": "8f6d3a705ff3e77233c5c0be41b37f9f3a5190305897ddb91f23420d4a2b5cc0"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/index.ts",
+      "sha256": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/mcp-server.ts",
+      "sha256": "e599c840044af5bb2662cafff6a1963a5023acf3e5e2369f8bfd847d633f4760"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/native-compaction-provenance.ts",
+      "sha256": "4e052c82c12dbc46d7f163152c7d4b262c8d7ee1fb0bec16b3696d9b188c88e2"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/prompt.ts",
+      "sha256": "a3cf78428d53f04c89af6fc3e7a2d51d8fd7b80a38b178749513fe7c266aeb26"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/submitted-input-projection.ts",
+      "sha256": "9340c1f93f8617a601238a4b0d5a0785dc42c5afd8ec247b9216b5397fa13828"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/thread-environment.ts",
+      "sha256": "67a1c3ec18610abb89b289cf2ba8f5f83bf12534a5b37e6bb61d42bfaee3490a"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/turn-execution.ts",
+      "sha256": "7f122b54380f6d792ec8f5127f98182cf01ad183244c069f2773730466868c99"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/usage.ts",
+      "sha256": "ca593bb0719fa9ba0c714ca3409c347ea3e78b2b4f43b563199ae4dea62093f3"
+    },
+    {
+      "path": "src/responses/parser.ts",
+      "sha256": "c251689d05e81181d646e5c23f11d510fd335175d0c0fd8b98b87d64069196b4"
+    },
+    {
+      "path": "src/server.ts",
+      "sha256": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257"
+    },
+    {
+      "path": "tests/blocked-operation-ledger.test.ts",
+      "sha256": "ddf9d3a2142241930b017c88f1ebc4ac338fdb74bee17c0055d1e2fe603313ab"
+    },
+    {
+      "path": "tests/blocked-operation-review.test.ts",
+      "sha256": "cd02ec1c5929aee44df1ee80fb10cc527d07b6748901e9fc5f8a1df600dc4df9"
+    },
+    {
+      "path": "tests/browser-turn-binding.test.ts",
+      "sha256": "d12c92a95e8a15daf4445fa580a3b483d994197338481958fdda095c1f67182f"
+    },
+    {
+      "path": "tests/browser-worker-contract.test.ts",
+      "sha256": "c87f7a96c8cb4ca956e88ff6b6ca945dad514103c864db9fd29c31b5b25c5917"
+    },
+    {
+      "path": "tests/composer-insert.test.ts",
+      "sha256": "e937e0fcb2558c4357b825557fedbb3f6401d9b02a78214560146fa4fb1819a0"
+    },
+    {
+      "path": "tests/environment.test.ts",
+      "sha256": "eaa059d86bb3b4843ea699a63b27597d64f30d1f4ee6862bf245344e0154efd4"
+    },
+    {
+      "path": "tests/native-compaction-provenance.test.ts",
+      "sha256": "560a4611cb88c33e54f9bb790926136ea142f838cf7be7d031eff763868130d6"
+    },
+    {
+      "path": "tests/prompt-contract.test.ts",
+      "sha256": "ada8b2c1bb18376c603080cd84b20815a5c0186c839bd33dc45c05139b9261be"
+    },
+    {
+      "path": "tests/provenance-errors.test.ts",
+      "sha256": "90e3e356ede2b669d13f2ccc9c8676cc7ec4db7d52f8be75c8573243722c41ee"
+    },
+    {
+      "path": "tests/responses-lite-tools.test.ts",
+      "sha256": "c916422499fd1766144a2b63027f19aaf1e6ff01d0266bcb0ea6ef6a8eda17ab"
+    },
+    {
+      "path": "tests/retained-compaction.test.ts",
+      "sha256": "6cbd3acfe20a050272ba4ecd3389cbf7016e1b727ffdd2e0cabe0e71ba7ad991"
+    },
+    {
+      "path": "tests/safety-review-adapter.test.ts",
+      "sha256": "e30a906b483df2d8df79219612a84cc1eec4dc1d82b15bf16d341ac38b21dabd"
+    },
+    {
+      "path": "tests/safety-review-mcp.test.ts",
+      "sha256": "1467f4be460b38288ffd1a43ebc3688894866c236ad788bd7b5b05959f7bc557"
+    },
+    {
+      "path": "tests/safety-review-prompt.test.ts",
+      "sha256": "b950698fd4f246aa62995d99debec7a84e9aa43f0dec589758bfadab20ec7ac6"
+    },
+    {
+      "path": "tests/safety-tool-retirement.test.ts",
+      "sha256": "d9174c09adc1c31af80d63e84f6bffe26981a112f7c1bee073dd26bf032b2cd2"
+    },
+    {
+      "path": "tests/server-compaction.test.ts",
+      "sha256": "2d9556f15bcbcb64f551a0f56e47c98e9b826caad07b72ccff7abaabefead418"
+    },
+    {
+      "path": "tests/server-lifecycle.test.ts",
+      "sha256": "41675c4899d42e94b74dc37dc900b57ac4eff3b2f0800959f9234bdaa7b3b08f"
+    },
+    {
+      "path": "tests/server-predictions.test.ts",
+      "sha256": "d33595adccd18f19fbe5fd68b37fddc004362d620b149f1a149e05e5e5d91928"
+    },
+    {
+      "path": "tests/submitted-input-projection.test.ts",
+      "sha256": "cff724bcc9d678b7040b1c7839602afd2a9da35104464f6a4479e15e963bb8ae"
+    },
+    {
+      "path": "tests/turn-broker-lifecycle.test.ts",
+      "sha256": "0fecffad1cb7c62777d022c341b6bd179c31eee2fcf6421bf45ee6b9eb361ac5"
+    },
+    {
+      "path": "tests/zero-risk-mcp-lifecycle.test.ts",
+      "sha256": "d2aa53c298a0b0da15b7048b0f5ac6b18e57b4fd93d3765b7685dc4fb23fb057"
+    }
+  ],
+  "source_test_file_count": 37,
+  "verification": {
+    "regression": {
+      "log": "output/day10-native-glob-regression-20261016.log",
+      "pass": 264,
+      "skip": 25,
+      "fail": 0,
+      "assertions": 1698,
+      "files": 7
+    },
+    "dom": {
+      "log": "output/day10-native-glob-dom-final-20261016.log",
+      "pass": 29,
+      "fail": 0,
+      "assertions": 208,
+      "files": 2
+    },
+    "typecheck": {
+      "log": "output/day10-native-glob-typecheck-20261016.log",
+      "exit": 0
+    }
+  },
+  "live_receipt": "docs/superpowers/day10-native-web-installation-receipt.json",
+  "production_changed": false
+}

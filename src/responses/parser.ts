@@ -27,7 +27,7 @@ type InputBlock =
   | { type: "input_image"; image_url?: string; file_id?: string; detail?: string }
   | { type: "input_file"; file_id?: string; filename?: string };
 
-function inputContentParts(blocks: unknown[] | string | undefined): string | CodexContentPart[] {
+export function inputContentParts(blocks: unknown[] | string | undefined): string | CodexContentPart[] {
   if (typeof blocks === "string") return blocks;
   if (!blocks) return [];
   const parts: CodexContentPart[] = [];

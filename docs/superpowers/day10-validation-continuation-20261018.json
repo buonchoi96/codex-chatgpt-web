@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-18",
+  "phase": "Day-10 full regression and isolated native reader verification",
+  "goal_status": "ACTIVE",
+  "main_model_effort": "UNVERIFIED_BY_CONNECTOR",
+  "subagents_spawned_this_phase": 0,
+  "baseline": {
+    "web_branch": "main",
+    "web_head_at_initial_inspection": "bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift_branch": "main",
+    "swift_head_at_initial_inspection": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "dirty_worktrees_preserved": true
+  },
+  "full_suite": {
+    "prior_run": {
+      "session_id": 3165,
+      "exit_code": 1,
+      "pass": 1635,
+      "skip": 93,
+      "fail": 2,
+      "log": "output/day10-full-suite-recheck-20261018.log",
+      "failure": "Fresh-process provenance fixture tried to parse logging and final JSON as one stdout document; run captured an earlier test source version."
+    },
+    "current_run": {
+      "session_id": 26684,
+      "command": "bun run test",
+      "exit_code": 0,
+      "pass": 1639,
+      "skip": 93,
+      "fail": 0,
+      "assertions": 11481,
+      "files": 141,
+      "log": "output/day10-full-suite-current-20261018.log",
+      "runtime_seconds": 219.38
+    },
+    "focused_test": {
+      "command": "bun test tests/native-compaction-provenance.test.ts",
+      "pass": 105,
+      "fail": 0,
+      "assertions": 148,
+      "source_currently_parses_last_stdout_json_line": true
+    },
+    "root_typecheck": "PASS",
+    "launcher_typecheck": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "swift_native_integration": {
+    "typescript_build": "PASS",
+    "production_binary_link": "WINDOWS_FILE_IN_USE_PERMISSION_DENIED",
+    "observed_existing_binary_pid": 40908,
+    "running_process_terminated": false,
+    "isolated_link": "PASS",
+    "isolated_binary": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/artifacts/native-day10-20261018/computer_use_swift_native_day10.exe",
+    "isolated_binary_sha256": "EEF94B753ABA387F58749EC41B0FB1AE7E787A513127EB44732BF25653C3AE78",
+    "test_harness": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/reader-observation.mjs",
+    "harness_sha256": "E00D26A84451CF3868BBD253C3E97923B3BD99137F47D8DEF1A9DE9889F2D6BE",
+    "result_receipt": "F:/Source Projects/ComputerUseSwift-MCP/tests/e2e/artifacts/reader-1792295354889/results.json",
+    "result": "PASS",
+    "scope": "Owned native process + rendered fixture + Swift stdio + in-memory authenticated Web adapter",
+    "native2_observe_calls": 2,
+    "frame_ids_observed": [1, 2],
+    "native_uia_nodes": 1,
+    "native_cv_nodes": 13,
+    "cv_expected_roi_iou": 0.8,
+    "observer_readiness": "PARTIAL",
+    "ocr": "NOT_INTEGRATED_IN_THIS_BINARY",
+    "model_pixels": "NOT_RUN",
+    "image_delivery": "UNAVAILABLE",
+    "cpu_auto_workers": 1,
+    "cpu_capacity": "UNCERTAIN",
+    "input_sequences": 0,
+    "image_encodes": 0,
+    "cleanup": {
+      "native_process": "CLOSED",
+      "fixture_process": "CLOSED",
+      "held_keys": 0,
+      "held_buttons": 0
+    }
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "ce6c36be431f06fc99540f9dd09fdca0108845aaf7cf2f8d118783213e836036",
+    "unresolved_count": 8,
+    "status": "PENDING_SAFETY_REVIEW",
+    "native_review_tool_advertised": false,
+    "original_blocked_desktop_observe_retries": 0,
+    "local_bookkeeping_only": true
+  },
+  "requirement_matrix": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "limitations": [
+    "The integration harness uses an owned fixture and in-memory Web adapter, not a real Web model.",
+    "OCR and semantic READY remain unverified with this non-WinRT binary.",
+    "The native UIA snapshot does not prove pixel correspondence.",
+    "CPU AUTO did not establish verified multiworker capacity.",
+    "The user-facing pixel challenge remains unavailable.",
+    "Neither production configuration nor Git refs were changed."
+  ],
+  "next_safe_step": "Test native OCR and ROI readiness with an independently built supported provider and owned fixture; then pursue model-facing semantic E2E under applicable current authorization and host capability gates."
+}

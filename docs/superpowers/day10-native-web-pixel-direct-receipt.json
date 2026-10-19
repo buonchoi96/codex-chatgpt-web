@@ -1,0 +1,87 @@
+{
+  "at": "2026-10-16T06:33:05.077Z",
+  "classification": "MODEL_REPORTED_IMAGE_RELAY_UNAVAILABLE",
+  "scope": "ONE actual direct native view_image PNG case; no nested or observer image acceptance",
+  "original_receipt": {
+    "path": "output/day10-native-web-pixel-direct-1792131751527.json",
+    "sha256": "c6b85417ce7bfc621b1e1985bd286d0caa0b334253617aa87ba5ab1c43249fa1",
+    "result": "FAIL_OR_UNAVAILABLE",
+    "errors": [
+      "SyntaxError: JSON Parse error: Unexpected identifier \"IMAGE\""
+    ],
+    "source_sha256": "fe69f2180661c0507d97fccceff9b662bd649aa9597356f78f7c99885acce009"
+  },
+  "native_final": {
+    "file": "C:/Users/Long-PC/AppData/Local/Temp/day10-native-web-pixel-4QH5jq/profile/sessions/2026/10/16/rollout-2026-10-16T13-22-35-01a14360-6fbc-7c62-8dc1-95b4cb768d6c.jsonl",
+    "line": 16,
+    "answer_sha256": "2c0e1b20fd2ffdaeeb8fc7ab1d359975a014f54102019bc674f4138c35ba0f63",
+    "raw_text": "IMAGE\\_RELAY\\_UNAVAILABLE",
+    "normalized_marker": "IMAGE_RELAY_UNAVAILABLE",
+    "reason": "Markdown escaped underscores were not recognized by the original harness"
+  },
+  "native": {
+    "binary": "C:\\Users\\Long-PC\\AppData\\Local\\OpenAI\\Codex\\bin\\e78bad9887fa50cf\\codex.exe",
+    "sha256": "9ecb9df2ecafcc00542ef0966c6f1737a81397dc9531b0a4b178238e2bf4a46d",
+    "thread_id": "01a14360-6fbc-7c62-8dc1-95b4cb768d6c",
+    "turn_id": "01a14360-7024-7022-88b2-ace31454db81",
+    "requests": 2,
+    "calls": [
+      {
+        "call_id": "call_R37eB_MmPIpA4RI6Bev8DvYxxbENY0qB",
+        "name": "view_image",
+        "path": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-pixel-challenge-ff926239-dc6c-4f58-98b2-e77b516912ef-QXXFXv\\fixtures\\a608da16ee724343e96e9886495210f1301ca771.png",
+        "detail": "original"
+      }
+    ],
+    "image_parts": 1
+  },
+  "broker_image_results": [
+    {
+      "call_id": "call_R37eB_MmPIpA4RI6Bev8DvYxxbENY0qB",
+      "blocks": [
+        {
+          "mimeType": "image/png",
+          "bytes": 1236,
+          "sha256": "39ebdee9e750fc753d2610ea39962953801ab52bb7115afe5f95e970560ae419"
+        }
+      ]
+    }
+  ],
+  "web_answer": "UNAVAILABLE",
+  "pixel_recognition": "UNPROVEN",
+  "oracle_read": false,
+  "observer_image_mode": "DISABLED",
+  "composer_attachments": 0,
+  "accepted_sends": 1,
+  "cleanup_complete": true,
+  "supervisor": {
+    "path": "output/day10-pixel-supervisor-direct-report.json",
+    "sha256": "f1e64fccb273da0ea2c3cc0a7f7d5e4644a98c15519f3f247679eb560ea4244d",
+    "actor": "01a14341-fe53-7023-9755-4e420399e31a",
+    "model": "gpt-6-luna",
+    "effort": "high"
+  },
+  "loss_boundary": "Broker returned the exact image bytes, but Web pixel recognition was unavailable. Raw MCP tunnel HTTP image delivery was not captured; the specific host loss layer is UNKNOWN.",
+  "policy_refusal": false,
+  "retries": 0,
+  "ui_replay": false,
+  "original_receipt_unchanged": true,
+  "local_classifier_checks": {
+    "cases": 9,
+    "passed": 9,
+    "model_or_UI_calls": 0
+  },
+  "next_safe_step": "Audit actual DEV MCP serving code provenance and transport serialization independently. Do not rerun this completed case as a classifier repair.",
+  "classifier_typecheck": {
+    "log": "output/day10-pixel-negative-classifier-typecheck-20261016.log",
+    "exit_code": 0
+  },
+  "executed_source_snapshot": "output/day10-native-web-pixel-direct-executed-fe69f218.ts",
+  "serving_provenance": {
+    "report": "output/day10-pixel-runtime-supervisor-round6-report.json",
+    "configured_entrypoint": "F:/Source Projects/codex-chatgpt-web/src/cli.ts",
+    "loaded_revision": "UNKNOWN",
+    "source_audit": "output/day10-pixel-runtime-provenance-round7-report.json",
+    "main_disposition": "Public fixture is256x256, so1x1 sentinel filtering cannot explain this case. Prompt composer upload code is not the completed MCP response relay. No concrete local loss site proved."
+  }
+}

@@ -11,6 +11,7 @@ import {
   extractChatGptTurnIdentity,
   extractChatGptThreadSpawnLineage,
   extractChatGptRootThreadMetadata,
+  type ChatGptRootThreadMetadata,
   hasCurrentChatGptEnvironmentContext,
   extractChatGptCalendarEnvironmentDelta,
   hasRawChatGptEnvironmentContext,
@@ -21,7 +22,7 @@ import {
   type ChatGptSandboxPolicy,
   type ChatGptTurnEnvironment,
 } from "./environment";
-import { resolveCurrentCodexRolloutEnvironment } from "./codex-rollout-environment";
+import { resolveCurrentCodexRolloutEnvironment, resolveExactNativeRootTurnEnvironment } from "./codex-rollout-environment";
 import { ChatGptWebAdapterError } from "./adapter-error";
 
 interface StoredThreadEnvironment {
@@ -152,14 +153,74 @@ function conflictingAuthorityFields(claim: ChatGptEnvironmentClaim, right: ChatG
   return fields;
 }
 
+function assertMetadataMatchesAuthority(
+  metadata: Pick<ChatGptRootThreadMetadata, "sandboxType" | "workspaceRoots">,
+  environment: StoredThreadEnvironment,
+): void {
+  if (metadata.sandboxType === "platform"
+    ? environment.sandboxPolicy.type === "dangerFullAccess"
+    : environment.sandboxPolicy.type !== metadata.sandboxType) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex sandbox metadata");
+  }
+  if (metadata.workspaceRoots.length > 0
+    && !metadata.workspaceRoots.some(root => contains(root, environment.cwd))) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex workspace metadata");
+  }
+  if (metadata.workspaceRoots.some(root => !environment.roots.some(knownRoot => (
+    contains(knownRoot, root) || contains(root, knownRoot)
+  )))) {
+    throw new Error("Cached ChatGPT thread environment conflicts with current Codex workspace metadata");
+  }
+}
+
+function currentMetadataConstraints(
+  parsed: CodexParsedRequest,
+  threadId: string,
+): ChatGptRootThreadMetadata | undefined {
+  // Follow-up metadata often omits request_kind even though its sandbox/workspaces still
+  // constrain the current turn. Parse it only to narrow same-thread authority; it grants none.
+  const body = record(parsed._rawBody);
+  const clientMetadata = record(body?.client_metadata);
+  const encoded = clientMetadata?.["x-codex-turn-metadata"];
+  if (typeof encoded !== "string") return undefined;
+  let metadata: Record<string, unknown> | undefined;
+  try { metadata = record(JSON.parse(encoded)); } catch { return undefined; }
+  if (metadata?.thread_id !== threadId) return undefined;
+  if(metadata.workspaces!==undefined&&!record(metadata.workspaces))
+    throw new ChatGptWebAdapterError('Current Codex workspace metadata is malformed; supply an authentic Codex environment before retrying.',
+      {status:400,errorType:'invalid_request_error',code:'TRUSTED_CWD_MISSING_OR_UNVERIFIED',retryable:false});
+  const current = extractChatGptRootThreadMetadata(parsed);
+  if (current) return current;
+  const hasConstraints = metadata.sandbox_mode !== undefined || metadata.sandbox !== undefined
+    || metadata.workspaces !== undefined;
+  if (!hasConstraints) return undefined;
+
+  const constrainedBody = {
+    ...body,
+    client_metadata: {
+      ...clientMetadata,
+      "x-codex-turn-metadata": JSON.stringify({ ...metadata, request_kind: metadata.request_kind ?? "turn" }),
+    },
+  };
+  const constrainedRequest = { ...parsed, _rawBody: constrainedBody };
+  const constraints = extractChatGptRootThreadMetadata(constrainedRequest);
+  if (!constraints) {
+    throw new Error("Current Codex workspace or sandbox metadata cannot be validated against cached ChatGPT thread authority");
+  }
+  return constraints;
+}
+
 /**
  * Codex emits its trusted environment envelope when a task starts or its environment changes,
- * not on every follow-up. This store carries only that trusted authority across turns. Tool
- * declarations are always taken from the current request and are never persisted.
+ * not on every follow-up. Verified authority may carry across turns in this process; persisted
+ * records are diagnostic only. Tool declarations always come from the current request.
  */
 export class ChatGptThreadEnvironmentStore {
   private loaded = false;
   private readonly threads = new Map<string, StoredThreadEnvironment>();
+  // Persisted entries aid diagnosis and recovery inspection, but only a current verified
+  // environment in this process can mark a thread as an authority source.
+  private readonly verifiedThreads = new Map<string, number>();
   private readonly codexHomes: readonly string[];
 
   constructor(
@@ -180,7 +241,6 @@ export class ChatGptThreadEnvironmentStore {
       const environment = claim.environment;
       if (this.codexHomes.length > 1
         || (environment.sandboxPolicy.type !== "dangerFullAccess" && !claim.statesNetworkAccess)) {
-        // A shared bridge must prove the current native owner even for complete envelopes.
         // Modern envelopes state filesystem access only. Resolve the current native policy on
         // the first round too: absence of a network statement is not a disabled-network grant.
         initialClaim = claim;
@@ -198,7 +258,10 @@ export class ChatGptThreadEnvironmentStore {
       // Root tasks also retain unattributed environment fragments after compaction.
       // They are historical only when the exact native record predates this task;
       // neither the fragment nor the cache supplies the current authority.
-      const historicalMessages = hasCurrentContext && !currentCompaction
+      // A recognized current claim may omit only its network statement. Resolve
+      // that field from the current turn_context; do not authenticate the newly
+      // generated envelope as if it were an older historical response_item.
+      const historicalMessages = hasCurrentContext && !currentCompaction && !initialClaim
         ? unattributedChatGptEnvironmentMessages(parsed) : undefined;
       const steeringClaim = hasCurrentContext && !currentCompaction
         ? extractChatGptSteeringEnvironmentClaim(parsed) : undefined;
@@ -212,8 +275,15 @@ export class ChatGptThreadEnvironmentStore {
       const rolloutIdentity = lineage ?? extractChatGptRootThreadMetadata(parsed);
       // Automatic compaction has a current turn_context; standalone compaction has only its
       // source turn_context. Either must be the latest native record, never an arbitrary ancestor.
-      const compactionSourceTurnId = parsed._compactionRequest
-        ? extractChatGptCompactionSourceRevision(parsed).turnId : undefined;
+      const compactionSourceRevision = parsed._compactionRequest
+        ? extractChatGptCompactionSourceRevision(parsed) : undefined;
+      const compactionSourceTurnId = compactionSourceRevision?.turnId;
+      const compactionSource = compactionSourceRevision?.turnId && compactionSourceRevision.itemId
+        ? {
+          id: compactionSourceRevision.itemId,
+          turnId: compactionSourceRevision.turnId,
+          content: compactionSourceRevision.content,
+        } : undefined;
       if (rolloutIdentity && identity.turnId) {
         const rollout = resolveCurrentCodexRolloutEnvironment({
           codexHome: this.codexHomes[0]!,
@@ -222,15 +292,14 @@ export class ChatGptThreadEnvironmentStore {
           lineage: rolloutIdentity,
           turnId: identity.turnId,
           ...(compactionSourceTurnId ? { compactionSourceTurnId } : {}),
+          ...(compactionSource ? { compactionSource } : {}),
           ...(historicalMessages ? { historicalEnvironmentMessages: historicalMessages } : {}),
           tools: parsed.context.tools,
         });
         if (rollout) {
           let rolloutEnvironment = rollout.environment;
-          // After a restart Codex can omit workspace_roots while still explicitly
-          // granting unrestricted access. In that case [cwd] is not a native
-          // restriction. Keep the current envelope's workspace context; permissions
-          // and task identity still come from the exact current native record.
+          // Missing workspace_roots is not a native restriction for an explicitly
+          // unrestricted profile. Preserve the verified envelope's workspace context.
           if (!rollout.workspaceRootsDeclared
             && rolloutEnvironment.sandboxPolicy.type === "dangerFullAccess"
             && currentClaim?.environment.sandboxPolicy.type === "dangerFullAccess"
@@ -272,17 +341,45 @@ export class ChatGptThreadEnvironmentStore {
       if (this.codexHomes.length > 1) {
         throw new Error("No current native Codex task proof in the trusted homes", { cause: error });
       }
+      // An ordinary root /goal resume can omit optional current workspace claims
+      // after restarting the bridge. Recover only when the exact latest native
+      // root turn_context proves identity, model, effort, cwd, and permissions.
+      // Never apply this path to /compact, subagents or untrusted XML updates.
+      if (!rolloutIdentity && !parsed._compactionRequest
+        && identity.threadId && identity.turnId
+        && !hasRawChatGptEnvironmentContext(parsed)) {
+        const nativeRoot=resolveExactNativeRootTurnEnvironment({
+          codexHome:this.codexHomes[0]!,
+          ...(this.sqliteHome?{sqliteHome:this.sqliteHome}:{}),
+          threadId:identity.threadId,turnId:identity.turnId,
+          modelId:parsed.modelId,effort:parsed.options.reasoning,
+          tools:parsed.context.tools,
+        });
+        if(nativeRoot){
+          const constraints=currentMetadataConstraints(parsed,identity.threadId);
+          if(constraints) assertMetadataMatchesAuthority(constraints,authority(nativeRoot,this.now()));
+          this.set(identity.threadId,nativeRoot);
+          return nativeRoot;
+        }
+      }
       // Only a current native rollout can supersede an unrecognized historical envelope. Without
       // that proof, do not turn arbitrary history or an invalid update into cached authority.
       if (hasRawChatGptEnvironmentContext(parsed)) throw error;
       const sameThread = this.get(identity.threadId);
-      if (sameThread) return {
-        cwd: sameThread.cwd,
-        roots: sameThread.roots,
-        writableRoots: sameThread.writableRoots,
-        sandboxPolicy: sameThread.sandboxPolicy,
-        tools: parsed.context.tools ?? [],
-      };
+      if (sameThread) {
+        if (lineage) assertMetadataMatchesAuthority(lineage, sameThread);
+        else if (identity.threadId) {
+          const currentConstraints = currentMetadataConstraints(parsed, identity.threadId);
+          if (currentConstraints) assertMetadataMatchesAuthority(currentConstraints, sameThread);
+        }
+        return {
+          cwd: sameThread.cwd,
+          roots: sameThread.roots,
+          writableRoots: sameThread.writableRoots,
+          sandboxPolicy: sameThread.sandboxPolicy,
+          tools: parsed.context.tools ?? [],
+        };
+      }
 
       if (!lineage) throw error;
       const parent = this.get(lineage.parentThreadId);
@@ -312,28 +409,42 @@ export class ChatGptThreadEnvironmentStore {
 
   private get(threadId: string): StoredThreadEnvironment | undefined {
     this.load();
-    const stored = this.threads.get(threadId);
-    if (!stored) return undefined;
-    if (this.now() - stored.updatedAt > THREAD_ENVIRONMENT_TTL_MS) {
-      this.threads.delete(threadId);
-      this.persist();
+    const verifiedAt = this.verifiedThreads.get(threadId);
+    if (verifiedAt === undefined) return undefined;
+    if (this.now() - verifiedAt > THREAD_ENVIRONMENT_TTL_MS) {
+      this.verifiedThreads.delete(threadId);
       return undefined;
     }
+    const stored = this.threads.get(threadId);
+    if (!stored) return undefined;
+    this.threads.delete(threadId);
+    this.threads.set(threadId, stored);
+    this.verifiedThreads.delete(threadId);
+    // Reading previously verified authority is not a fresh verification event.
+    this.verifiedThreads.set(threadId, verifiedAt);
     return stored;
   }
 
   private set(threadId: string, environment: ChatGptTurnEnvironment): void {
-    // Shared-home recovery uses current native proof, never the single-home cache.
+    // Shared-home recovery never adopts persisted authority or single-home caches.
     if (this.codexHomes.length > 1) return;
     // Only this path has already verified authority from the current request, native
     // rollout, or a successfully loaded parent. A cache read alone may never recover it.
     this.load(true);
     this.threads.delete(threadId);
     this.threads.set(threadId, authority(environment, this.now()));
+    this.verifiedThreads.delete(threadId);
+    this.verifiedThreads.set(threadId, this.now());
     while (this.threads.size > MAX_THREAD_ENVIRONMENTS) {
       const oldest = this.threads.keys().next().value as string | undefined;
       if (!oldest) break;
       this.threads.delete(oldest);
+      this.verifiedThreads.delete(oldest);
+    }
+    while (this.verifiedThreads.size > MAX_THREAD_ENVIRONMENTS) {
+      const oldest = this.verifiedThreads.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.verifiedThreads.delete(oldest);
     }
     this.persist();
   }

@@ -1,8 +1,8 @@
-import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
+import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
-import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
+import { chatGptTurnSessions, bindAcceptedCompactionSource } from "./adapters/chatgpt-web/turn-execution";
 import {
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
@@ -23,6 +23,7 @@ import type { AppConfig } from "./config";
 import { providerConfig } from "./config";
 import { AsyncEventQueue } from "./event-queue";
 import { readJsonRequestBody } from "./http-body";
+import { HttpSseTerminalObserver } from "./http-sse-terminal";
 import { httpStatusFromTerminalError } from "./lib/errors";
 import { createHash } from "node:crypto";
 import { augmentNativeModelCatalog } from "./model-catalog";
@@ -306,6 +307,8 @@ export class HttpTurnCounter {
       // when the client disconnects and cancels the observer branch.
       const [clientBody, lifecycleBody] = response.body.tee();
       const reader = lifecycleBody.getReader();
+      // Only a transport-side drain receipt, never a Codex client ACK.
+      const terminalProbe = endpoint === "responses" ? new HttpSseTerminalObserver() : undefined;
       let chunks = 0;
       let bytes = 0;
       streamAbortListener = () => {
@@ -322,6 +325,7 @@ export class HttpTurnCounter {
             if (chunk.done) break;
             chunks += 1;
             bytes += chunk.value.byteLength;
+            terminalProbe?.observe(chunk.value);
             // Consume eagerly so the lifecycle branch never backpressures the client branch.
           }
         } catch (error) {
@@ -338,6 +342,18 @@ export class HttpTurnCounter {
           }
           // Stream failure is delivered to the client branch; lifecycle cleanup stays best-effort.
         } finally {
+          if (terminalProbe && !abort.signal.aborted) {
+            const receipt = terminalProbe.snapshot();
+            console.info("[codex-chatgpt-web] win_http_sse_terminal_drained " + JSON.stringify({
+              httpTurnId: id, endpoint, chunks, bytes, ...receipt,
+              clientAcknowledged: false,
+            }));
+            if (!receipt.terminal || !receipt.done) {
+              console.warn("[codex-chatgpt-web] win_http_sse_tail_missing " + JSON.stringify({
+                httpTurnId: id, endpoint, terminal: receipt.terminal, done: receipt.done,
+              }));
+            }
+          }
           release();
         }
       })();
@@ -719,11 +735,19 @@ export async function responseRequest(
     // Authenticate both exact producer-defined representations, never arbitrary rewrites.
     // Inspect the literal retained representation: an unchanged summary can match the
     // previous checkpoint, but must not substitute its recovered delegation here.
-    const v1Source = extractChatGptCompactionSourceRevision({
-      ...parsed,
-      _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
-    }, { recoverCheckpoint: false });
-    rememberCompactionContinuation(parsed, identity, [source, v1Source], summary);
+    let v1Source: ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined;
+    try {
+      v1Source = extractChatGptCompactionSourceRevision({
+        ...parsed,
+        _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
+      }, { recoverCheckpoint: false, allowAbortedRetainedComparison: true });
+    } catch (error) {
+      // A v1 compact can retain only an already-aborted older human instruction when
+      // the live task was a synthetic delegation. That retained instruction must not
+      // become an authenticated checkpoint source; the original delegation still is.
+      if (!(error instanceof ChatGptWebAdapterError) || error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING") throw error;
+    }
+    rememberCompactionContinuation(parsed, identity, v1Source ? [source, v1Source] : [source], summary);
   };
   if (compaction && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
     return formatErrorResponse(
@@ -733,6 +757,26 @@ export async function responseRequest(
     );
   }
   if (compaction) {
+    try {
+      // Resolve source provenance before changing the compact input or retiring any live
+      // retained browser/tool owner. Native tool-only and /goal runtime fragments do not qualify.
+      bindAcceptedCompactionSource(parsed);
+      extractChatGptCompactionSourceRevision(parsed);
+    } catch (error) {
+      if (!(error instanceof ChatGptWebAdapterError)) throw error;
+      const identity = extractChatGptTurnIdentity(parsed);
+      const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+      // Emit a bounded category without exposing native message contents or paths.
+      const provenanceReason = /\(reason=(latest_turn_mismatch|model_effort_mismatch|rollout_changed|native_rollout_unavailable)\)/.exec(error.message)?.[1];
+      console.warn(`[chatgpt-web] compaction_preflight ${JSON.stringify({
+        code: error.code,
+        ...(provenanceReason ? {reason:provenanceReason} : {}),
+        native_thread_id: identity.threadId ? "present" : "missing",
+        native_turn_id: identity.turnId ? "present" : "missing",
+        raw_input_items: Array.isArray(input) ? input.length : 0,
+      })}`);
+      return formatErrorResponse(error.status, error.errorType, error.message, error.code);
+    }
     // History compaction is a dedicated summarization turn. It must never bind the active Codex
     // tool bridge or continue an in-flight MCP round; the returned summary becomes the next turn's
     // replacement history through the Responses compaction contract.
@@ -747,6 +791,12 @@ export async function responseRequest(
   try {
     traceId = chatGptWebTraceId(provider, parsed);
   } catch (error) {
+    // Standalone v1 compaction can carry a canonical source item without a live
+    // replay turn. Its dedicated source preflight above remains authoritative;
+    // failure to derive an optional replay trace must not reject that protocol.
+    if(error instanceof ChatGptWebAdapterError&&['CURRENT_TURN_USER_REVISION_MISSING','REPLAY_PROVENANCE_UNVERIFIED'].includes(error.code)
+      && !(compaction&&!extractChatGptTurnIdentity(parsed).turnId))
+      return formatErrorResponse(error.status,error.errorType,error.message,error.code);
     // A cancelled browser session can only exist after the adapter accepted canonical native
     // turn identity and user-revision metadata. Requests without that identity have no matching
     // trace tombstone; preserve the adapter's existing strict validation/error path below.
@@ -778,21 +828,144 @@ export async function responseRequest(
       headers: { "content-type": "application/json" },
     });
   }
-  const adapter = adapterFactory(provider);
   const queue = new AsyncEventQueue<AdapterEvent>();
   const abort = new AbortController();
   if (req.signal.aborted) abort.abort();
   else req.signal.addEventListener("abort", () => abort.abort(), { once: true });
-  const run = async () => {
+
+  const forwardAdapterEvent = (event: AdapterEvent): void => {
+    options.onAdapterEvent?.(event);
+    queue.push(event);
+  };
+
+  const autoCompactAfterPromptTooLong = async (
+    activeParsed: CodexParsedRequest,
+  ): Promise<CodexParsedRequest> => {
+    const source = activeParsed._rawBody;
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new ChatGptWebAdapterError(
+        "ChatGPT reported that the browser prompt is too long, but the canonical request body is unavailable for automatic compaction.",
+        {
+          status: 409,
+          errorType: "invalid_request_error",
+          code: "auto_compaction_source_unavailable",
+          retryable: false,
+        },
+      );
+    }
+    const compactBody = structuredClone(source) as Record<string, unknown>;
+    compactBody.stream = false;
+    delete compactBody.previous_response_id;
+    const headers = new Headers(req.headers);
+    headers.set("content-type", "application/json");
+    const keepAlive = setInterval(
+      () => forwardAdapterEvent({ type: "heartbeat" }),
+      CHATGPT_WEB_ADAPTER_HEARTBEAT_MS,
+    );
+    let compactResponse: Response;
     try {
-      await adapter.runTurn!(parsed, { headers: req.headers, abortSignal: abort.signal }, event => {
-        options.onAdapterEvent?.(event);
-        queue.push(event);
-      });
+      compactResponse = await compactRequest(
+        new Request("http://127.0.0.1/v1/responses/compact", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(compactBody),
+          signal: abort.signal,
+        }),
+        config,
+        adapterFactory,
+        { onTurnIdentity: options.onTurnIdentity },
+      );
+    } finally {
+      clearInterval(keepAlive);
+    }
+    if (!compactResponse.ok) {
+      const detail = (await compactResponse.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 1_000);
+      throw new ChatGptWebAdapterError(
+        `ChatGPT reported that the prompt is too long and automatic compaction failed${detail ? `: ${detail}` : ""}`,
+        {
+          status: compactResponse.status || 502,
+          errorType: "server_error",
+          code: "auto_compaction_failed",
+          retryable: false,
+        },
+      );
+    }
+    const compacted = await compactResponse.json().catch(() => undefined) as { output?: unknown[] } | undefined;
+    if (!compacted || !Array.isArray(compacted.output) || compacted.output.length === 0) {
+      throw new ChatGptWebAdapterError(
+        "Automatic compaction completed without replacement history.",
+        {
+          status: 502,
+          errorType: "server_error",
+          code: "auto_compaction_invalid_response",
+          retryable: false,
+        },
+      );
+    }
+    const retryBody: Record<string, unknown> = {
+      ...compactBody,
+      stream: activeParsed.stream,
+      input: compacted.output,
+    };
+    const retryParsed = parseRequest(retryBody);
+    const retryRoute = routeChatGptWebRequest(retryParsed, config);
+    if (retryRoute.slug !== route.slug) {
+      throw new Error("Automatic prompt-too-long compaction changed the routed Web model");
+    }
+    return retryParsed;
+  };
+
+  const run = async () => {
+    let activeParsed = parsed;
+    let promptTooLongAutoCompactUsed = false;
+    try {
+      for (;;) {
+        let promptTooLong: Extract<AdapterEvent, { type: "error" }> | undefined;
+        const activeAdapter = adapterFactory(provider);
+        await activeAdapter.runTurn!(
+          activeParsed,
+          { headers: req.headers, abortSignal: abort.signal },
+          event => {
+            if (!activeParsed._compactionRequest
+              && event.type === "error"
+              && (event.code === "browser_prompt_too_long"
+                || event.code === "message_length_exceeds_limit")) {
+              promptTooLong = event;
+              return;
+            }
+            forwardAdapterEvent(event);
+          },
+        );
+        if (!promptTooLong) break;
+        if (promptTooLongAutoCompactUsed) {
+          forwardAdapterEvent({
+            type: "error",
+            message: "ChatGPT still reports that the prompt is too long after one automatic compaction retry.",
+            status: 413,
+            errorType: "browser_transport_error",
+            code: "message_length_exceeds_limit",
+            retryable: false,
+          });
+          break;
+        }
+        promptTooLongAutoCompactUsed = true;
+        forwardAdapterEvent({ type: "heartbeat" });
+        activeParsed = await autoCompactAfterPromptTooLong(activeParsed);
+        parsed = activeParsed;
+        forwardAdapterEvent({ type: "heartbeat" });
+      }
     } catch (error) {
-      const event: AdapterEvent = { type: "error", message: error instanceof Error ? error.message : String(error) };
-      options.onAdapterEvent?.(event);
-      queue.push(event);
+      const event: AdapterEvent = error instanceof ChatGptWebAdapterError
+        ? {
+          type: "error",
+          message: error.message,
+          status: error.status,
+          errorType: error.errorType,
+          code: error.code,
+          retryable: error.retryable,
+        }
+        : { type: "error", message: error instanceof Error ? error.message : String(error) };
+      forwardAdapterEvent(event);
     } finally {
       queue.close();
     }
@@ -817,6 +990,9 @@ export async function responseRequest(
           : {}),
         ...(compactionItem ? { compaction: true } : {}),
         onCompletedResponse: rememberCompletedResponse,
+        // Emits only when a terminal SSE event was actually enqueued,
+        // not when the browser finished. Not a client ACK.
+        onTerminal: status => console.info(`[chatgpt-web] responses_sse_terminal trace=${traceId ?? "unknown"} status=${status}`),
       },
     );
     return new Response(stream, {
@@ -1143,7 +1319,7 @@ export function startServer(
         // owner signal is the only cancellation boundary for a fresh fallback not in the session
         // registry.
         const compactionCancellation = cancelAllStructuredCompactions(reason);
-        const cancelledBrowserTurns = chatGptTurnSessions.clear() + (turnBroker?.revokeExternalOwners() ?? 0);
+        const cancelledBrowserTurns = chatGptTurnSessions.cancelAllForLauncher(reason) + (turnBroker?.revokeExternalOwners() ?? 0);
         const [cancelledHttpTurns, cancelledCompactionRuns] = await Promise.all([
           httpTurns.cancelAll(reason),
           compactionCancellation,

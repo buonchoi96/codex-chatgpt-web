@@ -8,10 +8,37 @@ import {
   codexInterruptHookHash,
   installCodexInterruptHook,
   installCodexInterruptHookCommand,
+  removeExactOrphanedCodexInterruptHook,
   restoreCodexInterruptHook,
   verifyCodexInterruptHook,
   verifyCodexInterruptHookRestored,
 } from "../src/codex-interrupt-hook";
+
+test("explicit orphan hook recovery requires an exact launcher-generated command and trust record", () => {
+  const configPath = "/fixture/config.toml";
+  const command = "codex-web-gpt verified hook";
+  for (const original of [
+    "",
+    'model = "gpt-5.6-sol"\n',
+    'model = "gpt-5.6-sol"\n\n',
+  ]) {
+    const generated = installCodexInterruptHookCommand(original, configPath, command);
+    const clean = removeExactOrphanedCodexInterruptHook(generated.text, configPath, command);
+    expect(clean.includes(MANAGED_INTERRUPT_HOOK_END)).toBe(false);
+    expect(installCodexInterruptHookCommand(clean, configPath, command).text).toBe(generated.text);
+    expect(removeExactOrphanedCodexInterruptHook(original, configPath, command)).toBe(original);
+    expect(() => removeExactOrphanedCodexInterruptHook(
+      generated.text, configPath, "a different runtime command",
+    )).toThrow("without an exactly matching");
+    expect(() => removeExactOrphanedCodexInterruptHook(
+      generated.text + "\n" + generated.text, configPath, command,
+    )).toThrow("ambiguous");
+    expect(() => removeExactOrphanedCodexInterruptHook(
+      generated.text.replace(generated.installed.trustedHash, "sha256:" + "0".repeat(64)),
+      configPath, command,
+    )).toThrow("without an exactly matching");
+  }
+});
 
 test("hook errors identify the damaged section without exposing config values", () => {
   const { text, installed } = installCodexInterruptHookCommand(

@@ -1,0 +1,263 @@
+{
+  "version": 2,
+  "updated": "2026-10-16",
+  "records": [
+    {
+      "blocker_id": "historical-20261014-native2-readiness-file-read",
+      "affected_GOAL_requirement": "SAFE-P0-01..08; historical TS2353 Native2 Screen Readiness diagnosis",
+      "status": "PENDING_RECEIPT_RECONCILIATION",
+      "evidence_kind": "User report identifying an assistant-reported refusal in a historical export; raw refusal receipt NOT VERIFIED",
+      "reported_sources": [
+        {
+          "file": "Pasted text(20261014-155918).txt",
+          "heading": "# Codex conversation",
+          "lines": [
+            4219,
+            4223
+          ]
+        },
+        {
+          "file": "Pasted text(20261014-153656).txt",
+          "lines": null
+        }
+      ],
+      "exact_tool_name": null,
+      "redacted_original_arguments_or_digest": null,
+      "intended_operation": "Read superpowers/systematic-debugging/SKILL.md and tests/screen-observation.test.ts to investigate TS2353",
+      "target_scope": "Historical Codex /goal session 2026-10-14; F:/Source Projects/codex-chatgpt-web",
+      "requested_session_model": "GPT-6 Sol (Web) High; no subagents",
+      "verified_runtime_model": null,
+      "original_call_id": null,
+      "original_trace_id": null,
+      "original_thread_id": null,
+      "request_turn_id": null,
+      "timestamp": null,
+      "classification": "SAFETY_STATUS_UNDETERMINED",
+      "dispatch_state": "UNKNOWN",
+      "execution_receipt": null,
+      "last_verified_state": "PENDING_RECEIPT_RECONCILIATION",
+      "required_permission": "User prohibits retry; receipt reconciliation only",
+      "attempts": null,
+      "retries_this_run": 0,
+      "next_allowed_review_condition": "Locate original export/raw receipt; no retry or tool change to bypass safety",
+      "resolution": "UNRESOLVED; not silently completed or removed",
+      "later_execution_coverage": "PARTIAL: later legitimate final-source typecheck/regressions are recorded separately; exact historical read/diagnosis requirement not reconciled. No assertion that the original blocked call ran.",
+      "audit": "35 current-parent rollouts yielded zero confirmed direct receipts. User clarified this was an older separate session; search widened without guessing IDs.",
+      "latest_receipt_search": {
+        "date": "2026-10-16T02:07:02.736Z",
+        "artifact": "output/day10-historical-refusal-search-20261016.json",
+        "scope": "All locally existing Oct14rollouts and attachment exact phrase matches; supplied export filenames absent in Downloads/attachments listing",
+        "tool_output_candidates": 9,
+        "verified_original_refusals": 0,
+        "conclusion": "Successful tool reads/searches quote GOAL/PLAN/source fixtures, not refusal receipts. Original call/thread/trace remain unknown; no retry."
+      },
+      "incidental_search_notes": [
+        {
+          "at": "2026-10-16T07:12:40.687Z",
+          "classification": "INCIDENTAL_MATCH_DURING_DISTINCT_SCOPE_SEARCH",
+          "current_execution_receipt": "exec_command chunk0b4629",
+          "operation": "Broad rg search for screen observer startup wiring over src/tests accidentally emitted matched lines90-91 from historical target tests/screen-observation.test.ts.",
+          "disposition": "Original two-file read and its raw refusal remain unreconciled. This partial incidental search is not a retry authorization, not proof of original dispatch, and not a completed original read. No status/resolution upgrade.",
+          "containment": "Exclude the historical test from all later broad searches; use only new named wiring tests. No systematic-debugging read or full verify attempt."
+        },
+        {
+          "note_id": "day10-screen-tree-child-single-skill-read-20261016",
+          "at": "2026-10-16T12:58:37.341Z",
+          "classification": "CHILD_SCOPE_DEVIATION_DISTINCT_SINGLE_FILE_READ",
+          "actor": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+          "evidence": [
+            {
+              "line": 3705,
+              "tool": "exec",
+              "call_id": "call_4c666c4875e349f9aaafb99bbd19ffed",
+              "receipt_line": 3708,
+              "receipt_sha256": "52c60ee7253914a688270967cca71a4fb968fe135018b880d11759e60f7bb3c5",
+              "output_mentions_exit_0": false,
+              "historical_test_target_in_same_call": false,
+              "receipt_header": "[{\"type\":\"input_text\",\"text\":\"Script completed\\nWall time 0.5 seconds\\n",
+              "executed_success_reported": false
+            }
+          ],
+          "audit": "output/day10-screen-tree-child-skill-read-audit-20261016.json",
+          "operation": "Child requested systematic-debugging/SKILL.md while diagnosing its ad hoc ES2022 vs ES2023 caller typecheck despite main assignment explicitly excluding that skill. Historical target test was not in this call.",
+          "disposition": "Preserve this distinct current call/receipt and the scope deviation. It is not the original two-file read, not an original refusal receipt, not authorization to retry it, and not proof that the historical blocked operation ran. Original pending status/resolution unchanged.",
+          "containment": "No more implementation assigned in this phase; independent reviewer explicitly excludes that skill and historical target. Main does not rerun the read, original pair, full verify or denied native hash operations."
+        }
+      ]
+    },
+    {
+      "blocker_id": "historical-20261014-native2-full-verification",
+      "affected_GOAL_requirement": "SAFE-P0-01..08; historical full regression after Native2 Screen Readiness",
+      "status": "PENDING_RECEIPT_RECONCILIATION",
+      "classification": "SAFETY_STATUS_UNDETERMINED",
+      "evidence_kind": "User report identifying an assistant-reported refusal in a historical export; raw refusal receipt NOT VERIFIED",
+      "reported_sources": [
+        {
+          "file": "Pasted text(20261014-155918).txt",
+          "heading": "# Codex conversation",
+          "lines": [
+            8455,
+            8461
+          ]
+        }
+      ],
+      "exact_tool_name": null,
+      "redacted_original_arguments_or_digest": null,
+      "original_call_id": null,
+      "original_trace_id": null,
+      "original_thread_id": null,
+      "request_turn_id": null,
+      "timestamp": null,
+      "intended_operation": "bun run verify",
+      "target_scope": "F:/Source Projects/codex-chatgpt-web; historical Codex /goal session 2026-10-14",
+      "requested_session_model": "GPT-6 Sol (Web) High; no subagents",
+      "verified_runtime_model": null,
+      "dispatch_state": "UNKNOWN",
+      "execution_receipt": null,
+      "attempts": null,
+      "retries_this_run": 0,
+      "last_verified_state": "PENDING_RECEIPT_RECONCILIATION",
+      "required_permission": "User prohibits retry; receipt reconciliation only",
+      "next_allowed_review_condition": "Locate original export/raw receipt; no retry or tool change to bypass safety",
+      "resolution": "UNRESOLVED; not silently completed or removed",
+      "later_execution_coverage": {
+        "status": "LATER_VERIFIED_EXECUTION_PARTIAL; full regression requirement remains open",
+        "evidence": "output/day10-native-provenance-verify-20261015.log",
+        "timing": "Distinct legitimate execution before the user's historical-receipt clarification and explicit no-retry direction",
+        "receipt": "exec handle 4293 terminal exit 1: 1297 pass, 72 skip, 2 fail, 9643 assertions, 1371 tests/114 files, 216.13s",
+        "remaining": "Two Windows disposable symlink fixtures failed EPERM; later verify stages not reached",
+        "original_blocked_call_executed": "UNVERIFIED"
+      },
+      "latest_receipt_search": {
+        "date": "2026-10-16T02:07:02.736Z",
+        "artifact": "output/day10-historical-refusal-search-20261016.json",
+        "scope": "All locally existing Oct14rollouts and attachment exact phrase matches; supplied export filenames absent in Downloads/attachments listing",
+        "tool_output_candidates": 9,
+        "verified_original_refusals": 0,
+        "conclusion": "Successful tool reads/searches quote GOAL/PLAN/source fixtures, not refusal receipts. Original call/thread/trace remain unknown; no retry."
+      }
+    },
+    {
+      "blocker_id": "20261016-hilbert-app-followup-readonly-permission",
+      "affected_GOAL_requirement": "CPU-P0-01..12; proposed observer-engine short live deadline regression",
+      "status": "PENDING_USER_APPROVAL",
+      "classification": "USER_APPROVAL_REQUIRED",
+      "evidence_kind": "Actual app waitingOnApproval status plus native turn_context read-only/on-request; no raw refusal receipt",
+      "exact_tool_name": null,
+      "intended_operation": "Child read/modify observer_engine_tests.cpp and build/run only pure engine test in own Temp directory",
+      "target_scope": "F:/Source Projects/ComputerUseSwift-MCP/native/tests/observer_engine_tests.cpp and explicitly scoped pure native source/build",
+      "owning_agent_id": "01a1411b-909e-7743-b7fd-d99792070e29",
+      "request_turn_id": "01a1412b-388a-72b0-b6d8-bb2f5a4627e4",
+      "timestamp": "2026-10-16T03:09:44.4764025+07:00",
+      "dispatch_state": "UNKNOWN",
+      "execution_receipt": null,
+      "last_verified_state": "App waitingOnApproval; latest completed calls read only gate; scope gate revoked and owned child cancelled",
+      "required_permission": "Original child permission interface must grant necessary scoped write/build access; main does not approve or edit production config",
+      "attempts": 1,
+      "retries_this_run": 0,
+      "next_allowed_review_condition": "Original permission interface/scoped child access correction with model, identity and scope revalidation; no automatic retry",
+      "resolution": "UNRESOLVED; no claim this requested regression executed",
+      "native_evidence": {
+        "line": 184,
+        "sandbox": "read-only",
+        "approval_policy": "on-request",
+        "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T02-48-08-01a1411b-909e-7743-b7fd-d99792070e29.jsonl",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      },
+      "live_request_state": "Owned child cancelled; app turn interrupted. Underlying work still requires reviewed scope; no pending action is to be auto-approved."
+    },
+    {
+      "blocker_id": "20261016-native-parallel-fixture-policy",
+      "affected_GOAL_requirement": "PAR-P0-01..12 actual native execution/overlap",
+      "status": "PENDING_POLICY_REVIEW",
+      "classification": "NATIVE_POLICY_BLOCKED",
+      "evidence_kind": "Raw native function_call_output for two distinct call IDs, not assistant-reported refusal",
+      "exact_tool_name": "exec_command",
+      "original_call_ids": [
+        "call_9ol-mJGBRmdgUUqBLnhZnoK6nMawysqI",
+        "call_rptSp2t9BW7210DLTaYtq1Rs8shDVWdE"
+      ],
+      "original_thread_id": "01a14245-59b3-7d43-8d62-67670b5668e6",
+      "request_turn_ids": [
+        "01a14245-59d7-7503-8187-3a0d3c7be52d"
+      ],
+      "intended_operation": "Two independent literal Get-FileHash reads of one owned fixture via isolated native app-server and MCP parallel batch",
+      "target_scope": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-parallel-y0tdpa/project",
+      "dispatch_state": "NATIVE_TOOL_DISPATCH_ATTEMPTED; CreateProcess rejected by policy",
+      "execution_receipt": "No successful hash execution or native overlap proof",
+      "attempts": 1,
+      "child_attempts": 2,
+      "retries_this_run": 0,
+      "receipt": "docs/superpowers/day10-native-parallel-policy-receipt.json",
+      "next_allowed_review_condition": "Review original native policy receipt and obtain explicit scoped authorization through its supported interface; no automatic retry, sandbox change, alternate tool or route",
+      "resolution": "UNRESOLVED; case8notattempted, no alternate route"
+    }
+  ],
+  "runtime_ledger_integration": "PARTIAL: persistent refusal journal plus scoped read-only paginated MCP review/current notices implemented, peer-reviewed and tested201PASS; other-scope-only status corrected without dropping aggregate pending counts. Full denial-class capture/native human review/once-only authorized retry and original receipt reconciliation remain open.",
+  "reported_refusal": "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.",
+  "reconciliation_search": "Exact export filenames not found under E:/Codex, repository or Downloads. Inspected27 Oct14 rollouts,23 with matching repository metadata: zero exact standalone direct refusal receipts under inspected schemas; embedded/quoted occurrences not promoted. This does not rule out older/exported/missing sessions; original wire/call/trace/thread IDs remain null. Sanitized evidence: output/day10-historical-safety-reconciliation-20261015.json.",
+  "retry_policy": "User prohibits retry of both historical operations. No automatic retry, no shape change, no alternate controller/path.",
+  "latest_review": {
+    "at": "2026-10-16T02:00:52.802Z",
+    "records": 4,
+    "historical_raw_refusals": "NOT_VERIFIED",
+    "historical_retries": 0,
+    "native_parallel_policy": "RAW_CREATEPROCESS_REFUSAL_VERIFIED; no retry/case8/alternate route",
+    "approval_block": "Owned former child cancelled; old short-live-deadline task not retried",
+    "unresolved": [
+      {
+        "id": "historical-20261014-native2-readiness-file-read",
+        "status": "PENDING_RECEIPT_RECONCILIATION"
+      },
+      {
+        "id": "historical-20261014-native2-full-verification",
+        "status": "PENDING_RECEIPT_RECONCILIATION"
+      },
+      {
+        "id": "20261016-hilbert-app-followup-readonly-permission",
+        "status": "PENDING_USER_APPROVAL"
+      },
+      {
+        "id": "20261016-native-parallel-fixture-policy",
+        "status": "PENDING_POLICY_REVIEW"
+      }
+    ]
+  },
+  "review_history": [
+    {
+      "at": "2026-10-15T19:36:07.856Z",
+      "owner": "main gpt-6.1-sol/high",
+      "record_count": 2,
+      "decision": "Both historical raw refusal receipts remain unreconciled and explicitly no-retry. All new runtime/model/stdio records are separately labeled synthetic tests; no original operation executed or retried.",
+      "later_evidence": "Peer-reviewed scoped review201tests/typecheck and Web current/retained/other-scope notice evidence; not original refusal receipts.",
+      "original_operations_retried": 0
+    },
+    {
+      "at": "2026-10-16T02:00:30.609Z",
+      "records": 4,
+      "historical_raw_refusals": "NOT_VERIFIED",
+      "historical_retries": 0,
+      "native_parallel_policy": "RAW_CREATEPROCESS_REFUSAL_VERIFIED; no retry/case8/alternate route",
+      "approval_block": "Owned former child cancelled; old short-live-deadline task not retried",
+      "unresolved": [
+        {
+          "id": "historical-20261014-native2-readiness-file-read",
+          "status": "PENDING_RECEIPT_RECONCILIATION"
+        },
+        {
+          "id": "historical-20261014-native2-full-verification",
+          "status": "PENDING_RECEIPT_RECONCILIATION"
+        },
+        {
+          "id": "20261016-hilbert-app-followup-readonly-permission",
+          "status": "PENDING_USER_APPROVAL"
+        },
+        {
+          "id": "20261016-native-parallel-fixture-policy",
+          "status": "PENDING_POLICY_REVIEW"
+        }
+      ]
+    }
+  ]
+}

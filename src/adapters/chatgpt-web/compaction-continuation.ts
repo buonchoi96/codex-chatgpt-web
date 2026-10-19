@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { decodeCompactionSummary, isReadableCompactionSummaryText, SUMMARY_PREFIX } from "../../responses/compaction";
 import type { CodexParsedRequest } from "../../types";
 import type { ChatGptTurnIdentity, ChatGptTurnUserRevision } from "./environment";
+import {resolveNativeCompactionSource,type NativeCompactionRecoveryOptions} from './native-compaction-provenance';
 
 interface CompletedCheckpoint {
   summaryHash: string;
@@ -62,19 +63,24 @@ export function isAcceptedCompactionContinuation(
   identity: ChatGptTurnIdentity,
   source: ChatGptTurnUserRevision,
 ): boolean {
-  return acceptedCheckpoint(parsed, identity)?.checkpoint.sourceHashes.has(sourceDigest(source)) === true;
+  if(acceptedCheckpoint(parsed, identity)?.checkpoint.sourceHashes.has(sourceDigest(source))===true)return true;
+  const native=resolveNativeCompactionSource(parsed,identity);
+  return native?.source.itemId===source.itemId&&native!==undefined&&sourceDigest(native.source)===sourceDigest(source);
 }
 
-/** Native compaction may retain only its summary; recover the task solely from our completed handoff. */
+/** Recover a retained task from our completed handoff or a matching native installation witness. */
 export function recoverCompactionInstruction(
   parsed: CodexParsedRequest,
   identity: ChatGptTurnIdentity,
+  options: NativeCompactionRecoveryOptions = {},
 ): { source: ChatGptTurnUserRevision; summaryIndex: number; sourceWasDelegation: boolean } | undefined {
   const accepted = acceptedCheckpoint(parsed, identity);
-  return accepted ? {
+  if (accepted) return {
     source: structuredClone(accepted.checkpoint.source), summaryIndex: accepted.summaryIndex,
     sourceWasDelegation: accepted.checkpoint.sourceWasDelegation,
-  } : undefined;
+  };
+  const native = resolveNativeCompactionSource(parsed, identity, options);
+  return native ? { ...native, sourceWasDelegation: false } : undefined;
 }
 
 function acceptedCheckpoint(

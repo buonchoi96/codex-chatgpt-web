@@ -1,0 +1,71 @@
+{
+  "at": "2026-10-16T16:54:58.106Z",
+  "status": "ONE_NEW_NATIVE_0163_NESTED_CASE_NEGATIVE; PIXEL_PROOF_NOT_ESTABLISHED",
+  "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-native-web-pixel-nested-1792169299537.json",
+  "raw_sha256": "9b50754be3102e5567fbf3586b6d2221847accb4f18c2f88e79f2dcc11bf45a3",
+  "reconciliation": "output/day10-native-nested-reconciliation-20261016.json",
+  "reconciliation_sha256": "3d75ac49c096663051dc9087054fcc94b25d47b64e571a102e93a44b664dec7e",
+  "executed_source": "output/day10-native-web-pixel-nested-executed-d892da5d.ts",
+  "source_sha256": "d892da5da15288f1c7d04d30a7f50206261f8183041be01e2847f6b819ddcec2",
+  "native_rollout": {
+    "file": "C:\\Users\\Long-PC\\AppData\\Local\\Temp\\day10-native-web-nested-gCUUSH\\profile\\sessions\\2026\\10\\16\\rollout-2026-10-16T23-48-22-01a1459d-5b5d-7d42-b146-27bf9c3e556d.jsonl",
+    "sha256": "e71195f298cbc315fa99d608fd026c98f1cc4008cd19efc2b20f7504c307c073",
+    "session_meta_line": 1,
+    "context_line": 6,
+    "model": "chatgpt-web/gpt-6-sol",
+    "effort": "high",
+    "final_message_line": 16,
+    "task_complete_line": 19,
+    "thread_id": "01a1459d-5b5d-7d42-b146-27bf9c3e556d",
+    "turn_id": "01a1459d-5e54-7bb2-961c-86a6ad2b32d8"
+  },
+  "answer_classification": "IMAGE_RELAY_UNAVAILABLE",
+  "answer_sha256": "2c0e1b20fd2ffdaeeb8fc7ab1d359975a014f54102019bc674f4138c35ba0f63",
+  "strict_live_guard": {
+    "result": "FAIL_OR_UNAVAILABLE",
+    "error": [
+      "NativeViewerProofError: NATIVE_ERROR"
+    ],
+    "original_preserved": true,
+    "raw_error_notification_persisted": false
+  },
+  "physical_sends": 1,
+  "nested_view_calls": 1,
+  "composer_attachments": 0,
+  "native_image": {
+    "mime": "image/png",
+    "bytes": 1206,
+    "sha256": "3b518bef6c4ed5df83761df4f703bc082f8120d09a97a0cc53897b91a94c70f5",
+    "callIdHash": "90ced53cb61c588e4f98319b3879adfd1e7b6fa0b1b94c5f022b7fec233f9a2d"
+  },
+  "http_requests": 2,
+  "oracle_opened": false,
+  "observer_image_mode": "DISABLED",
+  "cleanup_complete": true,
+  "native_exit": 0,
+  "same_dev_os_owner": true,
+  "dev_tunnel": "Existing DEV tunnel already ready at authorized check; zero start calls, no setup/restart/registration. Retained after probe.",
+  "local_validation": {
+    "tests": 80,
+    "assertions": 180,
+    "failed": 0,
+    "root_types_exit": 0,
+    "harness_types_exit": 0,
+    "main": "output/day10-nested-pixel-main-review-20261016.json",
+    "peer": "output/day10-nested-pixel-harness-peer-review-20261016.json",
+    "peer_delta": "output/day10-nested-pixel-harness-peer-delta-20261016.json"
+  },
+  "actual_receipt_peer_review": {
+    "status": "INDEPENDENT_RECEIPTS_CONSISTENT_NEGATIVE; NO PIXEL_PROOF_UPGRADE",
+    "report": "output/day10-native-nested-peer-receipt-review-20261016.json",
+    "report_sha256": "f5f282f41b5b8d0b8b68ff49c6d40ff64e2b33d756761580c0f48d9e6f7f4de5",
+    "reviewer_id": "01a145a6-58d8-71a0-8611-5701663b2284",
+    "model_receipt": "docs/superpowers/day10-nested-offline-replacement-model-receipt.json",
+    "initial_primary_receipt_sha256": "2008d83b835e106ed74d9d1a08d85722b94f018b1798e4a1b18fe081698d87ed"
+  },
+  "model_receipt": "docs/superpowers/day10-nested-pixel-final-model-receipt.json",
+  "scope": "One PNG negative, not20-case proof. Original direct case0 unchanged, unused cases not run. Loss layer UNKNOWN after broker. No composer fallback.",
+  "no_git_refs_or_production_changes": true,
+  "goal_status": "ACTIVE",
+  "actual_receipt_peer_review_at_initial_write": "NOT RUN: explicit same-ID followup returned thread not found after close. Main offline reconciliation only; prior peer reviews cover source/tests, not actual probe."
+}

@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-A4 / P0-E stale semantic frame must not retire newer MCP turn authority",
+  "previous_goal_turn": "PROGRESS: source provenance guard, 71 targeted observer checks, typecheck and full-suite status receipt",
+  "workspace": {
+    "web": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "preserved_preexisting_changes": true,
+    "git_refs_changed": false
+  },
+  "implementation": {
+    "files": ["src/adapters/chatgpt-web/mcp-server.ts", "src/adapters/chatgpt-web/screen-observation.ts"],
+    "tests": ["tests/mcp-screen-tree.test.ts", "tests/screen-observation.test.ts"],
+    "defect": "An internally rejected out-of-order read-only observation released the complete broker turn binding. Later valid screen observations in the same turn were rejected before provider dispatch.",
+    "fix": "Only registry-owned NativeScreenPublishedFrameStaleError exempts an obsolete frame from broker release. Provider-supplied code SCREEN_READER_STALE_FRAME and all other dispatched failures still retire authority.",
+    "red_1": "One isolated MCP test failed: a previously issued frame 7 followed by stale frame 6 retired broker, so frame 8 could not be observed. Native chunk 42f0bf.",
+    "red_2": "One isolated MCP test failed: provider-forged SCREEN_READER_STALE_FRAME was dispatched twice instead of retiring turn after first failure. Native chunk 7f283a.",
+    "green": "66 PASS / 0 FAIL / 370 assertions across five observer/MCP suites. Native chunk 70ad25.",
+    "typecheck": "bun run typecheck: exit 0; native chunk 57bd93",
+    "full_suite_before_final_provenance_refinement": "1652 PASS / 93 SKIP / 2 FAIL / 11484 assertions across 141 files; native session 33118 terminal exit 1",
+    "full_suite_failures": "Both tests in tests/codex-integration.test.ts fail at symlinkSync with EPERM while creating local temp fixtures; exact Windows privilege configuration unverified.",
+    "post_refinement_full_suite": "NOT RUN; focused final tests and typecheck passed",
+    "self_review": "Local stale-frame rejection is distinguished by error subclass, not a provider-controlled string. No retry, duplicate observation, or permission escalation. Same-turn valid read succeeds; provider error still retires."
+  },
+  "live_e2e": {"isolated_sdk_mcp": "PASS", "authenticated_web_model_semantic": "NOT_RUN", "real_native_swift_observer": "NOT_RUN", "model_pixel_relay": "UNVERIFIED"},
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "79b95313529f0aab06d2083d62392aebb74ef1184524fde8a5e7004ebb0417cf",
+    "unresolved": 11,
+    "complete": true,
+    "review_tool": "NOT_ADVERTISED",
+    "status": "PENDING_SAFETY_REVIEW",
+    "retry_allowed": false,
+    "refused_operations_retried": 0
+  },
+  "acceptance": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT_RUN": 21, "status_upgrades": 0},
+  "agents": {"subagents_spawned": 0, "required_main": "GPT-6 Sol (Web) High", "actual_main_model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR"},
+  "production_or_global_config_changed": false,
+  "next_safe_step": "Obtain fresh authenticated native screen observer capability plus a permitted foreground session and model-visible semantic observation; continue independent CPU and archive gates while native safety review remains pending."
+}

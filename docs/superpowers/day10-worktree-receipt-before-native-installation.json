@@ -1,0 +1,195 @@
+{
+  "recorded_at": "2026-10-15T19:36:08.036Z",
+  "repository": "F:\\Source Projects\\codex-chatgpt-web",
+  "branch": "main",
+  "head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+  "tracked_diff_sha256": "992e3240cd1c595df606108c8661f2a4138bdc4f7d736c0a52608c149ce0693c",
+  "files": [
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-ledger.ts",
+      "sha256": "83cee628af26f5c3c29268084c156929da4934bdb1f9bc4f24e52ffe6cc5427f"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/blocked-operation-review.ts",
+      "sha256": "962be5cb97db4779a5be3ced676219600b1cb575f1f523f14a4517e1f3ab7f79"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/browser-worker.ts",
+      "sha256": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/codex-rollout-environment.ts",
+      "sha256": "95668c0073e47f755657575a886391edef31e65b9356a061459cd95d4eee5b13"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/compaction-continuation.ts",
+      "sha256": "b980a0c86330a11deebecf974d89e47c1f68f135982e36cd01dad1dd61f46e88"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/environment.ts",
+      "sha256": "8f6d3a705ff3e77233c5c0be41b37f9f3a5190305897ddb91f23420d4a2b5cc0"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/index.ts",
+      "sha256": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/mcp-server.ts",
+      "sha256": "e599c840044af5bb2662cafff6a1963a5023acf3e5e2369f8bfd847d633f4760"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/native-compaction-provenance.ts",
+      "sha256": "2e8268ecdb00201c22e82775b235ba322621d0b08cb67eb5f87b630e12116893"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/prompt.ts",
+      "sha256": "d30483b02913f8331e0c940aa7f4860864626828f9826d9e1b9e29ce0c66bc04"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/submitted-input-projection.ts",
+      "sha256": "9340c1f93f8617a601238a4b0d5a0785dc42c5afd8ec247b9216b5397fa13828"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/thread-environment.ts",
+      "sha256": "67a1c3ec18610abb89b289cf2ba8f5f83bf12534a5b37e6bb61d42bfaee3490a"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/turn-execution.ts",
+      "sha256": "7f122b54380f6d792ec8f5127f98182cf01ad183244c069f2773730466868c99"
+    },
+    {
+      "path": "src/adapters/chatgpt-web/usage.ts",
+      "sha256": "ca593bb0719fa9ba0c714ca3409c347ea3e78b2b4f43b563199ae4dea62093f3"
+    },
+    {
+      "path": "src/responses/parser.ts",
+      "sha256": "c251689d05e81181d646e5c23f11d510fd335175d0c0fd8b98b87d64069196b4"
+    },
+    {
+      "path": "src/server.ts",
+      "sha256": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257"
+    },
+    {
+      "path": "tests/blocked-operation-ledger.test.ts",
+      "sha256": "ddf9d3a2142241930b017c88f1ebc4ac338fdb74bee17c0055d1e2fe603313ab"
+    },
+    {
+      "path": "tests/blocked-operation-review.test.ts",
+      "sha256": "cd02ec1c5929aee44df1ee80fb10cc527d07b6748901e9fc5f8a1df600dc4df9"
+    },
+    {
+      "path": "tests/browser-turn-binding.test.ts",
+      "sha256": "d12c92a95e8a15daf4445fa580a3b483d994197338481958fdda095c1f67182f"
+    },
+    {
+      "path": "tests/browser-worker-contract.test.ts",
+      "sha256": "c87f7a96c8cb4ca956e88ff6b6ca945dad514103c864db9fd29c31b5b25c5917"
+    },
+    {
+      "path": "tests/composer-insert.test.ts",
+      "sha256": "e937e0fcb2558c4357b825557fedbb3f6401d9b02a78214560146fa4fb1819a0"
+    },
+    {
+      "path": "tests/environment.test.ts",
+      "sha256": "eaa059d86bb3b4843ea699a63b27597d64f30d1f4ee6862bf245344e0154efd4"
+    },
+    {
+      "path": "tests/native-compaction-provenance.test.ts",
+      "sha256": "d4ce39c9469154362758ad48310cf18ba9a08ca8f58da7fc7b2d4fbd1d8e0e3e"
+    },
+    {
+      "path": "tests/prompt-contract.test.ts",
+      "sha256": "170fb6936c4e367b56f4990715c4ba859201b890bc036b699eb28d802c33d9d2"
+    },
+    {
+      "path": "tests/provenance-errors.test.ts",
+      "sha256": "90e3e356ede2b669d13f2ccc9c8676cc7ec4db7d52f8be75c8573243722c41ee"
+    },
+    {
+      "path": "tests/responses-lite-tools.test.ts",
+      "sha256": "c916422499fd1766144a2b63027f19aaf1e6ff01d0266bcb0ea6ef6a8eda17ab"
+    },
+    {
+      "path": "tests/retained-compaction.test.ts",
+      "sha256": "6cbd3acfe20a050272ba4ecd3389cbf7016e1b727ffdd2e0cabe0e71ba7ad991"
+    },
+    {
+      "path": "tests/safety-review-adapter.test.ts",
+      "sha256": "e30a906b483df2d8df79219612a84cc1eec4dc1d82b15bf16d341ac38b21dabd"
+    },
+    {
+      "path": "tests/safety-review-mcp.test.ts",
+      "sha256": "1467f4be460b38288ffd1a43ebc3688894866c236ad788bd7b5b05959f7bc557"
+    },
+    {
+      "path": "tests/safety-review-prompt.test.ts",
+      "sha256": "b950698fd4f246aa62995d99debec7a84e9aa43f0dec589758bfadab20ec7ac6"
+    },
+    {
+      "path": "tests/safety-tool-retirement.test.ts",
+      "sha256": "d9174c09adc1c31af80d63e84f6bffe26981a112f7c1bee073dd26bf032b2cd2"
+    },
+    {
+      "path": "tests/server-compaction.test.ts",
+      "sha256": "2d9556f15bcbcb64f551a0f56e47c98e9b826caad07b72ccff7abaabefead418"
+    },
+    {
+      "path": "tests/server-lifecycle.test.ts",
+      "sha256": "41675c4899d42e94b74dc37dc900b57ac4eff3b2f0800959f9234bdaa7b3b08f"
+    },
+    {
+      "path": "tests/server-predictions.test.ts",
+      "sha256": "d33595adccd18f19fbe5fd68b37fddc004362d620b149f1a149e05e5e5d91928"
+    },
+    {
+      "path": "tests/submitted-input-projection.test.ts",
+      "sha256": "cff724bcc9d678b7040b1c7839602afd2a9da35104464f6a4479e15e963bb8ae"
+    },
+    {
+      "path": "tests/turn-broker-lifecycle.test.ts",
+      "sha256": "0fecffad1cb7c62777d022c341b6bd179c31eee2fcf6421bf45ee6b9eb361ac5"
+    },
+    {
+      "path": "tests/zero-risk-mcp-lifecycle.test.ts",
+      "sha256": "d2aa53c298a0b0da15b7048b0f5ac6b18e57b4fd93d3765b7685dc4fb23fb057"
+    }
+  ],
+  "test_logs": [
+    {
+      "path": "output/day10-safety-review-reviewed-regression-20261016.log",
+      "sha256": "f5106a3158e6c50444f03aaac6187c86e0abda0a6d296fc175920e7bb833f515"
+    },
+    {
+      "path": "output/day10-safety-review-reviewed-typecheck-20261016.log",
+      "sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689"
+    },
+    {
+      "path": "output/day10-safety-review-other-scope-red-20261016.log",
+      "sha256": "fdd13433439580d7737c123a8b9ef0a245bc6486abce40f69c80179be06082fc"
+    },
+    {
+      "path": "output/day10-safety-review-other-scope-green-20261016.log",
+      "sha256": "c5b6d64a25e93feb99ac9cf9a9fc23605c8a5a0b611b355388757a0bd15a7e3a"
+    },
+    {
+      "path": "output/day10-maxwell-safety-review-20261016.log",
+      "sha256": "e0ba7e53cae40b1a5b0af1be21b7fa192f47178203144ef533eb8e6f57b542d6"
+    },
+    {
+      "path": "output/day10-safety-review-live-v3-20261016.json",
+      "sha256": "38c3334938d8523cf9994d997079eea958ed2071321fce0068902009a1387527"
+    },
+    {
+      "path": "output/day10-safety-review-live-v3-20261016.log",
+      "sha256": "ac72a751098eaa88eacd1b2e434642507b9dc9252db14457f8d546ca09e7eb07"
+    },
+    {
+      "path": "docs/superpowers/day10-agent-followup-receipt.json",
+      "sha256": "0eb947b7b91fa24c7fc26dc1eb7ccb02e69d4d5123ec4ae0d26161e471c54dae"
+    }
+  ],
+  "uncommitted": true,
+  "production_deployed": false,
+  "current_bundle": "NOT BUILT; prior private bundle evidence remains historical",
+  "previous_receipt": "docs/superpowers/day10-worktree-receipt-before-safety-review.json"
+}

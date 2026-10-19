@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-17",
+  "status": "PASS_PRIVATE_REAL_NATIVE_AND_RECONNECTED_NATIVE2_STDIO; WEB_MODEL_NOT_RUN",
+  "head_web": "e124aa08cfe6b23d8cb736ff415c6958a1f4798e",
+  "head_swift": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "harness": "output/day10-reader-reconnect-20261017.mjs",
+  "harness_sha256": "798b9d95f547373076307ca88dd932e23d17c902784f6421639b9f8e3541b8f3",
+  "log": "output/day10-reader-reconnect-runtime-20261017.log",
+  "log_sha256": "141ad476d0d6e3dffae5c55f2ff859383931702e83c3b03bb26f950ca01883a1",
+  "raw": "output/day10-reader-reconnect-1792215857763/results.json",
+  "raw_sha256": "fd4d6bc674a37799e4e6622c7e9b40083be2b4c58b699822eb85ccf858d81b69",
+  "execution": {
+    "exit_code": 0,
+    "native2_observation_calls": 6,
+    "frame_ids": [2,3,4,5,6],
+    "revoke_new_grant_old_mcp_rejected": true,
+    "old_mcp_process_closed": true,
+    "new_mcp_process_distinct": true,
+    "native2_observer_tool_readvertised": true,
+    "live_native_lease_unavailable_after_mcp_reconnect": true,
+    "fresh_delegation_after_reconnect": true,
+    "previous_mcp_snapshot_ack_invalid": true,
+    "fresh_full_snapshot_after_reconnect": true,
+    "image_delivery_status": "UNAVAILABLE",
+    "model_pixels": "NOT_RUN",
+    "native_input_actions": 0,
+    "image_encodes": 0,
+    "composer_uploads": 0,
+    "cleanup_all_owned_processes": true,
+    "cleanup_held_keys": 0,
+    "cleanup_held_buttons": 0,
+    "subagents_spawned": 0,
+    "production_changed": false
+  },
+  "scope_limits": [
+    "Reconnected only a fixture-owned generated Native2 MCP stdio subprocess, not a production connector or browser.",
+    "The native Swift controller and rendered fixture stayed alive while the MCP process restarted.",
+    "This proves private reconnect/reader-ACK invalidation, not actual authenticated Web model delivery.",
+    "All observed frame trees were mixed OCR/CV/UIA; no genuine UIA-only incremental diff was observed.",
+    "CPU governor conservative one worker and model image delivery unavailable."
+  ],
+  "matrix": {"total":175,"PASS":5,"PARTIAL":137,"BLOCKED":12,"NOT RUN":21,"status_upgrades":0}
+}

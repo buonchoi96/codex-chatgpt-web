@@ -1,0 +1,269 @@
+{
+  "recorded_at": "2026-10-16T00:40:53.176Z",
+  "classification": "ACTUAL_NATIVE_AUTO_COMPACT_CONTROLLED_USAGE",
+  "status": "PASS_FOR_NATIVE_CLAMP_CALIBRATION_AND_BOUNDARY_DECISIONS",
+  "binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/9614f1d9b40d9c4f/codex.exe",
+  "binary_sha256": "e98c516f1c8935789aabe9122ee7e05ec4c3efd1ba6acf179242e031c495b99e",
+  "version": "0.162.0-alpha.17.2",
+  "actual_model_calls": 0,
+  "usage_injected_by_test_provider": true,
+  "effective_web_recall": "NOT TESTED",
+  "actual_large_web_consumption": "NOT TESTED",
+  "rows": [
+    {
+      "variant": "calibrated",
+      "tokens": 244799,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-244799-1792110973766.json",
+      "raw_sha256": "d1f60bdcf90b8993dc5a1345db7059a686a1aa37082136aeb8fba22473bb765a",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-244799.jsonl",
+      "rollout_sha256": "ab4d45b5e8faaf850805eb8d862913e6bdac908fa283f216b2ecc8934e64663f",
+      "native_pid": 17572,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 244800,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-244800-1792110980589.json",
+      "raw_sha256": "c07c63862837a656a5aadd78e61d036e75815817101ee24c6ad111051e6556df",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-244800.jsonl",
+      "rollout_sha256": "8969130aa3f975625b91688a879a959134bb32126ff082890310f0d6f331bf54",
+      "native_pid": 12904,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258399,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-258399-1792110987379.json",
+      "raw_sha256": "ff0218f87bb98c305cc55384f646889961ce5ed6159ea574bd402abff780f704",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-258399.jsonl",
+      "rollout_sha256": "688c788df1d4361f6ea884e11e98a3a031043fc63f05525233543c233c351dd7",
+      "native_pid": 15044,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258400,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-258400-1792110953724.json",
+      "raw_sha256": "d99f54fbd173bda88a41d5ad8b0810bc068211d7f5dcddf0a1c42067e5a05c7b",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-258400.jsonl",
+      "rollout_sha256": "496a727a6300076387e48d78bcf34e0ebc613cb5151ac8b7a7b5a4fdea512dd0",
+      "native_pid": 18836,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258401,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-258401-1792110994432.json",
+      "raw_sha256": "95f1b0aae54f37926c8d9141b17fe690252ecbb4fed8e85bfea9f7dc93c0e496",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-258401.jsonl",
+      "rollout_sha256": "e3324c1319f15b6a3fe656b83d83ae322ed9da4ec1950759e025fd33cfa4ef2f",
+      "native_pid": 17956,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 271999,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-271999-1792111001184.json",
+      "raw_sha256": "a9646a4285aaadf06b67db502248b297626561aea42dfa6c096202c1c7a31e8e",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-271999.jsonl",
+      "rollout_sha256": "bfa2992ea95befc89ef43a9a8a6a11555cc8ec61136bdad3a7fe59ebb24dffd2",
+      "native_pid": 2128,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 272000,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-272000-1792111008079.json",
+      "raw_sha256": "cd4e8be6eaaec49e7a4498c7565a4166d27db23971485d975e30624e40b69b33",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/calibrated-272000.jsonl",
+      "rollout_sha256": "45f9e6fc29cc883fc4aff41e1f23a9018082850fc4a8326949cb61bdd62bb3e6",
+      "native_pid": 22648,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "uncalibrated-control",
+      "tokens": 244799,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 272000,
+        "effective_context_window_percent": 100,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-uncalibrated-control-244799-1792111099618.json",
+      "raw_sha256": "74f25f4d8b74a180cdfea6c8afddd65294e747f84dabc818d8cc08b087b873b5",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/uncalibrated-control-244799.jsonl",
+      "rollout_sha256": "8977827df29ec784360683b43bb8588125a909cfd56784023f6fffbfc1db49dc",
+      "native_pid": 13156,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": []
+    },
+    {
+      "variant": "uncalibrated-control",
+      "tokens": 244800,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 272000,
+        "effective_context_window_percent": 100,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "output/day10-native-auto-uncalibrated-control-244800-1792111106416.json",
+      "raw_sha256": "5036f9fe08560865c224be22c63a207f941d0a509ef427811f5e87fc69f5581d",
+      "rollout_evidence": "output/day10-native-boundary-evidence-20261016/uncalibrated-control-244800.jsonl",
+      "rollout_sha256": "29298b53015e7289ae6a410f64da991e8a7e6b9fe2cde2e7c2057530f9fb16d5",
+      "native_pid": 18748,
+      "native_exit": 0,
+      "cleanup_complete": true,
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    }
+  ],
+  "calibrated": {
+    "raw_window": 302223,
+    "effective_percent": 90,
+    "resolved_native_window": 272000,
+    "auto_compact_at": 258400
+  },
+  "uncalibrated_control": {
+    "raw_window": 272000,
+    "effective_percent": 100,
+    "resolved_native_window": 272000,
+    "auto_compact_at": 244800
+  },
+  "native_context_fields_unchanged": {
+    "rows": 11,
+    "digest": "cf75bf0aae132d43f3b20c93b137e022144039b93e298f07dd9f08c58341ce8f"
+  },
+  "static_max_capability_web_rows": 11,
+  "live_native_model_scope": "chatgpt-web/gpt-6-sol/high only; other efforts/routes not native-executed",
+  "source_sha256": {
+    "src/web-context-policy.ts": "6cc2b12ec41b2cc99c3340ad850033d6b04e3d4539a5929ad92c4b7e1990f0e3",
+    "src/model-catalog.ts": "d6d70b453bb6e011cb011e44a895c8fabffdb1a5bc5d09c39986ef13fc15825a",
+    "output/day10-native-auto-boundary-20261016.ts": "f1406cb893093a00fdd21d7f1b28930dd3f4625d637826f611f47f909fe6a205"
+  },
+  "production_changed": false,
+  "observer_image_mode": "DISABLED",
+  "all_owned_processes_terminal": true
+}

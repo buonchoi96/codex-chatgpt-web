@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterEvent, CodexParsedRequest } from "../../types";
 import type { BrokerToolRequest } from "./turn-broker";
-import { ChatGptWebAdapterError, chatGptBrowserTabClosedError, chatGptTurnSupersededError } from "./adapter-error";
+import { ChatGptWebAdapterError, ChatGptSteeringObserverSuperseded, chatGptBrowserTabClosedError, chatGptTurnSupersededError } from "./adapter-error";
 import {
   chatGptTurnUserRevisionHistory,
   extractChatGptCompactionSourceRevision,
@@ -162,6 +162,9 @@ interface ChatGptTurnRuntimeBase {
   /** Idempotently retire the turn-bound MCP capability after browser and observer settlement. */
   retireCapability?: () => void | Promise<void>;
   submission?: { phase: "prepared" | "send_activated" | "accepted" };
+  /** Canonical queued revisions share this journal instead of retiring pending receipts. */
+  enqueueSteering?:(incoming:CodexParsedRequest,signal?:AbortSignal)=>boolean|Promise<boolean>;
+  activateSteering?:()=>void;
   /** Present only when the visible ChatGPT tab is driven manually through the Codex Zero Risk MCP contract. */
   manualControl?: { surfaceNonce: string };
   cancel: (reason?: Error) => void;
@@ -183,6 +186,11 @@ function executionKey(parsed: CodexParsedRequest, payload: unknown): string {
   })).digest("hex");
 }
 
+function missingReplayIdentity(message:string):ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(message+' Supply an authentic Codex turn before retrying.',
+    {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
+}
+
 function compactionInputRevision(parsed: CodexParsedRequest): unknown[] {
   const body = parsed._rawBody;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -197,7 +205,7 @@ function compactionInputRevision(parsed: CodexParsedRequest): unknown[] {
 
 export function chatGptTurnExecutionKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!identity.turnId) throw missingReplayIdentity("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
   return executionKey(parsed, {
     threadId: identity.threadId,
     turnId: identity.turnId,
@@ -218,18 +226,19 @@ export function chatGptInstructionLineage(parsed: CodexParsedRequest): ChatGptIn
   const revisions = chatGptTurnUserRevisionHistory(parsed).map(revision => createHash("sha256")
     .update(JSON.stringify([revision.itemId ?? null, revision.content])).digest("hex"));
   const current = revisions.pop();
-  if (!current) throw new Error("ChatGPT web requires a canonical user instruction");
+  if (!current) throw new ChatGptWebAdapterError('ChatGPT web requires a canonical user instruction; supply an authentic Codex instruction or an acknowledged native compaction checkpoint.',
+    {status:400,errorType:'invalid_request_error',code:'CURRENT_TURN_USER_REVISION_MISSING',retryable:false});
   return { current, predecessors: new Set(revisions) };
 }
 
 /** Exact canonical Responses request identity inside one long-lived browser execution. */
 export function chatGptTurnRoundKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for round replay");
+  if (!identity.turnId) throw missingReplayIdentity("ChatGPT web requires native Codex turn_id metadata for round replay");
   const body = parsed._rawBody;
   if (!body || typeof body !== "object" || Array.isArray(body)
     || !Array.isArray((body as { input?: unknown }).input)) {
-    throw new Error("ChatGPT web requires the complete native Codex input for round replay");
+    throw missingReplayIdentity("ChatGPT web requires the complete native Codex input for round replay");
   }
   return executionKey(parsed, {
     threadId: identity.threadId,
@@ -242,7 +251,7 @@ export function chatGptTurnRoundKey(parsed: CodexParsedRequest): string {
 /** Stable identity for limiting automatic retries of one native Codex turn. */
 export function chatGptTurnRetryKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-turn retry budgeting");
+  if (!identity.turnId) throw missingReplayIdentity("ChatGPT web requires native Codex turn_id metadata for browser-turn retry budgeting");
   return createHash("sha256").update(JSON.stringify({
     threadId: identity.threadId,
     turnId: identity.turnId,
@@ -260,14 +269,14 @@ export function chatGptThreadOwnershipKey(parsed: CodexParsedRequest): string {
       : identity.turnId
         ? { kind: "turn", id: identity.turnId }
         : undefined;
-  if (!owner) throw new Error("ChatGPT web requires native Codex turn identity metadata for browser ownership");
+  if (!owner) throw missingReplayIdentity("ChatGPT web requires native Codex turn identity metadata for browser ownership");
   return createHash("sha256").update(JSON.stringify(owner)).digest("hex");
 }
 
 /** Locate the browser response that a native mid-turn compaction replaces. */
 export function chatGptCompactionSourceExecutionKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!identity.turnId) throw missingReplayIdentity("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
   const source = extractChatGptCompactionSourceRevision(parsed);
   return executionKey(parsed, {
     threadId: identity.threadId,
@@ -295,6 +304,8 @@ export class ChatGptTurnSession {
   private attachedConversationKey: string | undefined;
   private tail: Promise<void> = Promise.resolve();
   private capabilityRetirementScheduled = false;
+  private currentExecution?:string;
+  private readonly observerControllers=new Map<string,AbortController>();
   private readonly rounds = new Map<string, {
     events: AdapterEvent[];
     reasoning: string[];
@@ -306,9 +317,9 @@ export class ChatGptTurnSession {
     readonly runtime: ChatGptTurnRuntime,
     readonly traceId?: string,
     readonly ownerKey?: string,
-    readonly nativeTurnId?: string,
+    public nativeTurnId?: string,
     readonly nativeThreadId?: string,
-    readonly instruction?: string,
+    public instruction?: string,
   ) {
     this.attachedConversationKey = runtime.conversationKey;
     this.physicalSettlement = runtime.physicalSettlement.then(
@@ -342,6 +353,17 @@ export class ChatGptTurnSession {
     this.tail = run.then(() => undefined, () => undefined);
     this.scheduleCapabilityRetirement();
     return run;
+  }
+  adoptExecution(key:string):void {
+    this.currentExecution=key;
+    for(const [previous,controller] of this.observerControllers)if(previous!==key)controller.abort(new ChatGptSteeringObserverSuperseded());
+  }
+  observerSignal(key:string):AbortSignal {
+    this.currentExecution??=key;
+    let controller=this.observerControllers.get(key);
+    if(!controller){controller=new AbortController();this.observerControllers.set(key,controller);}
+    if(this.currentExecution!==key)controller.abort(new ChatGptSteeringObserverSuperseded());
+    return controller.signal;
   }
 
   touch(): void {
@@ -519,6 +541,38 @@ export class ChatGptTurnSessions {
   private readonly retirements = new Map<string, Promise<void>>();
   private readonly ownerRetirements = new Map<string, Promise<void>>();
   private readonly conversationRetirements = new Map<string, Promise<void>>();
+  private readonly physicalRetirements=new WeakMap<ChatGptTurnSession,Promise<void>>();
+  private readonly steeringAdmissions = new Map<string, Promise<void>>();
+  private readonly steeringReservations = new Set<string>();
+  // A launcher cancel-all must retire the native execution, not just discard
+  // its in-memory browser handle. Codex /goal can replay that same HTTP turn
+  // after Stop; reopening it could duplicate browser sends and tool actions.
+  // Keys contain no raw instruction data and are bounded independently.
+  private readonly launcherCancelledKeys = new Map<string, { error: Error; at: number }>();
+  private readonly launcherCancellationTtlMs = 24 * 60 * 60_000;
+  private readonly launcherCancellationMaxKeys = 512;
+
+  private launcherCancelledError(key: string): Error | undefined {
+    const record = this.launcherCancelledKeys.get(key);
+    if (!record) return undefined;
+    if (Date.now() - record.at > this.launcherCancellationTtlMs) {
+      this.launcherCancelledKeys.delete(key);
+      return undefined;
+    }
+    return record.error;
+  }
+
+  private rememberLauncherCancellation(key: string, reason: Error): void {
+    this.launcherCancelledKeys.delete(key);
+    this.launcherCancelledKeys.set(key, { error: new ChatGptWebAdapterError(
+      "This native Codex turn was cancelled by the launcher. Submit a new turn to continue; a cancelled request cannot be replayed.",
+      { status: 499, errorType: "client_closed_request", code: "client_cancelled",
+        retryable: false, cause: reason },
+    ), at: Date.now() });
+    while (this.launcherCancelledKeys.size > this.launcherCancellationMaxKeys) {
+      this.launcherCancelledKeys.delete(this.launcherCancelledKeys.keys().next().value!);
+    }
+  }
 
   constructor(
     private readonly ttlMs = 30 * 60_000,
@@ -535,19 +589,21 @@ export class ChatGptTurnSessions {
     instruction?: string,
   ): ChatGptTurnSession {
     this.prune();
+    const cancelled = this.launcherCancelledError(key);
+    if (cancelled) throw cancelled;
     const existing = this.entries.get(key);
     if (existing) {
       if (existing.supersededError) throw existing.supersededError;
       existing.touch();
       return existing;
     }
-    const active = [...this.entries.values()].filter(session => session.isActive()).length;
+    const active = [...new Set(this.entries.values())].filter(session => session.isActive()).length;
     if (active >= MAX_CHATGPT_BROWSER_TABS) {
       throw new Error(
         `ChatGPT Web supports at most ${MAX_CHATGPT_BROWSER_TABS} simultaneous browser turns; close or finish a browser tab before starting another`,
       );
     }
-    if (this.entries.size >= this.maxEntries) throw new Error(`ChatGPT web session registry is full (${this.maxEntries} entries)`);
+    if (this.entries.size + this.steeringReservations.size >= this.maxEntries) throw new Error(`ChatGPT web session registry is full (${this.maxEntries} entries)`);
     const session = new ChatGptTurnSession(start(), traceId, ownerKey, nativeTurnId, nativeThreadId, instruction);
     this.entries.set(key, session);
     const conversationKey = session.conversationKey();
@@ -564,16 +620,19 @@ export class ChatGptTurnSessions {
     nativeTurnId?: string,
     nativeThreadId?: string,
     instruction?: ChatGptInstructionLineage,
+    steeringInput?:CodexParsedRequest,
   ): Promise<ChatGptTurnSession> {
     for (;;) {
       if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+      const cancelled = this.launcherCancelledError(key);
+      if (cancelled) throw cancelled;
       const existing = this.entries.get(key);
       if (existing) {
         if (existing.supersededError) throw existing.supersededError;
         existing.touch();
         return existing;
       }
-      const pending = this.retirements.get(key) ?? this.ownerRetirements.get(ownerKey);
+      const pending = this.retirements.get(key) ?? this.ownerRetirements.get(ownerKey) ?? this.steeringAdmissions.get(ownerKey);
       if (pending) {
         await awaitWithAbort(pending, signal);
         continue;
@@ -586,6 +645,26 @@ export class ChatGptTurnSessions {
         if (ownedSession.isActive() && instruction && ownedSession.instruction
           && instruction.current !== ownedSession.instruction) {
           if (!instruction.predecessors.has(ownedSession.instruction)) throw chatGptTurnSupersededError();
+          if (steeringInput && ownedSession.runtime.enqueueSteering) {
+            if (this.entries.size + this.steeringReservations.size >= this.maxEntries)
+              throw new Error('ChatGPT steering alias journal is full');
+            this.steeringReservations.add(key);
+            const admission = Promise.resolve().then(() => ownedSession.runtime.enqueueSteering!(steeringInput, signal))
+              .then(admitted => {
+                if (!admitted) return false;
+                // Keep the alias with its committed queue revision if the HTTP observer
+                // disconnects at this boundary; a reconnect must retain the admitted delta.
+                ownedSession.instruction=instruction.current;ownedSession.nativeTurnId=nativeTurnId;
+                ownedSession.adoptExecution(key);
+                this.entries.set(key,ownedSession);ownedSession.touch();return true;
+              });
+            const settlement = admission.then(() => undefined, () => undefined).finally(() => {
+              this.steeringReservations.delete(key);
+              if (this.steeringAdmissions.get(ownerKey) === settlement) this.steeringAdmissions.delete(ownerKey);
+            });
+            this.steeringAdmissions.set(ownerKey, settlement);
+            if (await awaitWithAbort(admission, signal)) return ownedSession;
+          }
           // Native steering can return the old tool result and a new instruction in one request.
           // Waiting for the old browser here deadlocks before that result can be consumed. Retire
           // its capability and rebuild from the complete canonical history, including that result.
@@ -604,6 +683,41 @@ export class ChatGptTurnSessions {
       if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
       return this.getOrCreate(key, start, traceId, ownerKey, nativeTurnId, nativeThreadId, instruction?.current);
     }
+  }
+
+  /** Only an accepted native Web Send from the exact same turn can restore a missing compact source. */
+  acceptedSourceForNativeTurn(
+    threadId: string,
+    turnId: string,
+    modelId: string,
+    reasoning: CodexParsedRequest["options"]["reasoning"],
+  ): ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined {
+    const candidates = [...new Set(this.entries.values())].filter(session => {
+      const input = session.runtime.usageInput;
+      return session.nativeThreadId === threadId
+        && session.nativeTurnId === turnId
+        && session.runtime.submission?.phase === "accepted"
+        && input?.modelId === modelId
+        && input.options.reasoning === reasoning
+        && !input._compactionRequest;
+    });
+    let resolved: ReturnType<typeof extractChatGptCompactionSourceRevision> | undefined;
+    for (const candidate of candidates) {
+      const input = candidate.runtime.usageInput!;
+      let revision: ReturnType<typeof extractChatGptCompactionSourceRevision>;
+      try {
+        revision = extractChatGptCompactionSourceRevision({ ...input, _compactionRequest: true });
+      } catch {
+        continue;
+      }
+      const original = extractChatGptTurnIdentity(input);
+      if (original.threadId !== threadId || original.turnId !== turnId
+        || (revision.turnId && revision.turnId !== turnId)) continue;
+      // Two distinct admitted revisions cannot silently substitute for each other.
+      if (resolved && JSON.stringify(resolved) !== JSON.stringify(revision)) return undefined;
+      resolved = revision;
+    }
+    return resolved ? structuredClone(resolved) : undefined;
   }
 
   find(key: string): ChatGptTurnSession | undefined {
@@ -671,11 +785,14 @@ export class ChatGptTurnSessions {
       throw new Error("The compacted ChatGPT response execution key is already owned by another session");
     }
     this.conversationHeads.delete(conversationKey);
+    const detached=new Set<ChatGptTurnSession>();
     for (const [key, session] of matches) {
       if (this.entries.get(key) === session
         && (session !== preserved?.session || key !== preserved.executionKey)) {
         this.entries.delete(key);
       }
+      if(detached.has(session))continue;
+      detached.add(session);
       if (session.isActive()) session.cancel();
       if (!session.detachConversation(conversationKey)) {
         throw new Error("ChatGPT retained-conversation ownership changed during retirement");
@@ -695,7 +812,7 @@ export class ChatGptTurnSessions {
         this.conversationRetirements.delete(conversationKey);
       }
     }
-    return matches.length;
+    return new Set(matches.map(([,session])=>session)).size;
   }
 
   async waitForRetirement(key: string): Promise<void> {
@@ -754,6 +871,15 @@ export class ChatGptTurnSessions {
     return cancelled;
   }
 
+  /** Explicit launcher Stop-all: fail subsequent replays of these exact
+   * executions instead of restarting an already cancelled /goal turn.
+   * Ordinary clear() still resets test/shutdown registries without recording
+   * an operator cancellation, and a new native turn key is unaffected. */
+  cancelAllForLauncher(reason: Error): number {
+    for (const key of this.entries.keys()) this.rememberLauncherCancellation(key, reason);
+    return this.clear();
+  }
+
   async cancelTrace(traceId: string, reason = chatGptBrowserTabClosedError()): Promise<number> {
     const cancellation = this.beginCancelTrace(traceId, reason);
     await cancellation.settlement;
@@ -762,7 +888,7 @@ export class ChatGptTurnSessions {
 
   /** Revoke execution immediately; keep physical cleanup tracked independently of the UI receipt. */
   beginCancelTrace(traceId: string, reason: Error): { cancelled: number; settlement: Promise<void> } {
-    const sessions = [...this.entries.values()]
+    const sessions = [...new Set(this.entries.values())]
       .filter(session => session.traceId === traceId && session.isActive());
     for (const session of sessions) session.cancel(reason);
     return { cancelled: sessions.length, settlement: Promise.all(sessions.map(session => session.physicalSettlement)).then(() => undefined) };
@@ -810,7 +936,7 @@ export class ChatGptTurnSessions {
   activeCount(): number {
     this.prune();
     let active = 0;
-    for (const session of this.entries.values()) if (session.isActive()) active += 1;
+    for (const session of new Set(this.entries.values())) if (session.isActive()) active += 1;
     return active;
   }
 
@@ -832,11 +958,16 @@ export class ChatGptTurnSessions {
   }
 
   private beginRetirement(key: string, session: ChatGptTurnSession, reason?: Error): Promise<void> {
-    const existing = this.retirements.get(key);
-    if (existing) return existing;
+    const existing = this.retirements.get(key)??this.physicalRetirements.get(session);
+    if (existing){
+      this.retirements.set(key,existing);
+      void existing.then(()=>{if(this.retirements.get(key)===existing)this.retirements.delete(key);});
+      return existing;
+    }
     const conversationKey = session.conversationKey();
     session.cancel(reason);
     const retirement = session.physicalSettlement;
+    this.physicalRetirements.set(session,retirement);
     this.retirements.set(key, retirement);
     void retirement.then(() => {
       if (this.retirements.get(key) === retirement) this.retirements.delete(key);
@@ -874,3 +1005,44 @@ export class ChatGptTurnSessions {
 }
 
 export const chatGptTurnSessions = new ChatGptTurnSessions();
+
+/**
+ * Restore a real authenticated user message for compact-only /goal requests whose native
+ * input consists of tool results and synthetic goal fragments. This never invents content.
+ * The normal explicit native user message takes precedence over the retained owner.
+ */
+export function bindAcceptedCompactionSource(
+  parsed: CodexParsedRequest,
+  sessions: ChatGptTurnSessions = chatGptTurnSessions,
+): boolean {
+  if (!parsed._compactionRequest) return false;
+  let failedProvenance: ChatGptWebAdapterError | undefined;
+  try {
+    extractChatGptCompactionSourceRevision(parsed);
+    return true;
+  } catch (error) {
+    if (!(error instanceof ChatGptWebAdapterError)
+      || (error.code !== "COMPACTION_SOURCE_USER_MESSAGE_MISSING"
+        && error.code !== "REPLAY_PROVENANCE_UNVERIFIED")) throw error;
+    if (error.code === "REPLAY_PROVENANCE_UNVERIFIED") failedProvenance = error;
+  }
+  const identity = extractChatGptTurnIdentity(parsed);
+  if (!identity.threadId || !identity.turnId) return false;
+  const accepted = sessions.acceptedSourceForNativeTurn(
+    identity.threadId, identity.turnId, parsed.modelId, parsed.options.reasoning,
+  );
+  // Missing-source is a normal recoverable preflight; rejected native replay is
+  // recoverable only when this independent accepted-send witness exists.
+  if (!accepted) {
+    if (failedProvenance) throw failedProvenance;
+    return false;
+  }
+  parsed._trustedCompactionSource = {
+    threadId: identity.threadId, turnId: identity.turnId,
+    modelId: parsed.modelId, reasoning: parsed.options.reasoning,
+    revision: accepted,
+  };
+  extractChatGptCompactionSourceRevision(parsed);
+  console.info("[chatgpt-web] compaction_source_recovered source=accepted_native_turn");
+  return true;
+}

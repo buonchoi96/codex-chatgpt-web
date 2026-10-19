@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-16T05:40:28.037Z",
+  "classification": "BOTH_CHILDREN_USAGE_LIMIT_TERMINAL",
+  "source": "Two user-visible subagent_notification error events; native wait_agent both not_found",
+  "models": [
+    {
+      "id": "01a1424c-d1f6-7011-bf2c-6ae50118bfec",
+      "name": "Hypatia",
+      "requested": "gpt-6-luna/high",
+      "actual": "gpt-6-luna/high",
+      "context_lines": [
+        6
+      ]
+    },
+    {
+      "id": "01a1424c-d494-7fa2-922d-a8bd303cee76",
+      "name": "Sartre",
+      "requested": "gpt-6-luna/high",
+      "actual": "gpt-6-luna/high",
+      "context_lines": [
+        6,
+        1550
+      ]
+    }
+  ],
+  "active_children": 0,
+  "replacement_spawned": false,
+  "resume_attempted": false,
+  "models_substituted": false,
+  "source_changes_preserved": true,
+  "gates_retired": true,
+  "supervisor_round7": "Raw test log21pass215assert exit0 exists; final independent review report absent",
+  "goal_status": "ACTIVE",
+  "previous_turn_classification": "PROGRESS:20fresh actual WinRT/stdIO cases and deterministic retained-delta account-cap fix"
+}

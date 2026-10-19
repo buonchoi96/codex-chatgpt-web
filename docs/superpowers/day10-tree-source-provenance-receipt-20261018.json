@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "scope": "P0-A model-facing semantic tree source provenance; no native UI/controller invocation",
+  "web_head": "bca4b395e3fbff8a3aa23d357ac5638221165084",
+  "changed_source": "src/adapters/chatgpt-web/screen-observation.ts",
+  "changed_test": "tests/screen-observation-source-fidelity.test.ts",
+  "defect": "An opt-in semantic tree from a PARTIAL native response could publish nodes with no native sources receipt; enhanced projections therefore lacked provider availability evidence.",
+  "fix": "Require sources before projecting compact/json/both trees; retain legacy raw receipt compatibility.",
+  "red": "bun test ./tests/screen-observation-source-fidelity.test.ts: 10 PASS, 1 FAIL (expected promise rejection, actually resolved)",
+  "green": "bun test six observer/source/tree suites: 71 PASS, 0 FAIL, 397 assertions",
+  "typecheck": "bun run typecheck: exit 0",
+  "full_suite": {
+    "command": "bun run test",
+    "pass": 1652,
+    "skip": 93,
+    "fail": 2,
+    "exit_code": 1,
+    "failures": [
+      "codex-integration.test.ts: symlinked shared Codex config route install/update/removal",
+      "codex-integration.test.ts: symlinked config compensation and redirected targets"
+    ],
+    "cause_observed": "Both tests throw Windows EPERM in symlinkSync() creating disposable C:\\Users\\Long-PC\\AppData\\Local\\Temp test fixture links, before exercising route assertions.",
+    "root_cause": "Environment lacks ability to create these file symlinks for this test process; exact Windows policy setting unverified",
+    "attribution": "Unrelated to changed screen-observation files; full suite remains red"
+  },
+  "checks": {"git_diff_check": "PASS", "model_visible_e2e": "NOT_RUN", "swift_runtime_e2e": "NOT_RUN"},
+  "safety": {"scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111", "snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578", "unresolved": 10, "status": "PENDING_SAFETY_REVIEW", "review_tool": "NOT_ADVERTISED", "retry_allowed": false},
+  "model_and_effort": "UNVERIFIED",
+  "subagents": 0,
+  "requirements_count": 175,
+  "status_upgrades": 0,
+  "limitations": "No authenticated Web-model observation or proven pixel relay; source-level and local test evidence only."
+}

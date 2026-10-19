@@ -1,0 +1,341 @@
+{
+  "version": 1,
+  "date": "2026-10-15",
+  "goal_source": "E:/Codex/attachments/f529255e-fa33-46d7-b68d-3477c519c841/pasted-text-1.txt",
+  "goal_status": "ACTIVE",
+  "baseline": {
+    "web": {
+      "branch": "main",
+      "head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+      "initial_worktree": "clean",
+      "plan": "F:/Source Projects/codex-chatgpt-web/PLAN.md",
+      "plan_sha256": "8da926d072316ea9402bacd2ba63039d05bbe85239bb58198dbb4cc104328585",
+      "root_goal": "absent; authoritative goal is attachment"
+    },
+    "swift": {
+      "branch": "main",
+      "head": "30d3fe4570761943464947894a4e1e0b863b3574",
+      "initial_worktree": "dirty; preserved",
+      "design": "F:/Source Projects/ComputerUseSwift-MCP/PLAN.md"
+    }
+  },
+  "actors": [
+    {
+      "role": "main",
+      "requested_model": "gpt-6.1-sol",
+      "requested_effort": "high",
+      "resolved_model": "gpt-6.1-sol",
+      "resolved_effort": "high",
+      "evidence": {
+        "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+        "line": 14384,
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      },
+      "current_status": "working"
+    },
+    {
+      "role": "Coding / implementation",
+      "agent_id": "01a1411b-909e-7743-b7fd-d99792070e29",
+      "nickname": "Hilbert",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T02-48-08-01a1411b-909e-7743-b7fd-d99792070e29.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        184
+      ],
+      "current_status": "interrupted/closed after waitingOnApproval; readonly follow-up scope, task gate revoked",
+      "evidence": "docs/superpowers/day10-agent-stage2-receipt.json",
+      "latest_work": "Regression additions produced3RED; main fixed and expanded coverage"
+    },
+    {
+      "role": "UI / research / test supervisor",
+      "agent_id": "01a1411b-93d9-7920-a5fe-ed546f4c8ad0",
+      "nickname": "Euler",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false,
+        "role_in_message": true
+      },
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\16\\rollout-2026-10-16T02-48-09-01a1411b-93d9-7920-a5fe-ed546f4c8ad0.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        149,
+        270
+      ],
+      "current_status": "notLoaded; prior completed; two explicit follow-up attempts returned thread not found; no new task delivered",
+      "evidence": "docs/superpowers/day10-agent-stage2-receipt.json",
+      "latest_work": "Read-only Swift finding + native peer defect + final bounded retest"
+    }
+  ],
+  "model_incident": {
+    "old_children": [
+      "Gibbs/01a13860-79ec-7fa0-885f-8c709d7bbc84",
+      "Sagan/01a13860-b472-7770-b9bf-81819d042f56"
+    ],
+    "requested": "gpt-6-luna/high",
+    "actual_initial": "gpt-6-luna/high",
+    "actual_after_resume_followup": "gpt-6.1-sol/high",
+    "classification": "MODEL_OVERRIDE_NOT_PRESERVED_ON_RESUMED_FOLLOWUP",
+    "root_cause_limit": "Native implementation unavailable; cannot isolate resume versus follow-up internals",
+    "workaround": "APP_EXPLICIT_FOLLOWUP_OVERRIDE_VERIFIED: reuse same Maxwell/Pascal UUIDs with explicit app model/effort override and fresh nonce gate only after native metadata verification. No new identity or global config edit.",
+    "permanent_runtime_fix": false,
+    "evidence": "docs/superpowers/plans/2026-10-14-subagent-model-audit.md",
+    "configuration_recheck": "Read-only 2026-10-15: E:/Codex/config.toml model chatgpt-web/gpt-6-sol line1, effort high line2, multi_agent true line108, agents.max_depth2 line112; no named role heading or repo/global agents directory/local config found. Main did not edit configuration. Actual child turn_context, not defaults, establishes Luna/high.",
+    "operational_correction": "APP_EXPLICIT_FOLLOWUP_OVERRIDE_VERIFIED: reuse same Maxwell/Pascal UUIDs with explicit app model/effort override and fresh nonce gate only after native metadata verification. No new identity or global config edit.",
+    "latest_receipt": "docs/superpowers/day10-agent-followup-receipt.json"
+  },
+  "next_priorities": [
+    "Inspect actual native goal lifecycle/source authority and test synthetic-only /goal after compact without manufactured user input",
+    "Native/bridge restart continuation from installed checkpoint; automatic258400 clamp/boundary and effective recall",
+    "Correct owned child lifecycle/scope through supported original interface; no globalconfig or unverified bare resume work",
+    "CPU AUTO and native2–8 overlap benchmarks; state-aware readiness/UIA/OCR/CV/observer and archive acceptance"
+  ],
+  "image_mode": "disabled",
+  "production_changed": false,
+  "previous_goal_source": "E:/Codex/attachments/98fc1ad6-c7ae-49e1-8a98-d12124c10186/pasted-text-1.txt",
+  "previous_actors": [
+    {
+      "role": "Coding / implementation",
+      "agent_id": "01a13e65-2945-7953-a650-acbdbd6dbb20",
+      "nickname": "Beauvoir",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_context": false,
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "creation_event": "fresh explicit spawn; nonce gate authorized only after main verified native metadata",
+      "last_proven_receipt": "completed; exactly one turn_context at line6 remains Luna/high; close_agent returned completed",
+      "current_status": "closed",
+      "assigned_paths": [
+        "src/adapters/chatgpt-web/thread-environment.ts",
+        "tests/environment.test.ts"
+      ],
+      "evidence_directory": "E:/Codex/sessions/2026/10/15",
+      "session_meta_line": 1,
+      "turn_context_line": 6
+    },
+    {
+      "role": "UI / research / test supervisor",
+      "agent_id": "01a13e65-2c28-7410-ba2f-f504be1a6f91",
+      "nickname": "Heisenberg",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_context": false,
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "creation_event": "fresh explicit spawn; nonce gate authorized only after main verified native metadata",
+      "last_proven_receipt": "completed; exactly one turn_context at line6 remains Luna/high; close_agent returned completed",
+      "current_status": "closed",
+      "assigned_paths": [
+        "read-only provenance/compaction source and tests"
+      ],
+      "evidence_directory": "E:/Codex/sessions/2026/10/15",
+      "session_meta_line": 1,
+      "turn_context_line": 6
+    },
+    {
+      "role": "Coding / implementation",
+      "agent_id": "01a13eab-9002-79d2-bc89-8e42850802c0",
+      "nickname": "Maxwell",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "schema_boundary": "task_name and fork_turns unsupported; role in message, no-history via fork_context:false",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\15\\rollout-2026-10-15T15-26-33-01a13eab-9002-79d2-bc89-8e42850802c0.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        106
+      ],
+      "creation_event": "User explicitly requested replacement spawn; both previous owners terminal; validation-only first prompt, native checks before nonce gate task handoff",
+      "current_status": "closed; completed prior work preserved",
+      "last_proven_receipt": "Same UUID explicit app follow-up; actual native Luna/high before gate and after completed work; raw child tool receipt and app completion in day10-agent-followup-receipt.json",
+      "assigned_paths": [
+        "src/adapters/chatgpt-web/blocked-operation-ledger.ts",
+        "tests/blocked-operation-ledger.test.ts"
+      ],
+      "tests": "11 pass,53 assertions; added five tests only",
+      "latest_followup_method": "mcp__codex_app__send_message_to_thread model:gpt-6-luna thinking:high",
+      "latest_phase": "MCP review regression tests8pass68assert"
+    },
+    {
+      "role": "UI / research / test supervisor",
+      "agent_id": "01a13eab-bb5a-7ca1-b474-b4e3d5765347",
+      "nickname": "Pascal",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "actual_spawn_arguments": {
+        "model": "gpt-6-luna",
+        "reasoning_effort": "high",
+        "fork_context": false
+      },
+      "schema_boundary": "task_name and fork_turns unsupported; role in message, no-history via fork_context:false",
+      "resolved_model": "gpt-6-luna",
+      "resolved_effort": "high",
+      "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "native_file": "E:\\Codex\\sessions\\2026\\10\\15\\rollout-2026-10-15T15-26-44-01a13eab-bb5a-7ca1-b474-b4e3d5765347.jsonl",
+      "session_meta_line": 1,
+      "turn_context_lines": [
+        6,
+        113
+      ],
+      "creation_event": "User explicitly requested replacement spawn; both previous owners terminal; validation-only first prompt, native checks before nonce gate task handoff",
+      "current_status": "closed; completed prior work preserved",
+      "last_proven_receipt": "Same UUID explicit app follow-up; actual native Luna/high before gate and after completed work; raw child tool receipt and app completion in day10-agent-followup-receipt.json",
+      "assigned_paths": [
+        "read-only native provenance source/test review"
+      ],
+      "tests": "73 pass,281 assertions; no source edits; effort-evidence review note followed up by main",
+      "latest_followup_method": "mcp__codex_app__send_message_to_thread model:gpt-6-luna thinking:high",
+      "latest_phase": "Independent SAFE source review;14pass118assert; found scope status inconsistency"
+    }
+  ],
+  "active_owned_children": 0,
+  "latest_model_inventory": "Current same-owner metadata retains Luna/high, but Hilbert app follow-up changed scope to readonly/on-request; Euler handle unavailable. No substitute/new identity. Model pinning is not permission/lifecycle preservation.",
+  "verification": {
+    "final_typecheck": "PASS; exec48695 collected exit0; output/day10-native-glob-typecheck-20261016.log",
+    "final_native_focused": "235pass2skip0fail970assert6files25.97s; exec58450 collected exit0; output/day10-native-peer-green-final-20261016.log",
+    "final_mcp_focused": "146 pass,2 skip,0 fail,637 assertions,11 files,18.78s; output/day10-ledger-mcp-accepted-20261015.log",
+    "previous_full_verify": "1297 pass,72 skip,2 fail,9643 assertions,114 files; exit1 Windows EPERM symlink fixtures. Predates latest ledger/MCP/native-effort changes; not rerun after user no-retry direction.",
+    "runtime_build": "Private bundle PASS before latest safety/effort edits; output/day10-native-runtime-build-20261015.log; not installed",
+    "runtime_smoke": "Private pre-safety bundle log has RELOCATABLE_RUNTIME_SMOKE_OK; original exec handle96916 no longer retained. No new production deployment or current-source bundle claim.",
+    "interrupted_owned_runs": "PID8928,23356,25644 exact command+creation identities verified before stop; all terminal exit1, NOT PASS. Windows Bun socket promise matcher stalls; explicit-await assertions retained and fresh regressions green.",
+    "browser_focused": "195 pass,0 fail,1465 assertions,6 files,68.94s; exec15245 terminal exit0; output/day10-binding-final-v4-regression-20261015.log",
+    "browser_final_typecheck": "PASS; exec39736 terminal exit0; output/day10-binding-final-v4-typecheck-20261015.log",
+    "browser_prior_batch": "194 pass,1 Windows Bun rejection matcher timeout; NOT PASS. Explicit await preserves negative assertion; focused rerun1 pass26assert, full fresh batch195pass.",
+    "json_transport_focused": "102 pass,0 fail,746 assertions,7 files,29.71s; exec33289 terminal exit0; output/day10-json-final-regression-20261015.log",
+    "json_transport_typecheck": "PASS; exec55339 terminal exit0; output/day10-json-final-typecheck-20261015.log",
+    "current_source_scope": "Current asterisk encoding:2RED -> focused264pass25skip + typecheck + opt-inDOM29pass + actual native/Web3stage PASS. Prior native235/Safety201 receipts remain historical broader checks.",
+    "safety_review": "201pass0fail1081assert/16files28.88s; exec7334 collected exit0; output/day10-safety-review-reviewed-regression-20261016.log",
+    "current_prompt_regression": "264pass25skip0fail1698assert7files36.36s; exec83407 exit0; output/day10-native-glob-regression-20261016.log",
+    "current_dom_regression": "29pass0fail208assert2files50.29s; exec3765 exit0; output/day10-native-glob-dom-final-20261016.log"
+  },
+  "browser_recovery": {
+    "evidence": "docs/superpowers/plans/2026-10-15-day10-live-browser-recovery.md",
+    "basic_live": "PASS initial DEV browser reply, trace11f8407f50c2; one accepted INLINE Send with Native2 selected; no native compact ACK",
+    "failed_live": [
+      "ba80d5f1020d interactive initial binding failure; no follow-up/compact/resend",
+      "cbeea8d9e723 v1 initial binding failure; cleanup completed",
+      "0d8a96797dcf v2 initial binding failure; body10184 vs canonical40863; cleanup completed",
+      "v3 initial and retained recall passed; compact harness accepted5 replacements; postcompact trace089d1b543c39 failed full-body comparison9657 vs9584; exit1; both cleanup completed"
+    ],
+    "repairs": [
+      "exact pre-Send semantic draft/connector proof",
+      "same logical group remount physical locator refresh",
+      "shared semantic newline/BR reader",
+      "one scoped Show more disclosure then full exact re-verification",
+      "directional verified editor encoding only; intentional NBSP preserved",
+      "escaped bulk multiline editor insert with full integrity check",
+      "JSON Unicode transport of angle tags/literal slash pairs/escaped quotes preserves decoded original source and avoids rich-text escaping; comparator unchanged"
+    ],
+    "current_live_attempt": {
+      "outcome": "PASS_FOR_DEV_PROTOCOL_ONLY",
+      "report": "output/day10-live-chain-v4-20261015.json",
+      "log": "output/day10-live-chain-v4-20261015.log",
+      "exec_handle": 45642,
+      "cleanup": [
+        "completed",
+        "completed"
+      ],
+      "stages": [
+        {
+          "stage": "initial",
+          "matched": true,
+          "tool_calls": 0
+        },
+        {
+          "stage": "retained_followup",
+          "matched": true,
+          "tool_calls": 0
+        },
+        {
+          "stage": "compact",
+          "replacement_items": 5,
+          "protocol_ack": "Harness accepted canonical replacement history; native app-server installation NOT TESTED"
+        },
+        {
+          "stage": "post_compact_followup",
+          "matched": true,
+          "tool_calls": 0
+        }
+      ],
+      "native_app_server_ack": "NOT TESTED"
+    },
+    "boundary": "DEV canonical replacement is not native app-server installation ACK; no observer pixels proved",
+    "durable_terminal_receipt": "docs/superpowers/day10-live-browser-receipt.json; exact owned exec45642 terminal exit0 collected independently; DEV protocol only",
+    "latest_native_web": {
+      "receipt": "docs/superpowers/day10-native-web-installation-receipt.json",
+      "result": "PASS_FOR_EXPLICIT_COMPACT_AND_AUTHENTIC_NEXT_USER_TURN"
+    }
+  },
+  "safety_review": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-safety-review-receipt.json",
+    "implemented": [
+      "scoped bounded read-only snapshot and hash-bound paging",
+      "direct/reserved/manual read tool and broker activity settlement",
+      "current notices outside historical carriers",
+      "fresh-process/stdio restart privacy and failure tests",
+      "other_scope_pending separates unrelated scopes while preserving aggregate pending work"
+    ],
+    "live_current_scope_notice": "v2 PASS before peer correction; unchanged current-pending branch",
+    "live_other_scope_notice": "PASS_FOR_DEV_OTHER_SCOPE_NOTICE_ONLY",
+    "new_review_tool_model_invocation": "NOT TESTED",
+    "remaining": [
+      "additional denial-class capture",
+      "genuine human/native original-interface review and once-only permitted retry receipts",
+      "historical raw refusal reconciliation; originals prohibited from retry"
+    ]
+  },
+  "native_fixture_discovery": {
+    "desktop_binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/9614f1d9b40d9c4f/codex.exe",
+    "desktop_version": "0.162.0-alpha.17.2",
+    "npm_cli_version": "0.162.1",
+    "read_only_commands": "Exact binary schema/help/features introspection completed",
+    "unsafe_for_current_topology": "scripts/smoke-codex-environment.ts emits spawn_agent with model chatgpt-web/pro; not executed",
+    "actual_fixture": "Owned private native stdio app-server+fixed provider: native install/source PASS; terminal native exit0. No actual LLM/delegate invoked."
+  },
+  "latest_checkpoint_generator": "output/day10-native-web-checkpoint-20261016.ts; earlier phase generators are historical and must not overwrite current state",
+  "native_compact_installation": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-native-web-installation-receipt.json",
+    "proven": "Actual Web model initial -> native compacted installation+hash/id/source -> authentic next native user turn recalling marker, exact3Sends/0ZIP/0native actions",
+    "remaining": "Synthetic-only /goal, source/approval/compaction race gates; automatic258400 threshold/effective272K recall; restart recovery"
+  },
+  "cpu_backoff": {
+    "status": "PARTIAL",
+    "receipt": "docs/superpowers/day10-cpu-backoff-receipt.json",
+    "remaining": "End-to-end observer short-deadline and1vsAUTO foreground/eight-command benchmark"
+  },
+  "latest_agent_scope_receipt": "docs/superpowers/day10-agent-stage2-receipt.json"
+}

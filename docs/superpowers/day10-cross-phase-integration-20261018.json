@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C/P0-D/P0-E cross-module regression on restored main",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "test_files": [
+    "tests/transport-selector.test.ts",
+    "tests/unified-context-policy.test.ts",
+    "tests/browser-worker-contract.test.ts",
+    "tests/compaction-transaction.test.ts",
+    "tests/compaction-accepted-source-recovery.test.ts",
+    "tests/retained-compaction.test.ts",
+    "tests/parallel-native-capacity.test.ts",
+    "tests/parallel-native-commands.test.ts",
+    "tests/bridge-platform.test.ts",
+    "tests/http-sse-terminal.test.ts",
+    "tests/same-tab-recovery.test.ts",
+    "tests/recovery-watchdog.test.ts"
+  ],
+  "test_evidence": {
+    "result": "360 PASS / 0 FAIL / 1833 assertions across 12 test files",
+    "duration_seconds": 23.30,
+    "exit_code": 0,
+    "real_native_parallel_e2e": "NOT_RUN",
+    "actual_web_model_archive_ingestion_e2e": "NOT_RUN",
+    "actual_web_model_sse_final_answer_e2e": "NOT_RUN"
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

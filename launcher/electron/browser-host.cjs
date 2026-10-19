@@ -1095,6 +1095,9 @@ class BrowserHost {
         this.setState({ url });
         return;
       }
+      // A late ownership check belongs to the document that initiated it.
+      // A login redirect supersedes that check without making the new page erroneous.
+      this.primaryDocumentRevision = (this.primaryDocumentRevision ?? 0) + 1;
       this.primaryNavigationError = null;
       this.primaryRendererReady = false;
       this.primaryDeviceEmulationDirty = true;
@@ -1127,10 +1130,24 @@ class BrowserHost {
       }
       this.setState({ url, loading: false });
       if (this.primaryRendererRecovery) return; // Recovery establishes ownership once below.
+      const documentRevision = this.primaryDocumentRevision ?? 0;
       void this.applyViewportCss();
       void this.markOwnedSurface()
-        .then(() => this.probeAuthentication())
+        .then(() => {
+          if (this.destroyed || this.primaryRendererRecovery
+            || (this.primaryDocumentRevision ?? 0) !== documentRevision) return;
+          return this.probeAuthentication();
+        })
         .catch((error) => {
+          // executeJavaScript may be rejected when ChatGPT performs a real
+          // sign-in redirect after did-finish-load. The next document has its
+          // own did-finish-load and must establish its own surface ownership.
+          // Never let the stale callback overwrite that document's state.
+          if (this.destroyed || this.primaryRendererRecovery
+            || (this.primaryDocumentRevision ?? 0) !== documentRevision) {
+            this.logger.info("browser.surface_mark_superseded", { reason: "main_frame_navigation" });
+            return;
+          }
           this.logger.error("browser.surface_mark_failed", {
             message: error instanceof Error ? error.message : String(error),
           });
@@ -3129,12 +3146,12 @@ class BrowserHost {
     return { ok: true, ...evidence };
   }
 
-  async verifyConnector(appName) {
+  async verifyConnector(appName, expectedConnectorTunnelId) {
     requireAutomaticBrowserInspection(this, "ChatGPT connector verification");
-    return await this.withManualOperation("connector verification", () => this.runConnectorVerification(appName));
+    return await this.withManualOperation("connector verification", () => this.runConnectorVerification(appName, expectedConnectorTunnelId));
   }
 
-  async runConnectorVerification(appName) {
+  async runConnectorVerification(appName, expectedConnectorTunnelId) {
     requireAutomaticBrowserInspection(this, "ChatGPT connector verification");
     const connectorName = validateConnectorName(appName);
     this.setState({ status: "testing", message: "Checking ChatGPT connector" });
@@ -3146,6 +3163,7 @@ class BrowserHost {
         descriptorPath: this.descriptorPath,
         appName: connectorName,
         useSavedChats,
+        ...(expectedConnectorTunnelId !== undefined ? { expectedConnectorTunnelId } : {}),
         logger: this.logger,
       });
       this.logger.info("connector.verified", { appName: connectorName });

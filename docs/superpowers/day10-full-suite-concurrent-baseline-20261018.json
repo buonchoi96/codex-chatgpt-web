@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "Full Bun regression baseline after P0-C changes on restored main",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "full_suite": {
+    "command": "bun test --timeout 15000",
+    "exit_code": 1,
+    "passed": 2111,
+    "skipped": 97,
+    "failed": 6,
+    "assertions": 11724,
+    "tests": 2214,
+    "files": 171,
+    "duration_seconds": 284.27
+  },
+  "failed_cases": {
+    "windows_symlink_eperm": [
+      "tests/codex-integration.test.ts:114 shared Codex config symlink",
+      "tests/codex-integration.test.ts:149 redirected Codex config symlink",
+      "launcher/tests/runtime-host.test.cjs:1139 setup rollback config symlink"
+    ],
+    "isolated_followups": [
+      "launcher/tests/localization.test.cjs native dialogs non-English copy comparison: full-suite FAIL, isolated node --test PASS",
+      "launcher/tests/localization.test.cjs doctor locale copy comparison: full-suite FAIL, isolated bun test PASS",
+      "launcher/tests/packaging-contract.test.cjs Linux libnotify toolset: full-suite timeout 15000 ms, isolated 45000 ms test PASS in 561.55 ms"
+    ]
+  },
+  "isolated_test_evidence": {
+    "node_localization": "10 PASS / 0 FAIL",
+    "bun_localization": "10 PASS / 0 FAIL",
+    "bun_linux_libnotify": "1 PASS / 0 FAIL / 561.55 ms",
+    "shared_suite_interference_root_cause": "UNVERIFIED",
+    "windows_symlink_privilege": "EPERM reported by native test fixtures; no privilege or OS configuration changes attempted"
+  },
+  "limitations": {
+    "full_suite_green": false,
+    "real_web_model_e2e": "NOT_RUN",
+    "native_parallel_e2e": "NOT_RUN",
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR"
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

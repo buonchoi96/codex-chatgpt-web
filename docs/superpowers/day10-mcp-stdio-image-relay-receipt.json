@@ -1,0 +1,69 @@
+{
+  "at": "2026-10-16T07:02:10.301Z",
+  "status": "MCP_STDIO_SYNTHETIC_DIRECT_NESTED_IMAGE_SERIALIZATION_ACCEPTED",
+  "source": {
+    "path": "tests/mcp-stdio-image-relay.test.ts",
+    "sha256": "1159318439a02c8d0aa1457e26718745a13e7d33f0550d30b4378e46b742a2f6"
+  },
+  "implementation": {
+    "actor": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "receipt": "output/day10-pixel-stdio-round8-complete.json",
+    "pass": 4,
+    "assertions": 46
+  },
+  "main_review": "output/day10-pixel-stdio-main-review-20261016.json",
+  "main_tests": {
+    "log": "output/day10-pixel-stdio-main-tests-final-20261016.log",
+    "pass": 4,
+    "fail": 0,
+    "assertions": 46,
+    "exit_code": 0
+  },
+  "typecheck": {
+    "log": "output/day10-pixel-stdio-main-typecheck-corrected-20261016.log",
+    "exit_code": 0
+  },
+  "independent_supervisor": {
+    "actor": "01a14341-fe53-7023-9755-4e420399e31a",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "report": "output/day10-pixel-stdio-supervisor-round8-report.json",
+    "log": "output/day10-pixel-stdio-supervisor-round8-tests.log",
+    "pass": 4,
+    "fail": 0,
+    "assertions": 46,
+    "exit_code": 0,
+    "source_hash_match": true
+  },
+  "cases": [
+    "direct success",
+    "direct error",
+    "nested generated exec success",
+    "nested generated exec error"
+  ],
+  "preserved": [
+    "PNG/JPEG content order, MIME and bytes",
+    "native view_image path and original detail",
+    "structuredContent, _meta and isError",
+    "No base64 in text content"
+  ],
+  "transport_scope": "Actual separate Bun CLI src/cli.ts mcp stdio process, unique broker IPC, synthetic native viewer result. Nested generated program executes against mocked native tool.",
+  "cleanup": "Final passing runs await SDK close and broker close; exact canonical owned Temp guard passes, removal succeeds, errors surface. First failed main fixture run retained its Temp folders after missing-import failure; raw failure log preserved.",
+  "platform": "Windows executed; short Unix path reviewed, not executed",
+  "source_sha256": {
+    "src/cli.ts": "1c7aea2b1a21e3e2583ef152a4318524616d9180a9ff1a2607d9a8ab9fe70ea8",
+    "src/adapters/chatgpt-web/mcp-main.ts": "d4bd53beef1167d4454dcc1e2ee6f70098d82141e5bd8aa450a9b897e845cde8",
+    "src/adapters/chatgpt-web/mcp-server.ts": "5d152ee31908e7e859fd691b757eb1c1ff0983c06534111447298abf4e7b6da3",
+    "src/adapters/chatgpt-web/turn-broker.ts": "f19eea069eb9aaed726c88a82e750f6bb486985813746f5d96edeb6d61eec6ac"
+  },
+  "web_pixel_recognition": "NOT PROVED; live direct probe remains MODEL_REPORTED_IMAGE_RELAY_UNAVAILABLE",
+  "external_tunnel_HTTP": "NOT EXERCISED",
+  "native_Codex_viewer_execution": "MOCKED_BY_BROKER_FIXTURE",
+  "model_calls": 0,
+  "physical_sends": 0,
+  "composer_attachments": 0,
+  "observer_image_mode": "DISABLED",
+  "production_changed": false
+}

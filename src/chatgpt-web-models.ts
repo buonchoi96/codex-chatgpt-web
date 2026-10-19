@@ -1,3 +1,5 @@
+import { WEB_CONTEXT_POLICY, WEB_CONTEXT_CATALOG_POLICY } from './web-context-policy';
+
 export const CHATGPT_WEB_MODEL_PREFIX = "chatgpt-web/";
 /** Shared automatic transport profile; exact browser version is carried by modelFamily. */
 export const CHATGPT_WEB_BACKEND_MODEL = "gpt-5.6-sol";
@@ -149,8 +151,8 @@ function contextLimits(
   };
 }
 
-/** Resolve the product limit for the selected visible ChatGPT mode. */
-export function resolveChatGptWebContextLimits(
+/** Measured browser/recall envelope, kept separate from the routed catalog target. */
+export function resolveChatGptWebTransportContextLimits(
   backendModel: ChatGptWebBackendModel,
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
@@ -216,6 +218,29 @@ export function resolveChatGptWebContextLimits(
   );
 }
 
+/** All eligible Web routes share a target. This is not evidence of service-side recall. */
+export function resolveChatGptWebContextLimits(
+  backendModel: ChatGptWebBackendModel,
+  effort: ChatGptWebAdapterEffort,
+  capabilities: ChatGptWebAccountCapabilities,
+  modelFamily?: ChatGptWebModelFamily,
+): ChatGptWebContextLimits {
+  // Retain existing availability and incompatible manual-transport validation.
+  resolveChatGptWebTransportContextLimits(backendModel, effort, capabilities, modelFamily);
+  return { ...WEB_CONTEXT_POLICY };
+}
+
+/** Internal Codex catalog calibration; public DEV status still uses the exact effective target. */
+export function resolveChatGptWebCatalogContextLimits(
+  backendModel: ChatGptWebBackendModel,
+  effort: ChatGptWebAdapterEffort,
+  capabilities: ChatGptWebAccountCapabilities,
+  modelFamily?: ChatGptWebModelFamily,
+): ChatGptWebContextLimits {
+  resolveChatGptWebContextLimits(backendModel, effort, capabilities, modelFamily);
+  return { ...WEB_CONTEXT_CATALOG_POLICY };
+}
+
 /** Resolve limits of one visible ChatGPT composer message, independently of model context. */
 export function resolveChatGptWebTransportLimits(
   backendModel: ChatGptWebBackendModel,
@@ -267,7 +292,7 @@ export function resolveChatGptWebMessageTokenBudget(
   if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
     return Math.max(0, CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - imageTokens);
   }
-  const { contextWindow } = resolveChatGptWebContextLimits(
+  const { contextWindow } = resolveChatGptWebTransportContextLimits(
     backendModel, effort, { ...capabilities, experimentalBiggerContext: false },
   );
   const { browserMessageTokenLimit } = resolveChatGptWebTransportLimits(backendModel, effort, capabilities);
@@ -288,7 +313,7 @@ export function resolveChatGptWebStagingTokenBudget(
   // A first near-maximum Instant message can succeed while the next is rejected (#777).
   // Reuse normal Instant's input headroom, including the existing platform reserve;
   // this changes staging allocation, not the selected model's advertised context window.
-  const { autoCompactTokenLimit } = resolveChatGptWebContextLimits(backendModel, effort, {
+  const { autoCompactTokenLimit } = resolveChatGptWebTransportContextLimits(backendModel, effort, {
     ...capabilities, experimentalBiggerContext: false,
   });
   return Math.min(messageBudget, Math.max(0, autoCompactTokenLimit - CHATGPT_WEB_PLATFORM_RESERVE_TOKENS - 1));

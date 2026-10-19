@@ -13,6 +13,28 @@ import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters
 import { SUMMARY_PREFIX } from "../src/responses/compaction";
 import { biggerContextPartCount } from "../src/adapters/chatgpt-web/usage";
 import type { CodexParsedRequest } from "../src/types";
+import { validateContextArchive } from "../src/adapters/chatgpt-web/context-archive";
+
+function validImageUrl(marker: string): string {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==", "base64");
+  const metadata = Buffer.from(`fixture\0${marker}`);
+  const chunk = Buffer.alloc(metadata.length + 12);
+  chunk.writeUInt32BE(metadata.length, 0);
+  chunk.write("tEXt", 4);
+  metadata.copy(chunk, 8);
+  let crc = 0xffffffff;
+  for (const byte of chunk.subarray(4, -4)) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  chunk.writeUInt32BE((crc ^ 0xffffffff) >>> 0, chunk.length - 4);
+  return `data:image/png;base64,${Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]).toString("base64")}`;
+}
+
+function unavoidableMultipart(parsed: CodexParsedRequest): void {
+  parsed.context.systemPrompt = [...parsed.context.systemPrompt ?? [],
+    ...Array.from({ length: 6 }, (_, index) => `whole-system-record-${index}: ${"x".repeat(90_000)}`)];
+}
 
 function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexParsedRequest {
   return {
@@ -29,6 +51,20 @@ function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexP
   };
 }
 
+test("native parallel guidance requires current inventory and stays out of control-only and manual turns", () => {
+  const capabilities = { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true };
+  const token = "turn_12345678901234567890123456789012";
+  const ordinary = compileChatGptWebPrompt(request("high"), capabilities, token);
+  expect(ordinary.text).toContain("codex.control.parallel_exec");
+  expect(ordinary.text).toContain("current connector advertises");
+  expect(ordinary.text).toContain("Never parallelize UI input");
+  expect(ordinary.text).toContain("every child receipt");
+  const compact = request("high"); compact._compactionRequest = true;
+  expect(compileChatGptWebPrompt(compact, capabilities, token).text).not.toContain("codex.control.parallel_exec");
+  expect(compileChatGptWebPrompt(request("high"), capabilities, token, { manualControl:true }).text).not.toContain("codex.control.parallel_exec");
+  expect(compileChatGptWebPrompt(request("max"), { ...capabilities, localToolsEnabled:false }).text).not.toContain("codex.control.parallel_exec");
+});
+
 test("inline and staged history escape Markdown delimiters without changing decoded code", () => {
   const parsed = request("high");
   const code = '```ts\nconst value = "`key`";\n``` '.repeat(20) + '\\u0060 \\` [text](https://example.com) 中文';
@@ -41,6 +77,7 @@ test("inline and staged history escape Markdown delimiters without changing deco
   const decoded = JSON.parse(encoded);
   expect(decoded.system).toEqual([code]);
   expect(decoded.messages[1].content).toBe(code);
+  unavoidableMultipart(parsed);
   const staged = compileChatGptWebPrompt(parsed, capabilities, "turn_12345678901234567890123456789012", {
     experimentalMultipartParts: CHATGPT_BIGGER_CONTEXT_PARTS,
   });
@@ -48,11 +85,30 @@ test("inline and staged history escape Markdown delimiters without changing deco
     expect(part).not.toContain("`");
     return JSON.parse(part).records;
   });
-  expect(records.find(record => record.kind === "system").content).toBe(code);
+  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual(parsed.context.systemPrompt);
+  expect(staged.transportDecision!.measurements.composerChars).toBeGreaterThan(staged.transportDecision!.measurements.composerCharLimit!);
   expect(records.find(record => record.kind === "message" && record.message_index === 1).message.content)
     .toEqual(decoded.messages[1].content);
+  expect(records.filter(record => record.kind === "message").map(record => record.message)).toEqual(decoded.messages);
   // A literal escape in source code stays literal; it is not decoded into a backtick twice.
   expect(decoded.messages[1].content).toContain("\\u0060");
+});
+
+test("context JSON keeps angle tags and literal Windows slashes out of the rich-text lexer without changing decoded source", () => {
+  const source = {
+    text: '<environment_context>\n<cwd>F:\\Source Projects\\fixture</cwd>\n</environment_context>',
+    code: String.raw`Keep \u003c, \u0060, \\server\share, \"quotes\", and <tag attr="x"> exactly.`,
+    unicode: '中文 😀 \ud800',
+    '<literal-key>': String.raw`C:\fixture\path`,
+  };
+  const encoded = withoutRetiredTurnHandles(JSON.stringify(source));
+  expect(JSON.parse(encoded)).toEqual(source);
+  expect(encoded).not.toContain('<');
+  expect(encoded).not.toContain('>');
+  expect(encoded).not.toContain('\\\\');
+  expect(encoded).not.toContain(String.fromCharCode(92, 34));
+  expect(encoded).toContain('\\u003c');
+  expect(encoded).toContain('\\u005c');
 });
 
 test("history handle cleanup works on decoded text and preserves native call identities", () => {
@@ -148,6 +204,7 @@ test("Bigger Context sends six semantic record envelopes and starts work from th
     { role: "assistant", content: [{ type: "text", text: "prior-answer" }], timestamp: 3 },
     { role: "user", content: "latest-request", timestamp: 4 },
   );
+  unavoidableMultipart(parsed);
   const compiled = compileChatGptWebPrompt(
     parsed,
     { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
@@ -161,13 +218,17 @@ test("Bigger Context sends six semantic record envelopes and starts work from th
     expect(payload.version).toBe(1);
     return payload.records;
   }) as Array<Record<string, unknown>>;
-  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual([
-    "system-one",
-    "system-two",
-  ]);
+  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual(parsed.context.systemPrompt);
+  expect(compiled.transportDecision!.measurements.composerChars).toBeGreaterThan(compiled.transportDecision!.measurements.composerCharLimit!);
   expect(records.filter(record => record.kind === "message").map(record => (
     (record.message as { role: string }).role
   ))).toEqual(["developer", "user", "assistant", "user"]);
+  expect(records.filter(record => record.kind === "message").map(record => record.message)).toEqual([
+    { role: "developer", content: "preserve-developer" },
+    { role: "user", content: "perform the task" },
+    { role: "assistant", content: [{ type: "text", text: "prior-answer" }] },
+    { role: "user", content: "latest-request" },
+  ]);
   expect(compiled.multipart!.parts.join("\n")).not.toContain(token);
   expect(compiled.multipart!.commit.match(new RegExp(token, "g"))).toHaveLength(1);
   expect(compiled.text).toBe(compiled.multipart!.commit);
@@ -207,13 +268,27 @@ test("Bigger Context uses the minimum transport and reserves six parts for compa
   expect(biggerContextPartCount(190_000, 95_000, false)).toBe(6);
   expect(biggerContextPartCount(1, 95_000, true)).toBe(6);
 
+  const fitting = compileChatGptWebPrompt(request("high"),
+    { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+    undefined, { experimentalMultipartParts: 2 });
+  expect(fitting.transportDecision?.choice).toBe("INLINE");
+  expect(fitting.multipart).toBeUndefined();
+  const oversized = request("high");
+  unavoidableMultipart(oversized);
   const compiled = compileChatGptWebPrompt(
-    request("high"),
+    oversized,
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
     undefined,
     { experimentalMultipartParts: 2 },
   );
   expect(compiled.multipart?.parts).toHaveLength(2);
+  const records = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records);
+  expect(records.filter((record: { kind: string }) => record.kind === "system").map((record: { content: string }) => record.content)).toEqual(oversized.context.systemPrompt!);
+  expect(records.filter((record: { kind: string }) => record.kind === "message")).toHaveLength(oversized.context.messages.length);
+  expect(records.filter((record: { kind: string }) => record.kind === "message").map((record: { message: unknown }) => record.message)).toEqual([
+    { role: "developer", content: "preserve-developer" },
+    { role: "user", content: "perform the task" },
+  ]);
   const transactionId = `ctx_${"b".repeat(32)}`;
   const stages = compiled.multipart!.parts.slice(0, -1).map((part, index) => (
     formatChatGptWebMultipartStage(part, transactionId, index + 1, 2)
@@ -308,7 +383,7 @@ test("inline compaction carries the newest cumulative checkpoint across discarde
       { role: "user", content: `${SUMMARY_PREFIX}\nObsolete summary`, timestamp: 1 },
       { role: "user", content: textParts ? [{ type: "text", text: checkpoint }] : checkpoint, timestamp: 2 },
       { role: "toolResult", toolCallId: "old-output", toolName: "read", isError: false,
-        content: [{ type: "text", text: "x".repeat(100_000) }, { type: "image", imageUrl: "data:image/png;base64,old-image" }], timestamp: 3 },
+        content: [{ type: "text", text: "x".repeat(100_000) }, { type: "image", imageUrl: validImageUrl("old-image") }], timestamp: 3 },
       { role: "assistant", content: [{ type: "text", text: "recent verified progress" }], timestamp: 4 },
       { role: "user", content: "checkpoint-now", timestamp: 5 },
     ];
@@ -349,6 +424,41 @@ test("inline compaction rejects a required checkpoint that cannot fit instead of
   expect(() => compileChatGptWebPrompt(compact, {
     localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true,
   })).toThrow("cumulative checkpoint");
+});
+
+test("authorized inline compaction trims an over-composer old record before enforcing transport limits", () => {
+  for (const staleInvalidImage of [false, true]) {
+    const compact = request("high");
+    compact._compactionRequest = true;
+    compact.context.systemPrompt = [];
+    const checkpoint = `${SUMMARY_PREFIX}\nVerified cumulative scope: ${"s".repeat(20_000)}`;
+    compact.context.messages = [
+      { role: "toolResult", toolCallId: "old-output", toolName: "read", isError: false,
+        content: staleInvalidImage
+          ? [{ type: "text", text: `discardable-old-output-${"x".repeat(600_000)}` },
+            { type: "image", imageUrl: "data:image/png;base64,stale-invalid-image" }]
+          : `discardable-old-output-${"x".repeat(600_000)}`, timestamp: 1 },
+      { role: "user", content: checkpoint, timestamp: 2 },
+      { role: "assistant", content: [{ type: "text", text: "recent verified progress" }], timestamp: 3 },
+      { role: "user", content: "checkpoint-now", timestamp: 4 },
+    ];
+    const before = structuredClone(compact);
+    const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
+    const compiled = compileChatGptWebPrompt(compact, capabilities);
+    const envelope = JSON.parse(compiled.text.split("<codex_context_json>\n")[1]!.split("\n</codex_context_json>")[0]!);
+    expect(envelope.messages.map((message: { role: string }) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(envelope.messages[0].content).toBe(checkpoint);
+    expect(envelope.messages.at(-1).content).toBe("checkpoint-now");
+    expect(compiled.trimmedCompactionMessages).toBe(1);
+    expect(compiled.images).toEqual([]);
+    expect(compiled.text).not.toContain("discardable-old-output");
+    expect(compiled.text).toContain("history is incomplete");
+    expect(compiled.transportDecision?.choice).toBe("INLINE");
+    expect(compact).toEqual(before);
+    const normal = structuredClone(compact);
+    delete normal._compactionRequest;
+    expect(() => compileChatGptWebPrompt(normal, capabilities)).toThrow("transport blocked");
+  }
 });
 
 test("Bigger Context compaction preserves history above the retired inline byte budget", () => {
@@ -418,7 +528,7 @@ test("Web compaction rebuilds attachments after trimming an oversized oldest ima
       role: "user",
       content: [
         { type: "text", text: `discard-${"x".repeat(120_000)}` },
-        { type: "image", imageUrl: "data:image/png;base64,discarded-image" },
+        { type: "image", imageUrl: validImageUrl("discarded-image") },
       ],
       timestamp: 1,
     },
@@ -492,10 +602,10 @@ test("assigns prior assistant output to the model and never attributes Codex con
   expect(compiled.text).toContain("do not attribute, quote, summarize, or otherwise mention them");
 });
 
-test("a long task keeps the newest images and drops the overflow instead of failing", () => {
+test("a normal task preserves every image through an eligible archive or blocks instead of dropping overflow", () => {
   const image = (marker: string) => ({
     type: "image" as const,
-    imageUrl: `data:image/png;base64,${marker}`,
+    imageUrl: validImageUrl(marker),
   });
   const markers = Array.from({ length: 13 }, (_unused, index) => `IMG${index + 1}`);
   const replayed: CodexParsedRequest = {
@@ -512,23 +622,32 @@ test("a long task keeps the newest images and drops the overflow instead of fail
     options: { reasoning: "high" },
   };
 
+  expect(() => compileChatGptWebPrompt(replayed,
+    { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+    "turn_12345678901234567890123456789012")).toThrow("10 attachments");
   const compiled = compileChatGptWebPrompt(
     replayed,
     { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
     "turn_12345678901234567890123456789012",
+    { contextArchive: true },
   );
 
   expect(compiled.images.map(entry => entry.imageUrl)).toEqual(
-    markers.slice(-10).map(marker => `data:image/png;base64,${marker}`),
+    markers.map(validImageUrl),
   );
-  expect(compiled.text).toContain("older image not attached");
-  expect(compiled.text).toContain("step 1");
-  expect(compiled.text).toContain("step 13");
+  const files = validateContextArchive(Buffer.from(compiled.contextArchive!.base64, "base64"), compiled.contextArchive!.sha256);
+  const contextText = Buffer.from(files["context.txt"]!).toString("utf8");
+  expect(contextText).not.toContain("older image not attached");
+  expect(contextText).toContain("step 1");
+  expect(contextText).toContain("step 13");
+  expect(Object.keys(files).filter(path => path.startsWith("images/"))).toHaveLength(13);
+  for (const [index, marker] of markers.entries()) expect(Buffer.from(files[`images/codex-input-image-${index + 1}.png`]!))
+    .toEqual(Buffer.from(validImageUrl(marker).split(",")[1]!, "base64"));
 });
 
 test("Web compaction attaches the newest ten images as files and never embeds their base64 in prompt text", () => {
   const imagePayloads = Array.from({ length: 13 }, (_unused, index) =>
-    Buffer.from(`compaction-image-${index + 1}`).toString("base64"));
+    validImageUrl(`compaction-image-${index + 1}`).split(",")[1]!);
   const parsed: CodexParsedRequest = {
     modelId: CHATGPT_WEB_MODEL_ID,
     context: {
@@ -571,7 +690,7 @@ test("persisted one-pixel image sentinels are not attached to ChatGPT", () => {
         content: [
           { type: "text", text: "inspect the real image" },
           ...Array.from({ length: 30 }, () => ({ type: "image" as const, imageUrl: placeholder })),
-          { type: "image", imageUrl: "data:image/png;base64,real-image" },
+          { type: "image", imageUrl: validImageUrl("real-image") },
         ],
         timestamp: 1,
       }],
@@ -582,9 +701,20 @@ test("persisted one-pixel image sentinels are not attached to ChatGPT", () => {
 
   const compiled = compileChatGptWebPrompt(parsed, { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true });
 
-  expect(compiled.images.map(image => image.imageUrl)).toEqual(["data:image/png;base64,real-image"]);
+  expect(compiled.images.map(image => image.imageUrl)).toEqual([validImageUrl("real-image")]);
   expect(compiled.text.match(/"type":"image_attachment"/g)).toHaveLength(1);
   expect(compiled.text).not.toContain("older image not attached");
+});
+
+test("remote, malformed and unsupported images remain blocked with ZIP and multipart enabled", () => {
+  const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
+  for (const imageUrl of ["https://example.com/image.png", "data:image/png;base64,invalid-image", "data:image/svg+xml;base64,PHN2Zy8+"]) {
+    const parsed = request("high");
+    parsed.context.messages[1]!.content = [{ type: "image", imageUrl }];
+    expect(() => compileChatGptWebPrompt(parsed, capabilities, undefined, {
+      contextArchive: true, experimentalMultipartParts: 2,
+    })).toThrow("supported inline base64 data URLs");
+  }
 });
 
 test("the replayed context never carries a finished turn's broker handles", () => {
@@ -651,7 +781,7 @@ test("uses the public Instant name without leaking the browser menu alias into t
 
 test("keeps large contexts intact in the inline text envelope", () => {
   const token = "turn_12345678901234567890123456789012";
-  const largeContent = "x".repeat(600_000);
+  const largeContent = "x".repeat(220_000);
   const large = request("high");
   large.context.messages.push({
     role: "toolResult",
@@ -667,13 +797,23 @@ test("keeps large contexts intact in the inline text envelope", () => {
     token,
   );
 
-  expect(compiled.text.length).toBeGreaterThan(600_000);
+  expect(compiled.text.length).toBeGreaterThan(220_000);
   expect(compiled.text).toContain(largeContent);
   expect(compiled.text).toContain(token);
   expect(compiled.text).toContain(`<codex_context_json>`);
   expect(compiled.text).not.toContain(`<codex_context_attachment>`);
   expect(compiled.text).not.toContain("sha256");
   expect(compiled.text).not.toContain("SHA-256");
+  large.context.messages.at(-1)!.content = "x".repeat(600_000);
+  const archived = compileChatGptWebPrompt(large,
+    { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true }, token,
+    { contextArchive: true });
+  expect(archived.transportDecision?.choice).toBe("ZIP_SINGLE_MESSAGE");
+  expect(JSON.parse(archived.contextArchive!.contextText).messages.at(-1).content).toBe("x".repeat(600_000));
+  large.context.messages.at(-1)!.content = "x".repeat(1_000_000);
+  expect(() => compileChatGptWebPrompt(large,
+    { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true }, token,
+    { contextArchive: true })).toThrow("account budget");
 });
 
 test("serialized history cannot feed code-fence backtracking into ChatGPT's link lexer", () => {
@@ -686,6 +826,35 @@ test("serialized history cannot feed code-fence backtracking into ChatGPT's link
   expect(JSON.parse(encoded)).toEqual(original);
 });
 
+test("native skill globs cannot gain Markdown escapes in serialized history", () => {
+  // Real native Web trace463087445e91 first differed at references/*.md.
+  // Its two literal stars align with the two extra post-Send code units.
+  const original={content:'Read references/*.md and docs/**/*.md. Keep 2 * 3 and **bold** literally.',
+    '*key*':[String.raw`\u002a`,String.raw`\*`,'星号 * 日本語']};
+  const encoded=withoutRetiredTurnHandles(JSON.stringify(original));
+  expect(encoded).not.toContain('*');
+  expect(encoded).toContain('\\u002a');
+  expect(JSON.parse(encoded)).toEqual(original);
+});
+
+test("inline and multipart preserve original globs while avoiding literal asterisks", () => {
+  const parsed=request('high');
+  parsed.context.messages[1]!.content='Read references/*.md and keep **literal** plus \\u002a unchanged.';
+  const caps={localToolsEnabled:true,solAvailable:true,extraHighAvailable:true,proAvailable:true};
+  const inline=compileChatGptWebPrompt(parsed,caps,'turn_12345678901234567890123456789012');
+  const envelope=inline.text.split('<codex_context_json>\n')[1]!.split('\n</codex_context_json>')[0]!;
+  expect(envelope).not.toContain('*');
+  expect(JSON.parse(envelope).messages[1].content).toBe(parsed.context.messages[1]!.content);
+  unavoidableMultipart(parsed);
+  const multipart=compileChatGptWebPrompt(parsed,caps,'turn_12345678901234567890123456789012',
+    {experimentalMultipartParts:CHATGPT_BIGGER_CONTEXT_PARTS});
+  expect(multipart.multipart).toBeDefined();
+  for(const part of multipart.multipart!.parts){expect(part).not.toContain('*');expect(()=>JSON.parse(part)).not.toThrow();}
+  expect(multipart.multipart!.parts.flatMap(part=>JSON.parse(part).records)
+    .filter((record:{kind:string})=>record.kind==='message').map((record:{message:unknown})=>record.message))
+    .toEqual(JSON.parse(envelope).messages);
+});
+
 test("inline and multipart transports preserve code while escaping its Markdown delimiters", () => {
   const parsed = request("high");
   parsed.context.messages[1]!.content = '```python\nprint("hello")\n``` '.repeat(20);
@@ -694,6 +863,7 @@ test("inline and multipart transports preserve code while escaping its Markdown 
   const envelope = inline.text.split("<codex_context_json>\n")[1]!.split("\n</codex_context_json>")[0]!;
   expect(envelope).not.toContain("`");
   expect(JSON.stringify(JSON.parse(envelope))).toContain("```python");
+  unavoidableMultipart(parsed);
   const multipart = compileChatGptWebPrompt(parsed, capabilities, "turn_12345678901234567890123456789012", { experimentalMultipartParts: CHATGPT_BIGGER_CONTEXT_PARTS });
   expect(multipart.multipart).toBeDefined();
   for (const part of multipart.multipart!.parts) {
@@ -701,4 +871,10 @@ test("inline and multipart transports preserve code while escaping its Markdown 
     expect(() => JSON.parse(part)).not.toThrow();
   }
   expect(JSON.stringify(multipart.multipart!.parts.map(part => JSON.parse(part)))).toContain("```python");
+  expect(multipart.multipart!.parts.flatMap(part => JSON.parse(part).records)
+    .filter((record: { kind: string }) => record.kind === "system")
+    .map((record: { content: string }) => record.content)).toEqual(parsed.context.systemPrompt!);
+  expect(multipart.multipart!.parts.flatMap(part => JSON.parse(part).records)
+    .filter((record: { kind: string }) => record.kind === "message")
+    .map((record: { message: unknown }) => record.message)).toEqual(JSON.parse(envelope).messages);
 });

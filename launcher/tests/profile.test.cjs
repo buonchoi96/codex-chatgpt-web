@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { resolveLauncherProfile } = require("../electron/profile.cjs");
+const { resolveLauncherProfile, resolvePackagedWindowsDataPaths } = require("../electron/profile.cjs");
 
 test("DEV launcher profile isolates every durable home from production", () => {
   const homeDir = path.resolve("/Users/tester");
@@ -59,4 +59,14 @@ test("DEV launcher ignores generic production path overrides", () => {
   assert.equal(development.coreHome, path.join(homeDir, "isolated-dev"));
   assert.equal(development.codexHome, path.join(homeDir, "isolated-dev", "codex-home"));
   assert.equal(development.userData, path.join(homeDir, "isolated-dev", "launcher"));
+});
+
+
+test("packaged Windows layout keeps program and durable data under one E-drive root", () => {
+  const resolved = resolvePackagedWindowsDataPaths("E:\\Codex Web GPT\\App\\Codex Web GPT.exe");
+  assert.deepEqual(resolved, {
+    installRoot: "E:\\Codex Web GPT",
+    coreHome: "E:\\Codex Web GPT\\Data",
+    userData: "E:\\Codex Web GPT\\Data\\Launcher",
+  });
 });

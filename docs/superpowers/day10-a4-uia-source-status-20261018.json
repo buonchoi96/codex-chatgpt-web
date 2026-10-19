@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-A4 UIA native source status consistency",
+  "baseline": {
+    "web_branch": "main",
+    "web_head": "21c85a34f8f098462f6bd163b4dab895256b76b6",
+    "swift_branch": "main",
+    "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+    "preexisting_dirty_worktrees_preserved": true
+  },
+  "source_changed": "src/adapters/chatgpt-web/screen-observation.ts",
+  "test_changed": "tests/screen-observation-source-fidelity.test.ts",
+  "root_cause": "The bridge could publish UIA nodes despite an unsupported or failed native UIA provider receipt. A timed-out traversal can legitimately retain partial UIA nodes.",
+  "change": "Require source UIA status ok, or timeout with partial true, whenever UIA nodes are published. Preserve empty and unavailable providers with zero UIA nodes.",
+  "red": {
+    "command": "bun test tests/screen-observation-source-fidelity.test.ts",
+    "pass": 7,
+    "fail": 1,
+    "failure": "The new unsupported-source UIA test resolved instead of rejecting.",
+    "native_command_chunk_id": "1b446f"
+  },
+  "green": {
+    "command": "bun test tests/screen-observation-source-fidelity.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts tests/mcp-stdio-screen-observer.test.ts tests/screen-tree.test.ts tests/screen-reader-pipe-framing.test.ts",
+    "pass": 76,
+    "fail": 0,
+    "assertions": 421,
+    "files": 8,
+    "native_command_chunk_id": "3519a2",
+    "root_typecheck": "PASS",
+    "launcher_typecheck": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "sha256": {
+    "source": "D68BBFB21705FD4A3805E9D8767923935B200D7B2ECBF9EEB44EBBB383EDD15D",
+    "test": "84F149C838F91B2B7E880F7DEE9AD690A13AF7526F9FC1825466552CE9E24F03"
+  },
+  "full_suite": {
+    "rerun": false,
+    "historical_latest": "1627 passed, 93 skipped, 2 Windows EPERM failures",
+    "isolation_recheck": "Both previously failing symlink tests passed separately (1/1 each); temp symlink creation also succeeded. The cause of the earlier full-suite failure is unresolved."
+  },
+  "scope": {
+    "requirements_total": 175,
+    "counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+    "requirements_upgraded": 0,
+    "web_model_semantic_e2e": "UNVERIFIED",
+    "pixel_delivery": "UNAVAILABLE",
+    "production_or_global_config_changed": false,
+    "git_refs_changed": false,
+    "subagents_spawned": 0,
+    "main_model_effort": "UNVERIFIED_BY_CONNECTOR"
+  },
+  "next_safe_step": "Inspect a permitted authenticated native stdio receipt for source consistency, then pursue native Web-model semantic E2E only when the review and capability gates permit it."
+}

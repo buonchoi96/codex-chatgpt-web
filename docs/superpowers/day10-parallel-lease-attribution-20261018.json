@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C local native-command capacity preservation",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "source_files": ["src/adapters/chatgpt-web/parallel-native-commands.ts", "tests/parallel-native-capacity.test.ts"],
+  "change": "Bind each parallel child result to its exact NativeCommandLease, and prevent unidentified in-flight sibling terminal receipts from settling uncertain dispatches.",
+  "red_regression": "69 PASS / 1 FAIL; overlapping batches incorrectly admitted five further slots with two live and two unknown commands",
+  "green_regressions": "90 PASS / 0 FAIL / 326 assertions in parallel-native-capacity.test.ts and parallel-native-commands.test.ts",
+  "root_typecheck": "PASS / exit 0",
+  "full_suite": "1681 PASS / 93 SKIP / 2 FAIL / 11652 assertions / 1776 tests across 143 files / 235.58s",
+  "full_suite_log": "C:/Users/Long-PC/AppData/Local/Temp/day10-parallel-lease-full-suite-20261018.log",
+  "known_full_suite_errors": ["tests/codex-integration.test.ts:114 symlinkSync EPERM", "tests/codex-integration.test.ts:149 symlinkSync EPERM"],
+  "native_parallel_interface": "NOT_ADVERTISED; real 2-8 native overlap NOT_RUN",
+  "main_model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+  "scoped_safety_snapshot_sha256": "ab4e0de2b99420612a11e2be4328784a63b121b4c78b2ffa661b59c45d31d3d9",
+  "scoped_safety_pending": 18,
+  "acceptance_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "status_upgrades": 0,
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

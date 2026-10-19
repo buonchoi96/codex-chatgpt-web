@@ -64,7 +64,7 @@ test("Responses Lite native exec survives a complete server request as one custo
     body: JSON.stringify({
       model: "chatgpt-web/luna",
       stream: false,
-      metadata: { turn_id: turnId, thread_id: "thread_responses_lite_exec_regression" },
+      client_metadata: {'x-codex-turn-metadata':JSON.stringify({turn_id:turnId,thread_id:'thread_responses_lite_exec_regression'})},
       input: [{
         type: "additional_tools",
         role: "developer",

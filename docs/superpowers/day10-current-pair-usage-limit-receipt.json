@@ -1,0 +1,80 @@
+{
+  "at": "2026-10-16T11:21:16.443Z",
+  "status": "AGENT_TOPOLOGY_BLOCKED_LUNA_USAGE_LIMIT_EXCEEDED",
+  "active_children": 0,
+  "actors": [
+    {
+      "id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+      "role": "Coding / implementation",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl",
+      "last_actual_model": "gpt-6-luna",
+      "last_actual_effort": "high",
+      "terminal": {
+        "line": 1720,
+        "timestamp": "2026-10-16T07:13:31.311Z",
+        "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+        "error": "usage_limit_exceeded"
+      }
+    },
+    {
+      "id": "01a14341-fe53-7023-9755-4e420399e31a",
+      "role": "UI / research / test supervisor",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl",
+      "last_actual_model": "gpt-6-luna",
+      "last_actual_effort": "high",
+      "terminal": {
+        "line": 1801,
+        "timestamp": "2026-10-16T07:13:20.964Z",
+        "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+        "error": "usage_limit_exceeded"
+      }
+    }
+  ],
+  "unexecuted_work": {
+    "implementation_round": 11,
+    "supervisor_round": 9,
+    "pending_gates": "output/day10-observer-wiring-pending-gates-before-quota-20261016.json",
+    "source_changes_from_children": 0
+  },
+  "usage_api": {
+    "ordinaryUsageAllowed": true,
+    "codex_primary_used_percent": 8,
+    "codex_secondary_used_percent": 79,
+    "per_luna_bucket": "NOT EXPOSED",
+    "interpretation": "Ordinary allowance does not prove Luna availability. One explicit same-ID validation-only follow-up may establish current allocation; no new identity or model substitution."
+  },
+  "gates_authorized": false,
+  "production_changed": false,
+  "scope": "Quota failure is distinct from model drift, safety policy refusal and terminal stop semantics",
+  "recovery": {
+    "at": "2026-10-16T11:22:50.957Z",
+    "status": "SAME_TWO_IDS_EXPLICIT_LUNA_HIGH_NEW_TURNS_FULL_SCOPE_NATIVE_VERIFIED",
+    "new_identities": 0,
+    "actual_contexts": [
+      {
+        "id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+        "line": 1725,
+        "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      },
+      {
+        "id": "01a14341-fe53-7023-9755-4e420399e31a",
+        "line": 1806,
+        "turn_id": "01a14472-1245-78f2-a40f-f0a8d9d145a2",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "collaboration_model": "gpt-6-luna",
+        "collaboration_effort": "high",
+        "scope": "danger-full-access/never"
+      }
+    ],
+    "app_status": "Both exact IDs active/inProgress, no new-turn error in authoritative app snapshot",
+    "model_substitution": false,
+    "bare_resume": false,
+    "productive_gate_released_after_validation": true
+  }
+}

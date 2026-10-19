@@ -31,10 +31,11 @@ const {
   installProcessDiagnosticGuards,
   registerLoggedIpc,
 } = require("./logging.cjs");
+const { exportFullDebugBundle } = require("./debug-export.cjs");
 const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
-const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
+const { DEVELOPMENT_PROFILE, resolveLauncherProfile, resolvePackagedWindowsDataPaths } = require("./profile.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
 const {
@@ -50,6 +51,15 @@ const {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const SOURCE_ROOT = path.resolve(__dirname, "../..");
+if (process.platform === "win32" && app.isPackaged) {
+  const packagedData = resolvePackagedWindowsDataPaths(process.execPath);
+  if (!process.env.CODEX_CHATGPT_WEB_HOME?.trim()) {
+    process.env.CODEX_CHATGPT_WEB_HOME = packagedData.coreHome;
+  }
+  if (!process.env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR?.trim()) {
+    process.env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR = packagedData.userData;
+  }
+}
 const LAUNCHER_PROFILE = resolveLauncherProfile({ appData: app.getPath("appData") });
 const IS_DEV_PROFILE = LAUNCHER_PROFILE.kind === DEVELOPMENT_PROFILE;
 const CORE_HOME = LAUNCHER_PROFILE.coreHome;
@@ -731,7 +741,9 @@ function registerIpc({ logger, stateStore }) {
     }
     try {
       publishOperation({ name: operationName, status: "running", message: "Checking ChatGPT connector" });
-      await browserHost.verifyConnector(runtimeHost.mcpConnectorName());
+      await browserHost.verifyConnector(
+        runtimeHost.mcpConnectorName(), runtimeHost.runtimeConfigSnapshot().config?.tunnel?.tunnelId,
+      );
       const state = stateStore.update({ mcpSetupComplete: true });
       send("launcher:state-changed", state);
       const successMessage = IS_DEV_PROFILE
@@ -1051,6 +1063,25 @@ function registerIpc({ logger, stateStore }) {
       destinationPath: result.filePath,
     });
     logger.info("launcher.logs_exported", { recordCount });
+    return result.filePath;
+  });
+  handle("launcher:export-full-debug", async () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Export full debug bundle",
+      defaultPath: path.join(app.getPath("documents"), `codex-web-gpt-full-debug-${stamp}.zip`),
+      filters: [{ name: "ZIP archive", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    const exported = exportFullDebugBundle({
+      destinationPath: result.filePath,
+      coreHome: CORE_HOME,
+      launcherLogPath: logger.filePath,
+      launcherUserData,
+      version: app.getVersion(),
+      profile: LAUNCHER_PROFILE.kind,
+    });
+    logger.info("launcher.full_debug_exported", exported);
     return result.filePath;
   });
   handle("launcher:update-install", async () => {

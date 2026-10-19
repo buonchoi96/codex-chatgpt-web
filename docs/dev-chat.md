@@ -8,14 +8,25 @@ usable.
 ## Prerequisites
 
 - Use the repository-pinned Bun version.
-- Install a launcher built from the same working tree.
-- Start the isolated launcher with `bun run dev:launcher`.
+- Start the source launcher with `bun run launcher:dev`. `bun run dev:launcher` instead opens an
+  already installed launcher in its isolated DEV profile.
 - It skips the normal marketing onboarding and opens the setup surface directly. Sign in inside the
   window labelled **DEV**. This may be a different ChatGPT account.
 - Run its browser smoke test and initialize the DEV profile. Complete MCP setup only when testing
   simulated tool rounds; browser, effort, context-limit, and compaction work in browser-only mode.
   The launcher stores any MCP credentials only in the DEV home and supervises only that isolated
   tunnel. Create the ChatGPT connector as `Codex Native2 DEV`; keep `Codex Native2` unchanged.
+  Select the exact DEV tunnel configured in the Launcher MCP panel. The connector name alone
+  does not identify its runtime: a same-name plugin attached to another tunnel receives tokens
+  that its broker cannot accept.
+
+Full-mode prompt submission and Launcher connector verification compare the registered ChatGPT
+connector's tunnel with the configured local tunnel. A mismatch stops before sending the prompt
+with `connector_tunnel_mismatch`; unavailable or ambiguous routing metadata reports
+`connector_route_unverified`. Correct the DEV plugin registration, then verify again. Session
+credentials remain inside the authenticated ChatGPT page during this read-only check.
+The composer pill must also carry the verified connector ID. A retained pill from a renamed or
+replaced connector is cleared and selected again before the new prompt is attached.
 
 Nothing is copied from the normal launcher. The DEV command fails closed if its own launcher,
 browser descriptor, credentials, or connector are not ready. It never falls back to the production
@@ -26,7 +37,7 @@ profile, another model, a fake browser, or a second connector.
 One browser-only message:
 
 ```bash
-bun run dev:launcher
+bun run launcher:dev
 bun run src/cli.ts dev status
 bun run dev:chat smoke "Reply with exactly: DEV READY"
 ```

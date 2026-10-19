@@ -199,8 +199,9 @@ function firstRolloutRecord(fd: number, size: number): Record<string, unknown> {
   throw new Error("Codex rollout has no complete session metadata record");
 }
 
-function latestTurnContext(fd: number, size: number): Record<string, unknown> | undefined {
+function latestRolloutRecord(fd: number, size: number, type: string, maxScanBytes = Number.MAX_SAFE_INTEGER): Record<string, unknown> | undefined {
   let position = size;
+  let scanned = 0;
   let carry = Buffer.alloc(0);
   let firstSegmentAtEof = true;
   const fileEndsWithNewline = (() => {
@@ -210,7 +211,9 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
   })();
 
   while (position > 0) {
-    const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, position);
+    const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, position, maxScanBytes-scanned);
+    if(length<=0)return undefined;
+    scanned+=length;
     position -= length;
     const chunk = Buffer.alloc(length);
     const count = readSync(fd, chunk, 0, length, position);
@@ -228,7 +231,7 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
         throw new Error("Codex rollout JSONL record exceeds the bounded record size");
       }
       const item = parseJsonLine(line);
-      if (item.type === "turn_context") return record(item.payload);
+      if (item.type === type) return record(item.payload);
     }
     carry = Buffer.from(data.subarray(0, lineEnd));
     if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
@@ -237,7 +240,207 @@ function latestTurnContext(fd: number, size: number): Record<string, unknown> | 
   }
   if (carry.length === 0) return undefined;
   const item = parseJsonLine(carry);
-  return item.type === "turn_context" ? record(item.payload) : undefined;
+  return item.type === type ? record(item.payload) : undefined;
+}
+
+function latestTurnContext(fd:number,size:number):Record<string,unknown>|undefined {
+  return latestRolloutRecord(fd,size,'turn_context');
+}
+
+/** Read the newest completed installation witness, never an older matching checkpoint.
+ * A bounded backwards lookup avoids scanning a long-running task on every replay. */
+export function latestNativeCompactionRecord(fd:number,size:number):Record<string,unknown>|undefined {
+  return latestRolloutRecord(fd,size,'compacted',32*1024*1024);
+}
+
+/**
+ * Verify /goal resume against the exact native rollout, not XML or the browser's cache.
+ * Both the last historical human instruction and the new goal-control fragment must be
+ * recorded with their native ids and turn owners on opposite sides of task_started.
+ * A newer human message supersedes the historical instruction.
+ */
+export function verifyNativeGoalContinuationItems(
+  fd: number, size: number, currentTurnId: string,
+  historical: { id: string; turnId: string; content: unknown },
+  goal: { id: string; content: unknown },
+): boolean {
+  if (size <= 0 || size > 256 * 1024 * 1024
+    || historical.turnId === currentTurnId
+    || !historical.id || !goal.id || historical.id === goal.id) return false;
+  let position = 0;
+  let carry = Buffer.alloc(0);
+  let sawHistorical = false;
+  let sawBoundary = false;
+  let sawGoal = false;
+  let newerInstruction = false;
+  while (position < size) {
+    const count = Math.min(ROLLOUT_READ_CHUNK_BYTES, size - position);
+    const chunk = Buffer.alloc(count);
+    if (readSync(fd, chunk, 0, count, position) !== count) return false;
+    position += count;
+    const data = Buffer.concat([carry, chunk]);
+    let start = 0;
+    for (let end = data.indexOf(0x0a); end >= 0; end = data.indexOf(0x0a, start)) {
+      const line = data.subarray(start, end);
+      start = end + 1;
+      if (!line.length) continue;
+      if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
+      const item = parseJsonLine(line);
+      const payload = record(item.payload);
+      if (item.type === "event_msg" && payload?.type === "task_started" && payload.turn_id === currentTurnId) {
+        if (!sawHistorical || newerInstruction || sawBoundary) return false;
+        sawBoundary = true;
+      }
+      if (item.type !== "response_item" || payload?.type !== "message" || payload.role !== "user") continue;
+      const owner = record(payload.internal_chat_message_metadata_passthrough)?.turn_id;
+      if (!sawBoundary) {
+        if (payload.id === historical.id) {
+          if (owner !== historical.turnId || !isDeepStrictEqual(payload.content, historical.content)) return false;
+          sawHistorical = true;
+          newerInstruction = false;
+        } else if (sawHistorical) {
+          const kinds = record(payload.internal_chat_message_metadata_passthrough)?.content_item_kinds;
+          if (Array.isArray(kinds) && kinds.some(kind => kind === "user.text" || kind === "user.image")) {
+            newerInstruction = true;
+          }
+        }
+      } else if (payload.id === goal.id) {
+        if (sawGoal || (owner !== undefined && owner !== currentTurnId)
+          || !isDeepStrictEqual(payload.content, goal.content)) return false;
+        sawGoal = true;
+      } else if (sawGoal) {
+        // A later human or unknown user-role item can supersede this goal.
+        // Only explicitly typed, native-owned non-human context is harmless.
+        // Assistant output and tool results are not user-role items.
+        const native = record(payload.internal_chat_message_metadata_passthrough);
+        const kinds = native?.content_item_kinds;
+        if (typeof payload.id !== "string" || !payload.id
+          || typeof native?.turn_id !== "string" || !native.turn_id
+          || !Array.isArray(kinds) || kinds.length===0
+          || !kinds.every(kind=>typeof kind==="string"&&NATIVE_NONHUMAN_USER_KINDS.has(kind)))
+          return false;
+      }
+    }
+    carry = Buffer.from(data.subarray(start));
+    if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
+  }
+  return carry.length === 0 && sawHistorical && sawBoundary && sawGoal && !newerInstruction;
+}
+
+/**
+ * Bounded native-only witness for a standalone /compact request whose transient turn_context
+ * has not appeared on disk. The most recent authenticated human instruction must be exactly
+ * the claimed source. An intervening human instruction, missing source, or malformed record
+ * must fail closed rather than rebinding a checkpoint to a different task.
+ */
+export type LatestNativeCompactionSourceReason =
+  | "matched"
+  | "invalid_source_or_size"
+  | "native_read_failed"
+  | "native_record_oversize"
+  | "native_record_incomplete"
+  | "untyped_native_user_after_instruction"
+  | "native_user_identity_missing"
+  | "no_typed_native_user"
+  | "source_not_in_native_rollout"
+  | "superseded_by_newer_native_user"
+  | "native_source_owner_differs"
+  | "native_source_content_differs";
+
+/** Native-tagged context is not a human instruction even when its content is
+ * prose (e.g. the AGENTS.md instruction refresh). This allowlist is intentionally
+ * closed: unknown or missing kinds must never be silently treated as context. */
+const NATIVE_NONHUMAN_USER_KINDS=new Set([
+  "agents_md.instructions",
+  "environments.environment_context",
+  "additional_content.codex_apps_open_page",
+]);
+
+/** Diagnostic classification only: no file path, instruction text, ids, or hashes
+ * are logged. A failed witness never grants permission to compact. */
+export function diagnoseLatestNativeCompactionSource(
+  fd: number, size: number,
+  source: { id: string; turnId?: string; content: unknown },
+): { matches: boolean; reason: LatestNativeCompactionSourceReason } {
+  const reject=(reason:LatestNativeCompactionSourceReason)=>({matches:false,reason});
+  if (size <= 0 || size > 256 * 1024 * 1024 || !source.id
+    || (source.turnId !== undefined && !source.turnId)) return reject("invalid_source_or_size");
+  let offset=0;
+  let pending=Buffer.alloc(0);
+  let latest: { id:string;turnId:string;content:unknown } | undefined;
+  let sawCandidateId=false;
+  let untypedAfterLatest=false;
+  while(offset<size){
+    const length=Math.min(ROLLOUT_READ_CHUNK_BYTES,size-offset);
+    const chunk=Buffer.alloc(length);
+    if(readSync(fd,chunk,0,length,offset)!==length)return reject("native_read_failed");
+    offset+=length;
+    const data=Buffer.concat([pending,chunk]);
+    let start=0;
+    for(let end=data.indexOf(0x0a);end>=0;end=data.indexOf(0x0a,start)){
+      const line=data.subarray(start,end);
+      start=end+1;
+      if(!line.length)continue;
+      if(line.length>MAX_ROLLOUT_JSON_LINE_BYTES)return reject("native_record_oversize");
+      const item=parseJsonLine(line);
+      const payload=record(item.payload);
+      if(item.type!=="response_item"||payload?.type!=="message"||payload.role!=="user")continue;
+      const metadata=record(payload.internal_chat_message_metadata_passthrough);
+      const kinds=metadata?.content_item_kinds;
+      const content=payload.content;
+      const bodyText=typeof content==="string"?content:
+        Array.isArray(content)&&content.every(part=>(
+          record(part)?.type==="input_text"&&typeof record(part)?.text==="string"
+        ))?content.map(part=>record(part)!.text).join("\n"):"";
+      const trimmed=bodyText.trim();
+      const nativeContext=/^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(trimmed)
+        ||/^<(environment_context|goal_context|turn_aborted|subagent_notification)>[\s\S]*<\/\1>$/.test(trimmed)
+        ||bodyText.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
+        ||trimmed==="[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
+      // Native metadata provides stronger evidence than text wrapping: some
+      // control-plane context is normal prose without XML markers. Ignore it
+      // only when the native record has a complete, known non-human kind and
+      // an authenticated owner. Never extend this to arbitrary untyped items.
+      const typedNativeContext=typeof payload.id==="string"&&payload.id.length>0
+        &&typeof metadata?.turn_id==="string"&&metadata.turn_id.length>0
+        &&Array.isArray(kinds)&&kinds.length>0
+        &&kinds.every(kind=>typeof kind==="string"&&NATIVE_NONHUMAN_USER_KINDS.has(kind));
+      if(nativeContext||typedNativeContext)continue;
+      if(!Array.isArray(kinds)||!kinds.some(kind=>kind==="user.text"||kind==="user.image")){
+        // Order matters: an untyped item BETWEEN two typed human instructions
+        // cannot supersede the *later* typed human. Defer rejection until the
+        // entire native rollout is read; only a trailing untyped item is fatal.
+        if(latest!==undefined)untypedAfterLatest=true;
+        continue;
+      }
+      const id=payload.id,turnId=metadata?.turn_id;
+      if(typeof id!=="string"||!id||typeof turnId!=="string"||!turnId)
+        return reject("native_user_identity_missing");
+      if(id===source.id)sawCandidateId=true;
+      latest={id,turnId,content:payload.content};
+      untypedAfterLatest=false;
+    }
+    pending=Buffer.from(data.subarray(start));
+    if(pending.length>MAX_ROLLOUT_JSON_LINE_BYTES)return reject("native_record_oversize");
+  }
+  if(pending.length!==0)return reject("native_record_incomplete");
+  if(latest===undefined)return reject("no_typed_native_user");
+  if(untypedAfterLatest)return reject("untyped_native_user_after_instruction");
+  if(latest.id!==source.id)return reject(sawCandidateId
+    ?"superseded_by_newer_native_user":"source_not_in_native_rollout");
+  if(source.turnId!==undefined&&latest.turnId!==source.turnId)
+    return reject("native_source_owner_differs");
+  if(!isDeepStrictEqual(latest.content,source.content))
+    return reject("native_source_content_differs");
+  return {matches:true,reason:"matched"};
+}
+
+/** Only exact native user provenance authorizes a standalone compact. */
+export function verifyLatestNativeCompactionSource(
+  fd: number, size: number,
+  source: { id: string; turnId?: string; content: unknown },
+): boolean {
+  return diagnoseLatestNativeCompactionSource(fd,size,source).matches;
 }
 
 function verifyHistoricalEnvironmentMessages(
@@ -609,17 +812,36 @@ function validateMetadataConsistency(
   }
 }
 
-export function resolveCurrentCodexRolloutEnvironment(options: {
+export interface CurrentCodexRolloutOptions {
   codexHome: string;
   additionalCodexHomes?: readonly string[];
   sqliteHome?: string;
   lineage: RolloutIdentity;
   turnId: string;
   compactionSourceTurnId?: string;
+  /** Only a native-verified latest human instruction can bridge a transient compact turn. */
+  compactionSource?: { id: string; turnId?: string; content: unknown };
   tools?: readonly CodexTool[];
   historicalEnvironmentMessages?: ChatGptUnattributedEnvironmentMessage[];
-}): CodexRolloutEnvironment | undefined {
+  /** Internal root-only fallback when current Codex metadata omits optional
+   * workspace/sandbox claims. The authority must come exclusively from the
+   * exact current native root turn, never from the request or a cache. */
+  nativeCurrentRootOnly?: boolean;
+}
+
+/** The inspector runs synchronously while the exact authenticated file is open.
+ * It must not retain the descriptor. No model-provided path is accepted. */
+export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions,
+  inspect:(snapshot:{fd:number;size:number;turn:Record<string,unknown>;environment:ChatGptTurnEnvironment;workspaceRootsDeclared:boolean})=>T,
+  validateAppend?:(snapshot:{fd:number;size:number})=>void):T|undefined {
   const { codexHome, lineage, turnId, tools, compactionSourceTurnId } = options;
+  const nativeRootOnly=options.nativeCurrentRootOnly===true;
+  if(nativeRootOnly && ("parentThreadId" in lineage
+    || lineage.sandboxType!=="platform" || lineage.workspaceRoots.length!==0
+    || compactionSourceTurnId!==undefined || options.compactionSource!==undefined
+    || options.historicalEnvironmentMessages!==undefined)) {
+    throw new Error("Native root fallback cannot carry delegated or request-derived authority");
+  }
   const nativeThreadId = CODEX_ID.test(lineage.threadId);
   const nativeTurnId = CODEX_ID.test(turnId);
   if (!nativeThreadId && !nativeTurnId) return undefined;
@@ -628,13 +850,14 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     throw new Error("Codex thread metadata contains an invalid native identifier");
   }
 
-  // Establish one home before interpreting its permissions. Even a stale copy of
-  // the same thread in another registered home makes ownership ambiguous.
+  // An explicit shared-home registry must resolve the same thread to one and only
+  // one native owner. Never inherit CODEX_SQLITE_HOME into secondary homes.
   const owners = [codexHome, ...(options.additionalCodexHomes ?? [])].map((home, index) => {
     const indexed = indexedRollout(configuredSqliteHome(
       home, index === 0 ? options.sqliteHome : undefined, index === 0,
     ), lineage);
-    const candidates = indexed.kind === "found" ? [indexed.path] : scanCanonicalRollouts(home, lineage.threadId);
+    const candidates = indexed.kind === "found"
+      ? [indexed.path] : scanCanonicalRollouts(home, lineage.threadId);
     return { home, indexed, candidates };
   }).filter(owner => owner.candidates.length > 0);
   if (owners.length > 1) throw new Error("Codex thread exists in multiple trusted homes");
@@ -644,29 +867,52 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     throw new Error("Codex has no canonical rollout for the requested subagent thread");
   }
 
-  const matching: CodexRolloutEnvironment[] = [];
+  const matching: T[] = [];
   for (const candidate of owner.candidates) {
     const rolloutPath = validateRolloutPath(owner.home, candidate, lineage.threadId);
     const fd = openSync(rolloutPath, "r");
     try {
-      const size = fstatSync(fd).size;
+      const before=fstatSync(fd),size=before.size;
       if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Codex rollout is empty");
       validateSessionMeta(firstRolloutRecord(fd, size), lineage);
       const latest = latestTurnContext(fd, size);
       if (!latest) throw new Error("Codex rollout has no complete turn context");
       if (latest.turn_id !== turnId && (compactionSourceTurnId === undefined || latest.turn_id !== compactionSourceTurnId)) {
-        if (owner.indexed.kind === "found") {
-          throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
+        // A standalone compact is not always assigned a persisted turn_context before
+        // its request is routed. The exact newest native human source is independently
+        // verifiable from the same rollout; arbitrary older messages are never enough.
+        const sourceDiagnostic = options.compactionSource === undefined
+          ? undefined : diagnoseLatestNativeCompactionSource(fd, size, options.compactionSource);
+        if (sourceDiagnostic?.matches !== true) {
+          // Diagnostically distinguish an absent source witness from an exact
+          // native mismatch, without logging paths, message IDs or user text.
+          console.warn("[chatgpt-web] native_rollout_source_mismatch " + JSON.stringify({
+            compactionSourceProvided: options.compactionSource !== undefined,
+            sourceOwnerProvided: options.compactionSource?.turnId !== undefined,
+            latestNativeHumanMatches: false,
+            mismatchReason: sourceDiagnostic?.reason ?? "source_not_provided",
+            indexedRollout: owner.indexed.kind === "found",
+          }));
+          if (owner.indexed.kind === "found") {
+            throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
+          }
+          continue;
         }
-        continue;
       }
       const environment = environmentFromTurnContext(latest, latest.turn_id as string, tools);
       const workspaceRootsDeclared = latest.workspace_roots !== undefined;
-      validateMetadataConsistency(lineage, environment, workspaceRootsDeclared);
+      if (!nativeRootOnly) validateMetadataConsistency(lineage, environment, workspaceRootsDeclared);
       if (options.historicalEnvironmentMessages) {
         verifyHistoricalEnvironmentMessages(fd, size, turnId, options.historicalEnvironmentMessages);
       }
-      matching.push({ environment, workspaceRootsDeclared });
+      const inspected=inspect({fd,size,turn:latest,environment,workspaceRootsDeclared});
+      const after=fstatSync(fd);
+      if(after.size<size)throw new Error('Codex rollout shrank during provenance lookup');
+      if(after.size===size&&after.mtimeMs!==before.mtimeMs)throw new Error('Codex rollout was rewritten during provenance lookup');
+      if(after.size>size&&JSON.stringify(latestTurnContext(fd,after.size))!==JSON.stringify(latest))
+        throw new Error('Codex rollout turn changed during provenance lookup');
+      if(after.size>size)validateAppend?.({fd,size:after.size});
+      matching.push(inspected);
     } finally {
       closeSync(fd);
     }
@@ -678,4 +924,40 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     throw new Error("Codex has multiple canonical rollouts for the requested current turn");
   }
   return matching[0]!;
+}
+
+/**
+ * A resumed root turn can omit its workspace/sandbox envelope after restarting
+ * the bridge. Recover exclusively from the exact current native Codex rollout:
+ * canonical path, root session_meta, latest matching turn_context and matching
+ * model/effort. Never use the persisted ChatGPT environment file as authority.
+ * Subagents, older turns, different models and missing native files fail closed.
+ */
+export function resolveExactNativeRootTurnEnvironment(options:{
+  codexHome:string;
+  sqliteHome?:string;
+  threadId:string;
+  turnId:string;
+  modelId:string;
+  effort?:string;
+  tools?:readonly CodexTool[];
+}):ChatGptTurnEnvironment|undefined {
+  if (!CODEX_ID.test(options.threadId) || !CODEX_ID.test(options.turnId)
+    || !options.modelId || !options.effort) return undefined;
+  return inspectCurrentCodexRollout({
+    codexHome:options.codexHome,
+    ...(options.sqliteHome?{sqliteHome:options.sqliteHome}:{}),
+    lineage:{threadId:options.threadId,sandboxType:"platform",workspaceRoots:[]},
+    turnId:options.turnId,
+    tools:options.tools,
+    nativeCurrentRootOnly:true,
+  },({turn,environment})=>{
+    if(turn.model!==options.modelId || turn.effort!==options.effort)
+      throw new Error("Native root current model/effort differs from the Codex request");
+    return environment;
+  });
+}
+
+export function resolveCurrentCodexRolloutEnvironment(options:CurrentCodexRolloutOptions):CodexRolloutEnvironment|undefined {
+  return inspectCurrentCodexRollout(options,({environment,workspaceRootsDeclared})=>({environment,workspaceRootsDeclared}));
 }

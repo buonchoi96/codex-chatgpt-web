@@ -12,7 +12,7 @@ const prompt = "Suggest the next user message. Return only JSON with a suggestio
 const base = {
   model: "chatgpt-web/gpt-6-pro", reasoning: { effort: "max" }, stream: false,
   client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) },
-  input: [{ type: "message", role: "user", content: [{ type: "input_text", text: prompt }] }],
+  input: [{ type: "message", role: "user", id:'msg_prediction_fixture',content: [{ type: "input_text", text: prompt }] }],
   text: { format: { type: "json_schema", name: "suggestion", strict: true,
     schema: { type: "object", properties: { suggestion: { type: ["string", "null"] } }, required: ["suggestion"], additionalProperties: false } } },
 };
@@ -87,17 +87,32 @@ test("oversized predictions skip rather than opening a tab, staging, or silently
 test("excess image context skips predictions rather than omitting images", async () => {
   const result = await send({ ...base, input: [{ type: "message", role: "user", content: [
     { type: "input_text", text: prompt },
-    ...Array.from({ length: 11 }, (_, i) => ({ type: "input_image", image_url: `https://example.com/${i}.png` })),
+    ...Array.from({ length: 11 }, () => ({ type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==" })),
   ] }] });
   expect(result.response.status).toBe(400);
   expect(result.constructions).toBe(0);
   expect(result.text).toContain("more images");
 });
 
-test("prompt wording and inherited thread source do not reclassify real user turns", async () => {
+test("remote image predictions stop before adapter creation because the uploader requires inline bytes", async () => {
+  const result = await send({ ...base, input: [{ type: "message", role: "user", content: [
+    { type: "input_text", text: prompt },
+    { type: "input_image", image_url: "https://example.com/image.png" },
+  ] }] });
+  expect(result.response.status).toBe(400);
+  expect(result.constructions).toBe(0);
+  expect(result.text).toContain("supported inline base64 data URLs");
+});
+
+test("prompt wording cannot authorize unproven replay or reclassify a canonical real user turn", async () => {
   for (const client_metadata of [undefined, { "x-codex-turn-metadata": "not-json" },
     { "x-codex-turn-metadata": JSON.stringify({ ...metadata, turn_trigger: "user" }) }]) {
-    const { response, observed } = await send({ ...base, client_metadata });
+    const { response, observed,constructions,text } = await send({ ...base, client_metadata });
+    if(!client_metadata||client_metadata['x-codex-turn-metadata']==='not-json'){
+      expect(response.status).toBe(400);expect(constructions).toBe(0);
+      expect(JSON.parse(text).error.code).toBe('REPLAY_PROVENANCE_UNVERIFIED');
+      continue;
+    }
     expect(response.status).toBe(200);
     expect(observed!.parsed).toMatchObject({ _chatgptModelFamily: "6", options: { reasoning: "max" } });
     expect(observed!.provider.chatgptWeb!.localToolsEnabled).toBe(true);

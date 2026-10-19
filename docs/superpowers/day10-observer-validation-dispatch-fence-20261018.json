@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-A2 native grant authority revalidation immediately before observer dispatch",
+  "goal_status": "ACTIVE",
+  "preceding_turn_classification": "PROGRESS: prior P0-A2/A4 owner_epoch rollback fix and safety snapshot reconciliation were verified in source and receipts",
+  "workspace": {
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+    "web": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "existing_dirty_worktrees_preserved": true,
+    "git_ref_changes": 0,
+    "production_or_global_config_changes": 0
+  },
+  "implementation": {
+    "source": "src/adapters/chatgpt-web/screen-observation.ts",
+    "test": "tests/screen-observation.test.ts",
+    "defect": "ScreenObservationRegistry.observe read a valid entry, awaited broker validation and dispatched the native provider even when the entry was replaced or expired while validation was pending.",
+    "fix": "Before provider dispatch, compare the same grant-entry object against current broker-binding registry state and reject expired grants as SCREEN_READER_STALE; retain existing cancellation and post-observation publication validation.",
+    "regression": "Two deterministic asynchronous barriers replace the grant with a higher epoch or expire its lease while validation is pending. Both require zero provider calls and zero dispatch receipts."
+  },
+  "red": {
+    "command": "bun test tests/screen-observation.test.ts",
+    "result": "14 PASS / 1 FAIL",
+    "failure": "providerCalls was 1 rather than 0 when authority changed before dispatch",
+    "log": "output/day10-observer-pre-dispatch-grant-red-20261018.log"
+  },
+  "green": {
+    "targeted": "93 PASS / 0 FAIL / 505 assertions across 9 files",
+    "log": "output/day10-observer-pre-dispatch-grant-green-20261018.log",
+    "root_typecheck": "PASS: bun run typecheck",
+    "self_review": "Guard only the already validated binding entry's pre-dispatch lifetime; preserve current-session grant renewal and higher-epoch rotation, native observer image disabled and original broker denial behavior.",
+    "native_build": "NOT RUN: Web TypeScript-only change",
+    "full_web_suite": "NOT RUN this phase; previous full suite 1637 PASS / 93 SKIP / 2 EPERM symlink fixture failures"
+  },
+  "e2e": {
+    "isolated_mcp_stdio_regressions": "PASS as part of the 93-test group; source-contract and tool-protocol fixtures",
+    "fresh_owned_desktop_native_e2e": "NOT RUN; historical fixture had FOCUS_FAILED, current LockApp process existence alone does not establish current foreground",
+    "real_web_model_semantic_e2e": "NOT RUN; codex_screen_observe is not advertised in current native connector inventory",
+    "model_visible_pixels": "UNVERIFIED; mode remains DISABLED",
+    "cpu_auto_multiworker": "UNVERIFIED",
+    "native_parallel_exec": "NOT ADVERTISED"
+  },
+  "safety_review": {
+    "advisory": "docs/superpowers/day10-scoped-safety-advisory-20261018.json",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578",
+    "pending": 10,
+    "current_native_review_tool": "NOT ADVERTISED",
+    "original_refused_desktop_observe_calls_retried": 0,
+    "blocker_status": "PENDING_SAFETY_REVIEW"
+  },
+  "matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0},
+  "agents": {"spawned": 0,"actual_main_model_and_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR"},
+  "next_safe_step": "Continue A1/A2/A4 source-to-runtime semantic observer acceptance through an isolated authorized foreground fixture when a genuine model-facing route is available; retain unrelated refusal prerequisites, inspect CPU AUTO live allocation separately."
+}

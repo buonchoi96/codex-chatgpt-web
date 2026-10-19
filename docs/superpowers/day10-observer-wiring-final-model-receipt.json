@@ -1,0 +1,227 @@
+{
+  "at": "2026-10-16T12:40:34.491Z",
+  "status": "SAME_TWO_LUNA_HIGH_VERIFIED_AFTER_COMPLETION",
+  "main": {
+    "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+    "line": 19360,
+    "turn_id": "01a14467-9fa7-7550-b236-dc2ff038af1b",
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "collaboration_model": "gpt-6.1-sol",
+    "collaboration_effort": "high",
+    "approval_policy": "never",
+    "sandbox": "danger-full-access"
+  },
+  "actors": [
+    {
+      "agent_id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+      "nickname": "Huygens",
+      "role": "Coding / implementation",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-20-01a14341-fcd1-7a91-8345-00b3e0fa1e40.jsonl",
+      "meta": {
+        "line": 1,
+        "id": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+        "source": {
+          "subagent": {
+            "thread_spawn": {
+              "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+              "depth": 1,
+              "agent_path": null,
+              "agent_nickname": "Huygens",
+              "agent_role": null
+            }
+          }
+        },
+        "cli_version": "0.163.0-alpha.10.2"
+      },
+      "contexts": [
+        {
+          "line": 8,
+          "turn_id": "01a14341-fe17-7200-920f-611187a96248",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 882,
+          "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 975,
+          "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 1725,
+          "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 2356,
+          "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 2824,
+          "turn_id": "01a1449b-e47d-7c23-ab1c-6f555563d4b6",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        }
+      ],
+      "terminal": [
+        {
+          "line": 1720,
+          "timestamp": "2026-10-16T07:13:31.311Z",
+          "turn_id": "01a14367-8786-7bb1-934f-99658b42a366",
+          "error": {
+            "message": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 5:38 PM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        },
+        {
+          "line": 2820,
+          "timestamp": "2026-10-16T12:03:08.233Z",
+          "turn_id": "01a14471-f257-7302-8895-cc0c79da8b9c",
+          "error": null
+        },
+        {
+          "line": 3395,
+          "timestamp": "2026-10-16T12:31:30.145Z",
+          "turn_id": "01a1449b-e47d-7c23-ab1c-6f555563d4b6",
+          "error": null
+        }
+      ],
+      "status": "completed normally; app idle and native wait completed independently verified; cooperative stop gate true"
+    },
+    {
+      "agent_id": "01a14341-fe53-7023-9755-4e420399e31a",
+      "nickname": "Confucius",
+      "role": "UI / research / test supervisor",
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "high",
+      "requested_fork_turns": "none",
+      "native_file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T12-49-21-01a14341-fe53-7023-9755-4e420399e31a.jsonl",
+      "meta": {
+        "line": 1,
+        "id": "01a14341-fe53-7023-9755-4e420399e31a",
+        "source": {
+          "subagent": {
+            "thread_spawn": {
+              "parent_thread_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+              "depth": 1,
+              "agent_path": null,
+              "agent_nickname": "Confucius",
+              "agent_role": null
+            }
+          }
+        },
+        "cli_version": "0.163.0-alpha.10.2"
+      },
+      "contexts": [
+        {
+          "line": 8,
+          "turn_id": "01a14341-ffd4-7450-9028-805bf419e046",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 516,
+          "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 1183,
+          "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        },
+        {
+          "line": 1806,
+          "turn_id": "01a14472-1245-78f2-a40f-f0a8d9d145a2",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "approval_policy": "never",
+          "sandbox": "danger-full-access"
+        }
+      ],
+      "terminal": [
+        {
+          "line": 510,
+          "timestamp": "2026-10-16T06:12:28.164Z",
+          "turn_id": "01a14341-ffd4-7450-9028-805bf419e046",
+          "error": null
+        },
+        {
+          "line": 1801,
+          "timestamp": "2026-10-16T07:13:20.964Z",
+          "turn_id": "01a1435d-6291-7922-80f1-a1d7d66f9750",
+          "error": {
+            "message": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 5:38 PM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        },
+        {
+          "line": 3536,
+          "timestamp": "2026-10-16T12:36:57.120Z",
+          "turn_id": "01a14472-1245-78f2-a40f-f0a8d9d145a2",
+          "error": null
+        }
+      ],
+      "status": "completed normally; app idle and native wait completed independently verified; cooperative stop gate true"
+    }
+  ],
+  "productive_active_child_count": 0,
+  "open_completed_children": 2,
+  "lifecycle_evidence": "App wait_threads reports idle/completed with error:null for both; native wait_agent returned both completed; gate stop:true alone is not lifecycle proof.",
+  "new_identities": 0,
+  "bare_resume": false,
+  "permanent_native_resume_fix": false,
+  "original_spawn_receipt": "docs/superpowers/day10-compaction-cancel-pair-receipt.json",
+  "historical_mismatch": "docs/superpowers/plans/2026-10-14-subagent-model-audit.md"
+}

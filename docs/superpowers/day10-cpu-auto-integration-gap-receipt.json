@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-16T17:00:40.324Z",
+  "status": "SOURCE_CONFIRMED_CPU_AUTO_INTEGRATION_GAP; NO NEW BENCHMARK_OR_SPEEDUP_CLAIM",
+  "source_sha256": {
+    "native/src/observer_engine.cpp": "bd4a3d33ecfd95131f4bfbcb00a40d4686ad99cccd6b291f61c1ad6dfc9c22b1",
+    "native/include/observer_engine.hpp": "6db9d404928a1cbefeebb0629fc714aaf2eded49b111455882c3824c36d92466",
+    "native/src/observer_cpu.cpp": "c996a18eb1553624087da01421e47042808f4dee166d5a6bbda3032bed54f209",
+    "native/tests/observer_analysis_bench.cpp": "9a81a5e48a27e99b029ad19442df4be3c5039831475b01b910f93f157311c33e"
+  },
+  "findings": [
+    {
+      "id": "CPU-AUTO-INTEGRATED-PRESSURE-UNKNOWN",
+      "evidence": "native/src/observer_engine.cpp:17 is the only production caller of update_pressure and always passes an empty PressureSample; native/include/observer_engine.hpp has no measured pressure/throughput input.",
+      "effect": "Every analyze call sets concurrency limit1 through the unknown-pressure branch, even if a hypothetical process allocation were verified. Standalone pool tests do not establish production dynamic recovery."
+    },
+    {
+      "id": "CPU-AUTO-ALLOCATION-UNCERTAIN",
+      "evidence": "native/src/observer_cpu.cpp records job_ancestor_limits_unverified for processes inside a Job Object; bootstrap_cpu_budget conservatively returns effective1/worker1. Existing real20-fixture and synthetic benchmark receipts observe this condition.",
+      "effect": "Do not remove the uncertainty marker, fabricate allocation proof, force more workers or claim a measured AUTO speedup from existing results."
+    },
+    {
+      "id": "CPU-AUTO-STANDALONE-BENCH-SCOPE",
+      "evidence": "native/tests/observer_analysis_bench.cpp directly instantiates ObserverCpuPool and does not call ObserverEngine::analyze/update_pressure; current actual budget was1.",
+      "effect": "A future standalone multiworker result would still not prove the integrated engine telemetry path."
+    }
+  ],
+  "next_safe_implementation": [
+    "Define a native-owned bounded telemetry provider with unknown/stale/nonfinite handling; it must not trust externally supplied CPU-count or Web-model hints.",
+    "Wire actual measurement into engine while preserving one-worker behavior for uncertain allocation or unavailable telemetry, foreground/deadline backoff, cancellation and immutable frame admission.",
+    "Design measured exploration/recovery so the throughput-improved predicate is supplied by real matched samples rather than a fabricated true flag; prove deterministic unit cases before any new authorized native benchmark.",
+    "Only claim multiworker speedup when actual effective allocation and integrated same-workload measurements are verified. Existing UI cases and denied native hash operations remain unreplayed."
+  ],
+  "runtime_calls": 0,
+  "ui_calls": 0,
+  "swift_source_changes": 0,
+  "observer_image_mode": "DISABLED",
+  "goal_status": "ACTIVE"
+}

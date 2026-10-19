@@ -1,0 +1,81 @@
+{
+  "at": "2026-10-16T05:52:09.852Z",
+  "status": "LOCAL_PRIMITIVE_AND_MCP_BROKER_CANCELLATION_FIX_ACCEPTED",
+  "baseline_head": "73b628d4641e1e5c5830b18663ef6dcfce8eae51",
+  "scope": "Submitted but unconsumed compaction control summary must not outrank an already-aborted operator signal",
+  "source_sha256": {
+    "src/adapters/chatgpt-web/compaction-transaction.ts": "ddb4e43524bf89c70b33a87cf613534d3c172da52c8a67ab095c6da791703f21",
+    "tests/compaction-transaction.test.ts": "bea59e64fad7a6682f3e7ec54b2933223301d1ce7a62ca334c596aacb187ced9",
+    "tests/compaction-cancellation-broker.test.ts": "2521f2366a9b33b5484db41dc2d1e00414e75ceb0866700a735aa07ff5c22586"
+  },
+  "red": {
+    "log": "output/day10-compaction-cancel-before-consume-red-corrected-20261016.log",
+    "pass": 2,
+    "fail": 1,
+    "reason": "Pre-aborted wait resolved submitted summary"
+  },
+  "prior_test_fixture_error": {
+    "log": "output/day10-compaction-cancel-before-consume-red-20261016.log",
+    "reason": "Pending-wait test called Bun async assertion before abort, blocking until transaction TTL; fixture corrected before product fix"
+  },
+  "green": {
+    "log": "output/day10-compaction-cancel-before-consume-green-20261016.log",
+    "pass": 131,
+    "fail": 0,
+    "assertions": 532,
+    "files": 4
+  },
+  "typecheck": {
+    "log": "output/day10-compaction-cancel-broker-typecheck-20261016.log",
+    "exec_session": 48023,
+    "terminal_exit": 0,
+    "scope": "Current source and both new test files after fixture changes"
+  },
+  "change": "Move existing pre-aborted signal check before summary consumption; already consumed result remains completed and control capability remains one-shot",
+  "actor": {
+    "role": "main",
+    "actual_model": "gpt-6.1-sol",
+    "actual_effort": "high",
+    "context_line": 16831
+  },
+  "review_pair": "docs/superpowers/day10-compaction-cancel-pair-receipt.json",
+  "production_changed": false,
+  "observer_image_mode": "DISABLED",
+  "limits": [
+    "Primitive ordering fix; outer retained-handoff caller already has a separate abort fence",
+    "No live native ACK/source-retirement failure or completed checkpoint rollback demonstrated",
+    "Fresh native/Web model or GUI action not run for this slice",
+    "No complete GOAL acceptance inferred; existing real native ACK receipts are separate historical scenarios"
+  ],
+  "accepted_at": "2026-10-16T05:57:22.674Z",
+  "peer_review": {
+    "actor": "01a14341-fe53-7023-9755-4e420399e31a",
+    "actual_model": "gpt-6-luna",
+    "actual_effort": "high",
+    "round1": {
+      "report": "output/day10-cancel-supervisor-round1-report-20261016.md",
+      "log": "output/day10-cancel-supervisor-round1-tests-20261016.log",
+      "pass": 131,
+      "fail": 0,
+      "assertions": 532
+    },
+    "round2": {
+      "report": "output/day10-cancel-supervisor-round2-report-20261016.md",
+      "log": "output/day10-cancel-supervisor-round2-tests-20261016.log",
+      "pass": 5,
+      "fail": 0,
+      "assertions": 18
+    },
+    "findings": "No blocking finding; Windows local tests only"
+  },
+  "integration_implementation": {
+    "actor": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+    "actual_model": "gpt-6-luna",
+    "actual_effort": "high",
+    "receipt": "output/day10-cancel-implementation-round2-complete.json",
+    "pass": 2,
+    "fail": 0,
+    "assertions": 10,
+    "portability": "Short Unix socket fixture path; not executed on Unix"
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "recorded_at": "2026-10-15T19:31:16.834Z",
+  "classification": "APP_EXPLICIT_FOLLOWUP_OVERRIDE_VERIFIED",
+  "parent": {
+    "file": "E:/Codex/sessions/2026/10/13/rollout-2026-10-13T00-54-13-01a13140-303e-72b0-b4cd-5f1d10ad9fa2.jsonl",
+    "line": 13222,
+    "model": "gpt-6.1-sol",
+    "effort": "high"
+  },
+  "children": [
+    {
+      "id": "01a13eab-9002-79d2-bc89-8e42850802c0",
+      "role": "Coding / implementation",
+      "file": "E:/Codex/sessions/2026/10/15/rollout-2026-10-15T15-26-33-01a13eab-9002-79d2-bc89-8e42850802c0.jsonl",
+      "session_meta_line": 1,
+      "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "contexts": [
+        {
+          "line": 6,
+          "timestamp": "2026-10-15T08:26:34.883Z",
+          "turn_id": "01a13eab-913f-7f11-98ad-e79d363a4f47",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high"
+        },
+        {
+          "line": 106,
+          "timestamp": "2026-10-15T19:19:29.996Z",
+          "turn_id": "01a14101-56bc-79d2-a93a-4d0f3eb3b829",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high"
+        }
+      ],
+      "actual_parent_control_wrapper_line": 13617,
+      "requested": {
+        "method": "mcp__codex_app__send_message_to_thread",
+        "model": "gpt-6-luna",
+        "thinking": "high"
+      },
+      "gate": {
+        "path": "F:/Source Projects/codex-chatgpt-web/output/day10-maxwell-resume-mv9xabf9-uv8cy1ap.json",
+        "nonce": "mv9xabf9-uv8cy1ap",
+        "authorized_snapshot_path": "F:/Source Projects/codex-chatgpt-web/output/day10-maxwell-resume-mv9xabf9-uv8cy1ap.json.authorized-completed.json",
+        "authorized_sha256": "c81a779239b0d37829e196cc899f262d7ccd5b3dca405599ae0981960bf71f04",
+        "terminal_sha256": "1d9b8277751f03fa985b9c79125091700a518a6b8a2faafaba7e79abe571255c",
+        "authorized": false,
+        "retired_after_verified_completion": true
+      },
+      "completion": {
+        "id": "01a13eab-9002-79d2-bc89-8e42850802c0",
+        "status": {
+          "type": "idle"
+        },
+        "turn": {
+          "id": "01a14101-56bc-79d2-a93a-4d0f3eb3b829",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1792091969,
+          "completedAt": 1792092106,
+          "durationMs": 137086
+        },
+        "final": "Added the three requested MCP regressions. The targeted run passed: 8 tests, 0 failures, 68 assertions. No product defect surfaced. Changed paths: safety-review-mcp.test.ts and day10-maxwell-safety-review-20261016.log. No application source was edited. One scope slip: a search command also read turn-broker.ts, which was outside the gate’s read scope. That read was only for context; I made no changes to that file."
+      },
+      "raw_test_receipts": [
+        {
+          "line": 177,
+          "call_id": "call_13b1e03a103e4c9bb97eae21136f0cfe",
+          "actual_call_name": "exec",
+          "output_sha256": "05bdb3f4cb0b9256ea80291aa8872d7768c0a915bf9eddb2d2af1abc46326790",
+          "counts": [
+            "8 pass",
+            "0 fail",
+            "68 expect() calls"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "01a13eab-bb5a-7ca1-b474-b4e3d5765347",
+      "role": "UI / research / test supervisor",
+      "file": "E:/Codex/sessions/2026/10/15/rollout-2026-10-15T15-26-44-01a13eab-bb5a-7ca1-b474-b4e3d5765347.jsonl",
+      "session_meta_line": 1,
+      "parent_id": "01a13140-303e-72b0-b4cd-5f1d10ad9fa2",
+      "contexts": [
+        {
+          "line": 6,
+          "timestamp": "2026-10-15T08:26:45.614Z",
+          "turn_id": "01a13eab-bc96-7e11-860d-330781170d35",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high"
+        },
+        {
+          "line": 113,
+          "timestamp": "2026-10-15T19:21:24.179Z",
+          "turn_id": "01a14103-14f9-7b50-bf1d-90b565a0156c",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high"
+        }
+      ],
+      "actual_parent_control_wrapper_line": 13648,
+      "requested": {
+        "method": "mcp__codex_app__send_message_to_thread",
+        "model": "gpt-6-luna",
+        "thinking": "high"
+      },
+      "gate": {
+        "path": "F:/Source Projects/codex-chatgpt-web/output/day10-pascal-resume-mv9xcs5n-pv5j56p8.json",
+        "nonce": "mv9xcs5n-pv5j56p8",
+        "authorized_snapshot_path": "F:/Source Projects/codex-chatgpt-web/output/day10-pascal-resume-mv9xcs5n-pv5j56p8.json.authorized-completed.json",
+        "authorized_sha256": "e3f8c0a257b89b01e619eff9846461518a25138ab5b0bb7b3eae4d3abfb5e5ee",
+        "terminal_sha256": "9cea2ecb7a0f5b28bac3019e34af35fa6842b76c47141af3e87b9f925e293c70",
+        "authorized": false,
+        "retired_after_verified_completion": true
+      },
+      "completion": {
+        "id": "01a13eab-bb5a-7ca1-b474-b4e3d5765347",
+        "status": {
+          "type": "idle"
+        },
+        "turn": {
+          "id": "01a14103-14f9-7b50-bf1d-90b565a0156c",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1792092083,
+          "completedAt": 1792092179,
+          "durationMs": 96054
+        },
+        "final": "The three authorized test files passed once: 14 passed, 0 failed, 118 assertions. The run’s actual terminal receipt is included above. No source files were changed. I found one actionable status inconsistency in blocked-operation-review.ts: status becomes review_required whenever any unresolved ledger record exists, even if none match the current scope. In that case the response says unresolved_count: 0 with no entries, but the prompt notice still adds blocker instructions because the status is not clear. That can create a misleading warning on an unrelated task. The tests cover other-scope privacy, but don’t cover an other-scope-only ledger. Within the reviewed source, pagination is bounded and snapshot-bound, malformed ledgers stay unavailable, and persisted free-form descriptions are excluded or sanitized. The MCP review path settles broker activity in finally at mcp-server.ts. These findings and test results are source/fixture evidence only; they do not establish live native acknowledgment or full SAFE acceptance."
+      },
+      "raw_test_receipts": [
+        {
+          "line": 174,
+          "call_id": "call_4a863fc99b7a4b87b163936e5b2d1120",
+          "actual_call_name": "exec",
+          "output_sha256": "09b14980f01543b6c434a7f284ce51c3d432b3fecc528d356d08c66afc8f3209",
+          "counts": [
+            "14 pass",
+            "0 fail",
+            "118 expect() calls"
+          ]
+        }
+      ]
+    }
+  ],
+  "new_agent_identities": 0,
+  "active_owned_work": 0,
+  "native_resume_send_input_fix": "NOT FIXED; their exposed schemas still have no model argument",
+  "global_config_changed": false,
+  "scope_deviation": "Maxwell reported one read-only search also read turn-broker.ts outside its gate read subset; no write outside the assigned test/log paths."
+}

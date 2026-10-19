@@ -156,13 +156,14 @@ async function executeGatewayProgram(
   availableToolNames: string[],
   calls: GatewayProgramCall[],
   dynamicRegistry = false,
+  resultForTool?: (name:string)=>unknown,
 ): Promise<Array<{ type: "text"; text: string }>> {
   const emitted: Array<{ type: "text"; text: string }> = [];
   const implementations = Object.fromEntries(availableToolNames.map(name => [
     name,
     async (input: unknown) => {
       calls.push({ name, input });
-      return { output: name, exit_code: 0 };
+      return resultForTool?resultForTool(name):{ output: name, exit_code: 0 };
     },
   ]));
   const nestedTools = dynamicRegistry
@@ -431,8 +432,10 @@ describe("ChatGPT outer-native harness v4", () => {
   });
 
   test.each([
-    [false, false], [true, false], [false, true], [true, true],
-  ])("sequential native messages honor fresh conversation=%s and Luna Bigger Context=%s", async (freshConversation, luna) => {
+    [false, false, "thread", true], [true, false, "thread", true],
+    [false, true, "thread", true], [true, true, "thread", true],
+    [false, false, "prompt-cache-only", true], [false, false, "thread", false],
+  ])("sequential native messages honor fresh conversation=%s, Luna Bigger Context=%s, identity=%s, local tools=%s", async (freshConversation, luna, identityMode, localTools) => {
     const socketPath = brokerTestEndpoint(`cgw-retained-messages-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -442,7 +445,7 @@ describe("ChatGPT outer-native harness v4", () => {
         browserHostDescriptorPath: join(tempRoot, "retained-launcher.json"),
         experimentalFreshConversationPerTurn: freshConversation,
         brokerSocketPath: socketPath,
-        localToolsEnabled: true,
+        localToolsEnabled: localTools,
         solAvailable: !luna,
         experimentalBiggerContext: luna,
         extraHighAvailable: true, proAvailable: true,
@@ -464,8 +467,10 @@ describe("ChatGPT outer-native harness v4", () => {
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);
       const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
-      if (!token) throw new Error("retained message prompt has no current turn token");
-      tokens.push(token);
+      if (localTools) {
+        if (!token) throw new Error("retained message prompt has no current turn token");
+        tokens.push(token);
+      }
       prepared.release();
       browserMessages += 1;
       const answer = browserMessages === 1 ? "First retained answer" : "Second retained answer";
@@ -508,6 +513,15 @@ describe("ChatGPT outer-native harness v4", () => {
         },
       ],
     };
+    if (identityMode === "prompt-cache-only") {
+      for (const request of [first, second]) {
+        const body = request._rawBody as { client_metadata: Record<string, unknown> };
+        const key = "x-codex-turn-metadata";
+        const metadata = JSON.parse(body.client_metadata[key] as string) as Record<string, unknown>;
+        delete metadata.thread_id;
+        body.client_metadata[key] = JSON.stringify(metadata);
+      }
+    }
 
     try {
       const adapter = createChatGptWebAdapter(provider);
@@ -517,8 +531,9 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(browserMessages).toBe(2);
       expect(conversationKeys[0]).toBe(freshConversation
         ? undefined : chatGptConversationKey(first, chatGptWebExecutionNamespace(provider))!);
+      if (!freshConversation) expect(conversationKeys[0]).toBeDefined();
       expect(conversationKeys[1]).toBe(conversationKeys[0]);
-      expect(tokens[1]).not.toBe(tokens[0]);
+      if (localTools) expect(tokens[1]).not.toBe(tokens[0]);
       expect(preparedPrompts[0]).toContain("Inspect the project");
       expect(preparedPrompts[1]).toContain("Continue in the same repository");
       if (freshConversation) {
@@ -2442,9 +2457,13 @@ describe("ChatGPT outer-native harness v4", () => {
     }, 10_000);
     await broker.nextToolBatch(token);
     broker.revoke(token);
-    await expect(invocation).rejects.toThrow("revoked");
-    await expect(callTurnBroker(socketPath, { method: "resolve", bindingId: claimed.bindingId }))
-      .rejects.toThrow("has already finished");
+    const invocationFailure=await invocation.then(()=>null,error=>error);
+    expect(invocationFailure).toBeInstanceOf(Error);
+    expect(invocationFailure.message).toContain("revoked");
+    const resolveFailure=await callTurnBroker(socketPath, { method: "resolve", bindingId: claimed.bindingId })
+      .then(()=>null,error=>error);
+    expect(resolveFailure).toBeInstanceOf(Error);
+    expect(resolveFailure.message).toContain("has already finished");
     await broker.close();
   });
 
@@ -2948,15 +2967,24 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(listed.tools.map(tool => tool.name).sort()).toEqual([
         "codex_apply_patch",
         "codex_exec",
+        "codex_parallel_exec",
+        "codex_safety_review",
         "codex_tool_call",
         "codex_tool_inventory",
         "codex_view_image",
         "codex_write_stdin",
       ]);
-      const publicConnectorAbi = listed.tools.map(tool => ({
+      // The new direct interface is additive. Cached connectors retain the original
+      // six-tool ABI and reach the same executor through the reserved stable route.
+      // Keep every original cached schema/description byte stable; refreshing an
+      // installed connector to expose the extension is a separate owner action.
+      const publicConnectorAbi = listed.tools.filter(tool=>!["codex_parallel_exec", "codex_safety_review"].includes(tool.name)).map(tool => ({
         name: tool.name,
         title: tool.title ?? null,
-        description: tool.description ?? null,
+        // The additive safety review paragraph does not change the legacy tool-call ABI.
+        description: tool.name === "codex_tool_call"
+          ? (tool.description ?? "").split(" This connector also implements reserved codex.control.safety_review")[0]
+          : tool.description ?? null,
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema ?? null,
         annotations: tool.annotations ?? null,
@@ -2965,14 +2993,14 @@ describe("ChatGPT outer-native harness v4", () => {
       // An intentional hash change therefore requires an explicit connector refresh or identity migration.
       // The exact native turn-token format and copying instructions require a connector refresh.
       expect(createHash("sha256").update(canonicalJson(publicConnectorAbi)).digest("hex"))
-        .toBe("3dc626e4e32db1cab887c06038bd5bfcc3e0fe412ee83e5d800a0995329a59b5");
+        .toBe("473482f8a5c3fce246cf314d1f5c9adcc1f8727393c58f07be7e37d6dfe04b11");
       expect(listed.tools.find(tool => tool.name === "codex_tool_call")?.description)
         .toContain("reserved codex.control.compaction_handoff operation, which is not listed by inventory");
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({
-          type: "string", pattern: "^turn_[A-Za-z0-9_-]{32}$",
-          description: expect.stringContaining("Copy the complete turn_token from the current request unchanged"),
+          type: "string", pattern: "^(?:turn_[A-Za-z0-9_-]{32}|control_[a-f0-9]{32})$",
+          description: expect.stringContaining("Opaque, exact capability from the current request"),
         });
         expect(properties).not.toHaveProperty("binding_id");
         expect(tool.outputSchema).toBeUndefined();
@@ -3025,8 +3053,16 @@ describe("ChatGPT outer-native harness v4", () => {
         justification: "May the local fixture command run outside the sandbox?",
         prefix_rule: ["pwd"],
       });
+      const firstExecRequests = await broker.nextToolBatch(token);
+      expect(firstExecRequests).toHaveLength(1);
+      broker.completeTool(token,firstExecRequests[0]!.callId,toolResult({output:tempRoot,exit_code:0}));
+      await firstExec;
+      // Approval/interactive work is serial. Preserve both payload contracts without
+      // manufacturing an independent batch containing a pending approval request.
       const secondExec = call("codex_exec", { turn_token: token, cmd: "git status --short", workdir: tempRoot });
-      const execRequests = await broker.nextToolBatch(token);
+      const secondExecRequests = await broker.nextToolBatch(token);
+      expect(secondExecRequests).toHaveLength(1);
+      const execRequests = [...firstExecRequests,...secondExecRequests];
       expect(execRequests).toHaveLength(2);
       expect(execRequests.every(request => request.wireName === "exec" && request.freeform)).toBe(true);
       expect(execRequests.some(request => request.input?.includes(JSON.stringify({
@@ -3045,7 +3081,7 @@ describe("ChatGPT outer-native harness v4", () => {
         expect(request.input).toContain('"exec_command"');
         expect(request.input).toContain('"shell_command"');
         const output = request.input?.includes('git status --short') ? "clean" : tempRoot;
-        broker.completeTool(token, request.callId, toolResult({ output, exit_code: 0 }));
+        if(secondExecRequests.includes(request))broker.completeTool(token, request.callId, toolResult({ output, exit_code: 0 }));
       }
       const pwdRequest = execRequests.find(request => request.input?.includes('"cmd":"pwd"'));
       expect(pwdRequest?.input).toBeString();
@@ -3316,14 +3352,15 @@ describe("ChatGPT outer-native harness v4", () => {
         }
         const pending = call("codex_tool_call", { turn_token: token, wire_name: wait.name, arguments: wait.args });
         const [request] = await broker.nextToolBatch(token);
+        let gatewayContent:Array<{type:'text';text:string}>|undefined;
         if (wait.direct) {
           expect(request).toMatchObject({ wireName: wait.name, arguments: wait.args });
         } else {
           const calls: GatewayProgramCall[] = [];
-          await executeGatewayProgram(request!.input!, [wait.name], calls);
+          gatewayContent=await executeGatewayProgram(request!.input!, [wait.name], calls,false,()=>wait.result);
           expect(calls).toEqual([{ name: wait.name, input: wait.args }]);
         }
-        broker.completeTool(token, request!.callId, toolResult(wait.result));
+        broker.completeTool(token, request!.callId, gatewayContent?{content:gatewayContent}:toolResult(wait.result));
         expect((await pending).structuredContent).toEqual(wait.result);
 
         for (const timeout_ms of [180_000, 30_000]) {
@@ -3612,7 +3649,7 @@ describe("ChatGPT outer-native harness v4", () => {
       // correctly sized token. Neither may borrow the only registered turn.
       const malformed = await call("codex_exec", { turn_token: token.slice(0, -1), cmd: "must not execute" });
       expect(malformed.isError).toBe(true);
-      expect(JSON.stringify(malformed.content)).toContain("Copy turn_token exactly from the current request");
+      expect(JSON.stringify(malformed.content)).toContain("Copy the exact current turn_token or one-shot control token");
       expect(JSON.stringify(malformed)).not.toContain(token);
 
       const invalid = await call("codex_tool_inventory", {

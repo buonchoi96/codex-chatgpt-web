@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-17",
+  "goal_status": "ACTIVE",
+  "scope": "Day-10 P0-A1 generated Launcher/tunnel observer wiring to isolated stdio and P0-A3 OCR ROI readiness evidence",
+  "previous_turn_classification": "PROGRESS: final READY CV/OCR evidence guards were implemented, verified, and recorded",
+  "changes": [
+    "Added a private Windows MCP stdio regression using the exact generated mcpCommand for full/automatic observer opt-in; confirms the tool is listed but fabricated reader leases never authorize native observation.",
+    "Added a native OCR geometry predicate that accepts completed text only when its bounding-box center is inside the requested frame-local ROI, excluding edge-only intersections and unavailable/provider-error results.",
+    "Native observer readiness now uses that predicate and distinguishes OCR provider errors from unavailable OCR."
+  ],
+  "verification": {
+    "web_command": "bun test tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts tests/setup-observer-runtime-change.test.ts tests/mcp-screen-tree.test.ts tests/screen-observation.test.ts",
+    "web_test_result": "52 PASS, 0 FAIL across 5 files",
+    "web_test_log": "docs/superpowers/day10-observer-generated-startup-20261017-test.log",
+    "web_test_log_sha256": "31FE0CEF0DD8C2B97603941239C2B0FF0B53EF499C74B03D0A0B9596180BA259",
+    "web_typecheck": "PASS: bun run typecheck",
+    "native_red": "A focused native OCR test could not compile because has_text_in_roi did not exist; no production process was started.",
+    "native_build": "PASS: cmake --build native/build --target swift_observer_ocr_tests swift_observer_reader_tests --parallel 2",
+    "native_ctest_command": "ctest --test-dir native/build -R '^swift_observer_(ocr|reader|readiness|engine|frame)_tests$' --output-on-failure",
+    "native_ctest_result": "5 PASS, 0 FAIL",
+    "native_test_log": "ComputerUseSwift-MCP/output/day10-ocr-roi-center-green-20261017.log",
+    "native_test_log_sha256": "5B524B6F678AB775D0095FA0073F28AD9C73F092F89AA7648A2ADE5193D1D03D",
+    "git_diff_checks": "PASS (Swift line-ending warnings only)"
+  },
+  "files_sha256": {
+    "web/tests/mcp-stdio-screen-observer.test.ts": "20F3B79BFCE93A925E4B21FB16CBACE5377EE815AE58C850257C7A10F70D3655",
+    "swift/native/include/observer_ocr.hpp": "7E0309AB2012181850FF0BFEFD783C6C61193FA4EB366C2BAF19C97A613A7D07",
+    "swift/native/src/observer_ocr.cpp": "B45BD7BB218292274DEEDC118FCEE1AD9F06FA7A8312C4FD07FB676E95DAC442",
+    "swift/native/src/swift.cpp": "EDD8001A3D43E9E1480BF25000D47B12599FBDD2C065A32C8421C17BEDAE8FD9",
+    "swift/native/tests/observer_ocr_tests.cpp": "A0E706A487D2D6A0BFD259DB0F6F412048A324D0C5F52980B02BCBB404720CE8"
+  },
+  "limitations": [
+    "Generated startup launches an isolated MCP stdio process and a mock grant inventory; it does not use a live Swift capture/controller and does not prove a real Web-model tool receipt.",
+    "The native OCR ROI predicate was verified with synthetic line geometry and existing native OCR test suites; no live authorized foreground ROI challenge was run.",
+    "Model GPT-6 Sol (Web) High and actual model-facing image delivery remain unverified.",
+    "This round contains no tool retries or controller switch for the six original desktop_observe refusals."
+  ],
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "status_upgrades": 0,
+  "safety_scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "pending_safety_review": 6,
+  "safety_retry_allowed": false,
+  "native_safety_review_advertised": false,
+  "subagents_spawned": 0,
+  "production_service_mutations": 0,
+  "git_reference_mutations": 0
+}

@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "source": "Native2 current-runtime read-only verification and scoped local safety bookkeeping",
+  "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "web_branch": "main",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "swift_branch": "main",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "initial_dirty_entries": { "web": 128, "swift": 66 },
+  "modified_source_files_this_phase": [],
+  "safety_advisory": {
+    "receipt": "docs/superpowers/day10-scoped-safety-review-17-record-snapshot-20261018.json",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "b1adbbef8f65b2f34005d82548ba4bce71ebbf103480ce003bd87833e1380505",
+    "complete": true,
+    "unresolved_count": 17,
+    "status": "PENDING_SAFETY_REVIEW",
+    "retry_allowed": false,
+    "native_review_advertised": false,
+    "original_operations_retried": 0
+  },
+  "tests": {
+    "bun_version": "1.4.0",
+    "startup_config_stdio_image_relay": "21 PASS / 0 FAIL / 95 expect() calls across three files",
+    "screen_observation_tree_mcp": "59 PASS / 0 FAIL / 400 expect() calls across three files",
+    "web_typecheck": "PASS / exit 0",
+    "launcher_typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1657 PASS / 93 SKIP / 2 FAIL due to Windows symlink EPERM; not green"
+  },
+  "integration_limitations": {
+    "web_model_screen_observer_e2e": "NOT_RUN",
+    "model_visible_pixel_observation": "NOT_VERIFIED",
+    "observer_image_mode": "DISABLED",
+    "cpu_auto_real_parallelism": "UNVERIFIED / job ancestor limits unknown, safe one worker",
+    "native_parallel_exec_advertised": false,
+    "actual_main_model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "subagents_created_this_phase": 0,
+    "production_changes_this_phase": 0,
+    "git_reference_changes_this_phase": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-E fresh semantic watchdog authority before same-tab Stop",
+  "goal_status": "ACTIVE",
+  "previous_goal_turn_classification": "PROGRESS: SameTabRecovery state-machine race fix was verified, but browser-worker still hardcoded verifiedStall=true on every recovery observation",
+  "workspace": {
+    "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+    "web_branch_head": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift_branch_head": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "dirty_worktrees_preserved": true,
+    "git_ref_changes": 0,
+    "production_or_global_config_changes": 0
+  },
+  "defect": "Browser worker converted every recovered response observation to verifiedStall=true even after a new assistant text, native progress, or vanished error banner. The previously verified state-machine pre-Stop recheck could never cancel a live Stop on new semantic progress.",
+  "source_changes": [
+    "src/adapters/chatgpt-web/browser-worker.ts",
+    "src/adapters/chatgpt-web/recovery-watchdog.ts",
+    "tests/recovery-watchdog.test.ts"
+  ],
+  "implementation": [
+    "Read current response DOM, live red/delivery/interrupted error status, native progress revision and busy state for each owned recovery observation",
+    "Update existing awake-time recovery watchdog with fresh evidence instead of hardcoding verifiedStall=true",
+    "Keep explicit pending canonical steering eligible independently from the expired-stall predicate",
+    "Preserve 60000/180000 watchdog thresholds, ownership/history/approval/active-tool guards, and 30000 Stop-confirmation deadline"
+  ],
+  "red": {
+    "command": "bun test tests/recovery-watchdog.test.ts",
+    "result": "0 PASS / 1 FAIL: missing freshRecoveryStall export before implementation",
+    "log": "output/day10-watchdog-fresh-recheck-red-20261018.log"
+  },
+  "green": {
+    "focused": "23 PASS / 0 FAIL / 115 assertions across 2 files before final threshold regressions",
+    "focused_log": "output/day10-watchdog-fresh-recheck-targeted-green-20261018.log",
+    "seven_file_suite": "41 PASS / 3 SKIP / 0 FAIL / 222 assertions across 7 files before final threshold regressions",
+    "seven_file_log": "output/day10-watchdog-fresh-recheck-seven-file-green-20261018.log",
+    "browser_worker_contracts_and_final_tests": "182 PASS / 0 FAIL / 1042 assertions across 4 files after final threshold regressions",
+    "browser_worker_log": "output/day10-watchdog-fresh-recheck-contracts-green-20261018.log",
+    "isolated_headless_dom": "3 PASS / 0 FAIL / 24 assertions with installed Chrome in temporary Playwright-controlled fixture",
+    "isolated_headless_dom_log": "output/day10-watchdog-fresh-recheck-owned-fixture-dom-20261018.log",
+    "root_typecheck": "PASS: bun run typecheck, exit 0",
+    "git_diff_check": "PASS: no whitespace errors; LF/CRLF warnings",
+    "full_web_suite": "NOT_RUN this phase; previously reported 1637 PASS / 93 SKIP / 2 Windows symlink fixture EPERM failures"
+  },
+  "self_review": {
+    "outcome": "Fresh errors and semantic/native content are independently sampled before recovery Stop. Recheck returns waiting without Stop or Send if an earlier watchdog expiry becomes stale. Steering eligibility requires a currently pending user revision.",
+    "limits": [
+      "Headless DOM is an owned local fixture exercising recovery state transitions and Send counts, not an authenticated ChatGPT conversation",
+      "Current browser-worker recovery path has not been exercised end-to-end against the actual logged-in web frontend in this phase",
+      "Intermittent historical Bun segmentation fault cause remains unconfirmed"
+    ]
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578",
+    "pending": 10,
+    "native_safety_review_interface": "NOT_ADVERTISED",
+    "native_parallel_exec_interface": "NOT_ADVERTISED",
+    "original_refused_desktop_observe_retries": 0,
+    "requirement_impact": "PENDING_SAFETY_REVIEW; no original blocked-operation evidence has been reclassified or used to support UI E2E completion"
+  },
+  "matrix": {"total": 175, "PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21, "status_upgrades": 0},
+  "agents": {"created": 0, "main_model_and_effort": "UNVERIFIED_BY_CURRENT_NATIVE_CONNECTOR"},
+  "next_safe_step": "Obtain authorized real model-facing same-tab and semantic observer acceptance where original grants/host route are demonstrably available. Continue independent P0-A, P0-B and source-level P0-E work without replaying safety refusals."
+}

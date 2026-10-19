@@ -1,0 +1,67 @@
+{
+  "recorded_at": "2026-10-16T00:38:29.573Z",
+  "classification": "ACTUAL_NATIVE_WEB_RESTART_CONTINUATION_AND_SOURCE_PROVENANCE",
+  "status": "PASS_FOR_AUTHENTIC_NEXT_USER_TURN_AFTER_PROCESS_RESTART",
+  "raw_receipt": "output/day10-native-restart-1792096255336.json",
+  "raw_sha256": "727b3adabd0d41dec82ccbbc68fd09017384e3aae9e89e30714f4d6e44e13bce",
+  "log": "output/day10-native-web-restart-live-20261016.log",
+  "log_sha256": "2a885b48816962b20e87ad76fa110624ff4f3d23510bdaaa338ecdbc3b33a170",
+  "prior_receipt": "output/day10-native-web-1792095381814.json",
+  "same_native_thread_id": "01a14135-6eae-7a51-933a-6c56fd57dd22",
+  "new_bridge_pid": 16352,
+  "new_native_pid": 17568,
+  "native_exit": 0,
+  "original_private_config_unchanged": true,
+  "empty_bridge_cache_before_start": true,
+  "copied_bridge_cache": false,
+  "original_checkpoint_sha256": "f0be5ac45ff59ef603fada5c93305930b167aa85e388af825b16f6a5ca97b1f3",
+  "compaction_response_id": "resp_14a3c041d4be445b8587303638a1438e",
+  "actual_source_recovery": {
+    "source_id": "msg_01a14135-6f81-74f2-88ce-fbfb0e54fe4f",
+    "source_turn_id": "01a14135-6ecf-7770-9c4f-61ce6858c163",
+    "summary_index": 5,
+    "provenance": {
+      "kind": "native_compacted",
+      "checkpoint_sha256": "564ec9f8515260078971c180356db2ff1010aac521e0706e05e879846bbbdd51",
+      "source_id": "msg_01a14135-6f81-74f2-88ce-fbfb0e54fe4f",
+      "source_revision": "retained_01a14135-6f82-7ba0-a218-160dc204d60a"
+    }
+  },
+  "model_answer_sha256": "cae0e91b6c91aed297863e7d8f4cc9c0e057731533a9f7c2176ed9e9ed67b64f",
+  "expected_prior_answer_sha256": "cae0e91b6c91aed297863e7d8f4cc9c0e057731533a9f7c2176ed9e9ed67b64f",
+  "physical_sends": [
+    {
+      "traceId": "f26a93eb83c6",
+      "receiptId": "b33a5555-5def-404c-a592-11babe4557e6",
+      "acceptedSendCount": 1,
+      "phase": "task",
+      "preparedZip": false,
+      "nativeConnectorRequired": true,
+      "transport": "INLINE"
+    }
+  ],
+  "source_sha256": {
+    "src/server.ts": "38527368d004723dc9da7db22f1582527e738f9467482a665df1ec45f8039257",
+    "src/adapters/chatgpt-web/index.ts": "daa7b838799513aa47e351e76cf8e217f887ceada66379c2742f836e909a53e6",
+    "src/adapters/chatgpt-web/native-compaction-provenance.ts": "4e052c82c12dbc46d7f163152c7d4b262c8d7ee1fb0bec16b3696d9b188c88e2",
+    "src/adapters/chatgpt-web/browser-worker.ts": "13b37230b4dfb43cafef44a32d8fc8d26b796e9f39458622878b02c544618d0e",
+    "src/adapters/chatgpt-web/prompt.ts": "a3cf78428d53f04c89af6fc3e7a2d51d8fd7b80a38b178749513fe7c266aeb26"
+  },
+  "real_web_model": true,
+  "native_tool_actions": 0,
+  "cleanup": {
+    "complete": true,
+    "native_exit": 0,
+    "web": [
+      "completed",
+      "completed"
+    ]
+  },
+  "limits": [
+    "Fresh authenticated user question after restart; synthetic-only /goal NOT TESTED",
+    "Not272Krecall/auto-threshold or race acceptance"
+  ],
+  "observer_image_mode": "DISABLED",
+  "screenshot_composer_fallback": false,
+  "production_changed": false
+}

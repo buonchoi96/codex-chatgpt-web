@@ -1,0 +1,408 @@
+{
+  "at": "2026-10-16T06:39:53.941Z",
+  "classification": "ACTUAL_CURRENT_NATIVE_AUTO_COMPACT_CONTROLLED_USAGE",
+  "status": "PASS_FOR_0163_NATIVE_CLAMP_CALIBRATION_AND_BOUNDARY_DECISIONS",
+  "binary": "C:/Users/Long-PC/AppData/Local/OpenAI/Codex/bin/e78bad9887fa50cf/codex.exe",
+  "binary_sha256": "9ecb9df2ecafcc00542ef0966c6f1737a81397dc9531b0a4b178238e2bf4a46d",
+  "version": "0.163.0-alpha.10.2",
+  "prior_version_receipt": "docs/superpowers/day10-native-boundary-receipt.json",
+  "prior_receipt_unchanged": true,
+  "actual_model_calls": 0,
+  "usage_injected_by_test_provider": true,
+  "effective_web_recall": "NOT TESTED",
+  "actual_large_web_consumption": "NOT TESTED",
+  "rows": [
+    {
+      "variant": "calibrated",
+      "tokens": 244799,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-244799-1792132661434.json",
+      "raw_sha256": "1b325443b6c03f5043098761c37beec6b9a72f261feeca59e1bb4ea7df85708a",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-244799.jsonl",
+      "rollout_sha256": "ef5a59c1f7311eaab18ef266e9bf00ec2921729a18c6566f7b247e51092292cd",
+      "native_pid": 4176,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-43ff-7390-b35f-ae4224d919f7",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-4592-7fa1-ae71-0b65c176c049",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 244800,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-244800-1792132669860.json",
+      "raw_sha256": "5080491a27cf09b50c3c7e7612f921daa02f4e29321b5d0ebc359125f5e271fb",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-244800.jsonl",
+      "rollout_sha256": "91ef854ada7fdacb62675aa5872c64e81a4dfec4eb9fa996cbbd6c0c304f5d67",
+      "native_pid": 26412,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-64f9-7931-96de-4e45754bc5b3",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-66c1-7c21-9b4a-44bd85c46f15",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258399,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-258399-1792132677720.json",
+      "raw_sha256": "c85c9f8217df8b01b5c529ecfaca8cf07d5553425695d3baac61a779bf71a789",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-258399.jsonl",
+      "rollout_sha256": "ac7315e8ed7fb062516d415c680d531d66320dfb82bab27d243dfa69cf2ea497",
+      "native_pid": 11472,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-83c6-7e42-9791-7e04e8972542",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-8574-7e83-ac4c-4e41b45c564e",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": []
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258400,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-258400-1792132685733.json",
+      "raw_sha256": "0d58c81a4449a3a4d454aaf9380775317768c75e615ac1c8b2e82df2644ca24f",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-258400.jsonl",
+      "rollout_sha256": "3d38bf0016254df456acc6b9916e805c4543e655e2ed69d5ec2bd8aa69b893ed",
+      "native_pid": 26484,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-a650-7462-ae09-e7ce7590d0fe",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-a855-7050-8236-537018919252",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 258401,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-258401-1792132694504.json",
+      "raw_sha256": "1485df8e8155857136fab877f7b0e780066a6998d239c1a4dca73fc4cfd5088f",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-258401.jsonl",
+      "rollout_sha256": "d150633e603697703d7c63c1fc87ae68fe3d42949048095b73d548ce9a480cca",
+      "native_pid": 24620,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-c5d9-7f10-903f-a3aae3935947",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-c79f-7201-800d-67583cba5b60",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 271999,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-271999-1792132702516.json",
+      "raw_sha256": "8aa29e19bdb6633651e60975ee0ef218cc5bcc0d04fa9ca700976d2d332394cd",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-271999.jsonl",
+      "rollout_sha256": "e148deea1f2593307e0eaf7ae3707b669c066a3a65a6efe4772e2cd8a8626451",
+      "native_pid": 3668,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436e-e487-7d50-8062-432feba87986",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436e-e62d-7501-9ce1-2b5dcefdb5b2",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "calibrated",
+      "tokens": 272000,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 302223,
+        "effective_context_window_percent": 90,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-272000-1792132710205.json",
+      "raw_sha256": "8ffb26ee5e956c07c139ad571f8a0f9c696a4e1cf1a174f622b96cc3d7ce09da",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/calibrated-272000.jsonl",
+      "rollout_sha256": "5a473dea2745869d510e9e7d2c18480e773d85866720068ebf7e838710bbcae2",
+      "native_pid": 19212,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436f-031d-72b0-ac88-836fbd6277d0",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436f-04e9-7cb2-b920-9e26fc670aa3",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    },
+    {
+      "variant": "uncalibrated-control",
+      "tokens": 244799,
+      "expected_compact": false,
+      "observed_compact": false,
+      "durable_checkpoints": 0,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 272000,
+        "effective_context_window_percent": 100,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-uncalibrated-control-244799-1792132718719.json",
+      "raw_sha256": "5aa8a945de07a729405c9c96e5870855c10f876bc4097153907db4e4399564f9",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/uncalibrated-control-244799.jsonl",
+      "rollout_sha256": "cddbcce91f7696c8aa0ffa3fcf3e84b358da632ad748343623f49d2daa8ce5ee",
+      "native_pid": 8040,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436f-2567-7a10-91a5-7f791b856458",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436f-275f-7e41-bfe6-44f2424d1191",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": []
+    },
+    {
+      "variant": "uncalibrated-control",
+      "tokens": 244800,
+      "expected_compact": true,
+      "observed_compact": true,
+      "durable_checkpoints": 1,
+      "native_window": 272000,
+      "catalog": {
+        "context_window": 272000,
+        "effective_context_window_percent": 100,
+        "auto_compact_token_limit": 258400
+      },
+      "raw_receipt": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-current-native-auto-uncalibrated-control-244800-1792132727924.json",
+      "raw_sha256": "378f61e849233a638778e202aa7d599ae740cee5581251f1d5b72daaa859386a",
+      "rollout_evidence": "output/day10-current-native-boundary-evidence-20261016/uncalibrated-control-244800.jsonl",
+      "rollout_sha256": "529cb3d98799d60c97722ca4ca9ec1816081cba027c84158ea2454127c3ecdbd",
+      "native_pid": 1668,
+      "native_exit": 0,
+      "http_server_stopped": true,
+      "cleanup_complete": true,
+      "session_meta_version": "0.163.0-alpha.10.2",
+      "native_contexts": [
+        {
+          "turn_id": "01a1436f-495c-7df2-88ef-fd9436f1bf18",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "turn_id": "01a1436f-4b5b-7161-9902-e45e0e94c82c",
+          "model": "chatgpt-web/gpt-6-sol",
+          "effort": "high"
+        }
+      ],
+      "compaction_metadata": [
+        {
+          "trigger": "auto",
+          "reason": "context_limit",
+          "implementation": "responses_compaction_v2",
+          "phase": "pre_turn",
+          "strategy": "memento"
+        }
+      ]
+    }
+  ],
+  "calibrated": {
+    "raw_window": 302223,
+    "effective_percent": 90,
+    "resolved_native_window": 272000,
+    "auto_compact_at": 258400
+  },
+  "uncalibrated_control": {
+    "raw_window": 272000,
+    "effective_percent": 100,
+    "resolved_native_window": 272000,
+    "auto_compact_at": 244800
+  },
+  "native_context_fields_unchanged": {
+    "rows": 11,
+    "digest": "cf75bf0aae132d43f3b20c93b137e022144039b93e298f07dd9f08c58341ce8f"
+  },
+  "static_max_capability_web_rows": 11,
+  "live_native_model_scope": "Web SolHigh identifier only; fixed inert local provider, not actual Web inference",
+  "source_sha256": {
+    "src/web-context-policy.ts": "6cc2b12ec41b2cc99c3340ad850033d6b04e3d4539a5929ad92c4b7e1990f0e3",
+    "src/model-catalog.ts": "d6d70b453bb6e011cb011e44a895c8fabffdb1a5bc5d09c39986ef13fc15825a",
+    "output/day10-current-native-auto-boundary-20261016.ts": "0591dde839938e11073497239de15eb66238f00379e23f225c2fbee6f29d9739"
+  },
+  "production_changed": false,
+  "observer_image_mode": "DISABLED",
+  "all_owned_processes_terminal": true,
+  "peer_review": {
+    "actor": "01a14341-fe53-7023-9755-4e420399e31a",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "report": "output/day10-current-native-boundary-supervisor-round7-report.json",
+    "raw_and_rollout_hashes_match": true,
+    "logs": "Existence/exit checked; actual log hashes recorded by supervisor, no previously declared expected log hash",
+    "cases_rerun": false,
+    "web_recall": "NOT TESTED"
+  },
+  "main_acceptance": "BOUNDARY_CALIBRATION_ONLY_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+}

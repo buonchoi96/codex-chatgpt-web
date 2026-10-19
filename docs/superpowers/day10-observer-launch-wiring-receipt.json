@@ -1,0 +1,159 @@
+{
+  "at": "2026-10-16T12:35:04.624Z",
+  "status": "LOCAL_OBSERVER_STARTUP_WIRING_AND_ONE_REAL_SEMANTIC_CALL_ACCEPTED",
+  "source_sha256": {
+    "src/native-screen-observer-config.ts": "4c441714745d84d073dd0f6dcc779418bd2d7e7cf60abac4856493e61e14336b",
+    "src/config.ts": "499f690a815674c94671d52b3bccae18d26dfc70e02227afac2e6eb263a9e49a",
+    "src/tunnel.ts": "b9fc5e1e95749d7ec23ca9a7550db31e93bd2e85629032ebbda86fff4547dc1d",
+    "src/setup.ts": "cada4c915a491e3fae72ccda41aeb5ca0cd953a50d82c59d3519b1633ef80b4a",
+    "src/adapters/chatgpt-web/mcp-main.ts": "7747b6b0c6927d81939c01189a1eef2ab6d3e4791628cd68405932d937747546",
+    "tests/native-screen-observer-config.test.ts": "e1e63d5dfa0bf735a6d9f90a207d16ec0afe9c024b3438fb3f2719f51291ad69",
+    "tests/setup-observer-runtime-change.test.ts": "993b8c45276d7cb8342fd494eca37e8ed162335ce6b42e4d871dcdceabb7dade",
+    "tests/mcp-stdio-screen-observer.test.ts": "d34859c653e1dc40605eb31317faa0b6e0931234a8dc8f5a04df1e71aa2bd665",
+    "tests/mcp-stdio-image-relay.test.ts": "1159318439a02c8d0aa1457e26718745a13e7d33f0550d30b4378e46b742a2f6"
+  },
+  "behavior": [
+    "Optional strictly validated nativeScreenObserver field; no default activation",
+    "Generated Full/automatic/Windows command includes paired observer flags; safe/browser-only omit",
+    "CLI shares parser and preserves raw reader/grant whitespace for rejection",
+    "Active endpoint/grant changes participate in both setup and tunnel runtime refresh decisions",
+    "Registration is not authority: guessed lease and missing current grant inventory denied"
+  ],
+  "implementation": {
+    "actor": "01a14341-fcd1-7a91-8345-00b3e0fa1e40",
+    "receipt": "output/day10-observer-wiring-implementation-round11-complete.json",
+    "pass": 6,
+    "assertions": 29
+  },
+  "main": {
+    "tests": {
+      "log": "output/day10-observer-wiring-main-current-inventory-green-20261016.log",
+      "pass": 29,
+      "skip": 1,
+      "fail": 0,
+      "assertions": 179
+    },
+    "typecheck": {
+      "log": "output/day10-observer-wiring-main-final-typecheck-20261016.log",
+      "exit_code": 0
+    },
+    "review": "output/day10-observer-wiring-current-inventory-main-review-20261016.json"
+  },
+  "independent_supervisor": {
+    "actor": "01a14341-fe53-7023-9755-4e420399e31a",
+    "report": "output/day10-observer-wiring-supervisor-round11-report.json",
+    "raw_log": "F:\\Source Projects\\codex-chatgpt-web\\output\\day10-observer-wiring-supervisor-round11-tests.log",
+    "pass": 29,
+    "skip": 1,
+    "fail": 0,
+    "assertions": 179,
+    "source_hashes_match": true
+  },
+  "actual_semantic_fixture": {
+    "raw": "output/day10-reader-generated-startup-1792151058418/results.json",
+    "sha256": "c5a8ef34f93c1052bc68fbce0e21fab4e24dd850ad89d6a1c67d58dc02183aee",
+    "execution_log": "output/day10-reader-generated-startup-live-20261016.log",
+    "harness": "output/day10-reader-generated-startup-20261016.mjs",
+    "harness_sha256": "ab02ca07b8b10011461c9768935cde7bdba8ba2d253144ebd55065fdf5d4b8d7",
+    "observer_calls": 1,
+    "generated_argument_count": 11,
+    "observer_advertised": true,
+    "readiness": {
+      "status": "READY",
+      "semantic_ready": true,
+      "capture_attempts": 1,
+      "frame_id": 1,
+      "image_delivery_status": "UNAVAILABLE"
+    },
+    "ocr": {
+      "status": "completed",
+      "language": "en-US",
+      "nodes": 1,
+      "exact_fixture_text": true,
+      "materialized_copies": 3
+    },
+    "cv": {
+      "nodes": 15,
+      "best_expected_roi_iou": 0.72
+    },
+    "uia": {
+      "nodes": 1,
+      "temporal_relation": "after_final_frame",
+      "pixel_correspondence": "unverified"
+    },
+    "frame": {
+      "id": 1,
+      "generation": 1,
+      "width": 480,
+      "height": 320
+    },
+    "native_elapsed_ms": 617.9516,
+    "samples": 1,
+    "compute": {
+      "mode": "AUTO",
+      "worker_threads": 1,
+      "control_threads": 1,
+      "concurrency_limit": 1,
+      "active": 0,
+      "queued": 0,
+      "governor_reason": "pressure_unknown_safe_one",
+      "available_logical_processors": null,
+      "allocation_status": "uncertain",
+      "allocation_reasons": [
+        "job_ancestor_limits_unverified",
+        "unresolved_allocation_safe_one_worker"
+      ],
+      "foreground_reserved": 0,
+      "bootstrap_workers": 1,
+      "uia_provider_ownership": "isolated_private_helper",
+      "ocr_provider_ownership": "isolated_private_helper",
+      "ocr_engine_internal_parallelism": "not_measured"
+    },
+    "root_pids": {
+      "native": 7180,
+      "fixture": 19096,
+      "swift_stdio": 18940,
+      "native2_stdio": 22408
+    },
+    "cleanup": {
+      "held_keys": 0,
+      "held_buttons": 0,
+      "native2_stdio": true,
+      "swift_stdio": true,
+      "fixture": true,
+      "native": true
+    },
+    "post_run_pid_audit": {
+      "path": "output/day10-observer-wiring-owned-process-audit-20261016.json",
+      "sha256": "4e246eb4198a5700aa7381d75ba8b769047e30756aa14dbb53108cbdfcea39dd",
+      "matching_owned_pids_or_children": 0
+    },
+    "coding_peer_review": "output/day10-observer-wiring-implementation-round13-report.json"
+  },
+  "build": {
+    "receipt": "output/day10-observer-wiring-private-build-20261016.json",
+    "fresh_swift_typescript": true,
+    "native_snapshot_reused": true,
+    "native_sha256": "ef62acd71e33d7f8acbf84302ba04155a7381d7b71ae2a8b74a450a3b342ebc8",
+    "native_source_scope": "Byte-identical previously verified WinRT variant; native sources recorded by its prior receipt still match. No fresh native build claimed.",
+    "prior_root_harness_changed": true,
+    "disposition": "The old repository harness is not the executed script. Its later edits do not change the pinned executable or new reviewed script; no fresh native build or current-root-harness execution is claimed."
+  },
+  "main_review_qualification": "Live generated script has an explicit finally closing SDK clients/broker, revoking/disabling the lease/session and closing native/fixture handles. It does not recursively delete its retained build/artifact dirs. The coding peer phrase no inline cleanup is overbroad; actual script, cleanup flags and PID audit control acceptance.",
+  "limits": [
+    "Actual private Bun CLI/MCP/Swift/native fixture, not external tunnel HTTP or a Codex/Web model turn",
+    "One rendered fixture and one latency sample, not universal apps, transitions, game FPS or a percentile benchmark",
+    "UIA sampled after final frame; pixel correspondence remains unverified",
+    "CPU AUTO actually used1worker because ancestor allocation is unverified; no scaling gain claim",
+    "External-service test skipped; no installer/production/real profile setup executed",
+    "Web pixels still unproven; observer image mode stays disabled"
+  ],
+  "actual_model_calls": 0,
+  "physical_sends": 0,
+  "composer_attachments": 0,
+  "input_sequences": 0,
+  "image_encodes": 0,
+  "observer_image_mode": "DISABLED",
+  "production_or_installed_profile_changed": false,
+  "git_refs_changed": false
+}

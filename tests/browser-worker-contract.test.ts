@@ -836,12 +836,20 @@ test.each(["low", "high"] as const)("GPT-6 Plus stages High but keeps the Instan
   let browserStages = 0;
   const prepared = { ...compileChatGptWebPrompt({
     modelId: CHATGPT_WEB_MODEL_ID, stream: true, options: { reasoning },
-    context: { messages: [{ role: "user", content: "Keep the entire task.", timestamp: 1 }] },
+    // No ZIP is available in this fixture. These complete records exceed the real
+    // composer limit together, while each verified multipart stage still fits.
+    context: { messages: Array.from({length:reasoning==='low'?2:6},(_,index)=>({
+      role:"user" as const,content:'A'.repeat(reasoning==='low'?120000:100000),timestamp:index+1})) },
   }, capabilities, undefined, { experimentalMultipartParts: 2 }), release() { released = true; } };
+  expect(prepared.multipart?.parts).toHaveLength(2);
   const worker: any = ChatGptBrowserWorker.forProvider({
     adapter: "chatgpt-web", baseUrl: `browser://${root}`, chatgptWeb: { browserDiagnosticsPath: root },
   });
-  worker.runStage = async () => { browserStages++; throw new Error("Test reached browser acquisition"); };
+  worker.runStage = async (_trace: string, stage: string, _timeout: number, action: (signal: AbortSignal) => Promise<unknown>) => {
+    if (stage === "prompt_preparation") return action(new AbortController().signal);
+    browserStages++;
+    throw new Error("Test reached browser acquisition");
+  };
   try {
     await expect(worker.runBrowserTurn({
       traceId: "six_context", modelId: CHATGPT_WEB_MODEL_ID, modelFamily: "6", reasoning, capabilities,
@@ -852,16 +860,43 @@ test.each(["low", "high"] as const)("GPT-6 Plus stages High but keeps the Instan
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a stalled pre-Send prompt handshake terminates before browser acquisition", async () => {
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web", baseUrl: "test://pre-send-watchdog", chatgptWeb: {},
+  }) as any;
+  const runStage = worker.runStage.bind(worker);
+  let laterStageReached = false;
+  worker.runStage = (traceId: string, stage: string, timeoutMs: number,
+    action: (signal: AbortSignal) => Promise<unknown>, ...args: unknown[]) => {
+    if (stage !== "prompt_preparation") laterStageReached = true;
+    return runStage(traceId, stage, stage === "prompt_preparation" ? 20 : timeoutMs, action, ...args);
+  };
+  try {
+    await expect(worker.runBrowserTurn({
+      traceId: "stalled_pre_send", modelId: CHATGPT_WEB_MODEL_ID, reasoning: "high",
+      capabilities: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false },
+      prepare: async () => new Promise<never>(() => {}),
+      onTextDelta() {},
+    })).rejects.toThrow("ChatGPT browser stage timed out: prompt_preparation");
+    expect(laterStageReached).toBeFalse();
+    expect(browserStageTimeouts.promptPreparation).toBe(120_000);
+  } finally {
+    // Isolate the stub from future tests using the same worker key.
+    delete worker.runStage;
+  }
+});
+
 test("two-part saved chats re-prove unchanged effort after the first message creates the conversation URL", async () => {
   const root = mkdtempSync(join(tmpdir(), "saved-chat-multipart-"));
   const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false };
   const prepared = { ...compileChatGptWebPrompt({
     modelId: CHATGPT_WEB_MODEL_ID, stream: true, options: { reasoning: "low" },
     context: { systemPrompt: ["Keep literal paths."], messages: [
-      { role: "user", content: "Read the first file.", timestamp: 1 },
-      { role: "user", content: "Compare it with the second file.", timestamp: 2 },
+      { role: "user", content: "Read the first file.\n"+'A'.repeat(120000), timestamp: 1 },
+      { role: "user", content: "Compare it with the second file.\n"+'B'.repeat(120000), timestamp: 2 },
     ] },
   }, capabilities, undefined, { experimentalMultipartParts: 2 }), release() {} };
+  expect(prepared.multipart?.parts).toHaveLength(2);
   const worker: any = ChatGptBrowserWorker.forProvider({
     adapter: "chatgpt-web", baseUrl: `browser://${root}`,
     chatgptWeb: { useSavedChats: true, browserDiagnosticsPath: root },
@@ -877,6 +912,7 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
     evaluate: async () => { throw new Error("No real browser in the transport fixture"); },
   });
   let sends = 0;
+  let draftText='';
   const finished = new Error("final send reached with a current effort proof");
   Object.assign(worker, {
     prepareChatSurface: async (_page: unknown, _capture: unknown, saved: boolean) => { expect(saved).toBeTrue(); },
@@ -887,7 +923,9 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
         selection: { url, label: "Instant" } };
     },
     captureSubmissionBaseline: async () => ({}),
-    attachPrompt: async () => {}, attachPromptWithCompactionRetry: async () => {}, attachFiles: async () => {},
+    attachPrompt: async (_page:unknown,text:string) => {draftText=text;},
+    attachPromptWithCompactionRetry: async (_page:unknown,text:string) => {draftText=text;},
+    attachedPromptText:async()=>draftText,attachFiles: async () => {},
     waitForNewAssistantTurn: async () => ({}),
     waitForMultipartAcknowledgement: async () => ({ identity: "stage:1" }),
     sendAttachedPrompt: async (_page: unknown, _baseline: unknown, _capture: unknown, _signal: unknown,
@@ -1206,6 +1244,18 @@ test("active composer resolution waits for exactly one visible editor", async ()
   expect(await activeComposer.call({}, page, 500)).toBe(composer);
 });
 
+test("canonical composer integrity does not require a rendered layout read", async () => {
+  const { createWindow } = require("@mixmark-io/domino");
+  const window = createWindow('<div id="composer"><p>Complete fixture task.</p></div>');
+  const composer = window.document.getElementById("composer");
+  Object.defineProperty(composer, "innerText", { get() { throw new Error("Unnecessary rendered layout read"); } });
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    activeComposer: async () => ({ evaluate: async (callback: Function, argument: unknown) => callback(composer, argument) }),
+  }) as any;
+  expect(await worker.attachedPromptText({})).toBe("Complete fixture task.");
+  await worker.assertPromptAttached({}, "Complete fixture task.");
+});
+
 test("composer verification ignores icon markup while preserving the exact prompt and live editor", async () => {
   const { createWindow } = require("@mixmark-io/domino");
   const links = Array.from({ length: 6 }, (_, index) => `https://drive.google.com/file/d/example-${index}`);
@@ -1228,7 +1278,7 @@ test("composer verification ignores icon markup while preserving the exact promp
   const expected = `${links.join(" ")}\n${literal}\n\n  Keep  two spaces, 日本語 and ordinary rich text.`;
   const original = composer.innerHTML;
   const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
-    activeComposer: async () => ({ evaluate: async (callback: Function) => callback(composer) }),
+    activeComposer: async () => ({ evaluate: async (callback: Function, argument: unknown) => callback(composer, argument) }),
   }) as {
     attachedPromptText(page: unknown): Promise<string>;
     assertPromptAttached(page: unknown, prompt: string): Promise<void>;
@@ -1433,7 +1483,7 @@ test("selected connector identity does not depend on its visible pill text", asy
   const { createDocument } = require("@mixmark-io/domino");
   const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
   worker.config = { appName: "Codex Native2" };
-  const selected = async (html: string) => {
+  const selected = async (html: string, expectedConnectorId?: string) => {
     const document = createDocument(`<div id="composer">${html}</div>`);
     const composer = {
       locator: (selector: string) => ({
@@ -1446,7 +1496,7 @@ test("selected connector identity does not depend on its visible pill text", asy
         }),
       }),
     };
-    return worker.connectorIsSelected(composer);
+    return worker.connectorIsSelected(composer, undefined, expectedConnectorId);
   };
   const pill = '<span data-id="plugin:configured" data-keyword="Codex Native2">表示名</span>';
   expect(await selected(pill)).toBeTrue();
@@ -1460,6 +1510,10 @@ test("selected connector identity does not depend on its visible pill text", asy
   expect(await selected(powerPill.replace('contenteditable="false"', 'contenteditable="true"'))).toBeFalse();
   expect(await selected(powerPill.replace('app-mention-display-name="Codex Native2"', 'app-mention-display-name="Other"'))).toBeFalse();
   await expect(selected(pill + powerPill)).rejects.toThrow("duplicate");
+  expect(await selected(pill, "configured")).toBeTrue();
+  expect(await selected(powerPill, "configured")).toBeTrue();
+  expect(await selected(pill, "replacement")).toBeFalse();
+  expect(await selected(powerPill, "replacement")).toBeFalse();
 });
 
 test("connector selection re-resolves the active composer after ChatGPT replaces it", async () => {
@@ -1869,6 +1923,7 @@ for (const useSavedChats of [false, true]) test(`connector verification prepares
   const diagnosticsRoot = mkdtempSync(join(tmpdir(), "cgw-connector-verification-success-"));
   const calls: string[] = [];
   const page = {
+    screenshot: async () => { throw new Error("synthetic screenshot unavailable"); },
     evaluate: async () => ({
       location: { origin: "https://chatgpt.com", pathSegments: 0, temporaryChat: true },
       surfaceBound: true,
@@ -3484,12 +3539,12 @@ test("browser preflight separates model context from one-message transport limit
 
   expect(() => assertChatGptWebInputWithinLimits(40_999, 32_807, "gpt-5.6-sol", "low", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(41_000, 32_808, "gpt-5.6-sol", "low", plus)).toThrow(
-    "41,000-token context window",
+    "41,000-token browser transport envelope",
   );
   expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "medium", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "high", plus)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "high", plus)).toThrow(
-    "90,000-token context window",
+    "90,000-token browser transport envelope",
   );
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "xhigh", pro)).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "max", pro)).not.toThrow();
@@ -3603,10 +3658,10 @@ test("GPT-6 staged input enforces its measured account and effort ceiling before
   )).toThrow("GPT-6 Instant uses standard context");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     333_578, 60_000, "gpt-5.6-sol", "high", pro, 250_000, 6, undefined, "5.6",
-  )).not.toThrow();
+  )).toThrow('272,000-token six-part ceiling');
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     336_578, 60_000, "gpt-5.6-sol", "max", pro, 250_000, 6, undefined, "6",
-  )).not.toThrow();
+  )).toThrow('272,000-token six-part ceiling');
 });
 
 test("Bigger Context fits mixed-density whole records within both token and composer limits", () => {
@@ -3658,7 +3713,7 @@ test("Bigger Context fits mixed-density whole records within both token and comp
   }
 }, 90_000);
 
-test("Bigger Context preflight expands only the total context ceiling and keeps each message boundary", () => {
+test("Bigger Context respects the unified context ceiling and each measured message boundary", () => {
   const plus = {
     localToolsEnabled: false,
     solAvailable: true,
@@ -3672,7 +3727,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     experimentalBiggerContext: true,
   };
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_578,
+    271_999,
     95_000,
     "gpt-5.6-sol",
     "high",
@@ -3681,7 +3736,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     6,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_579,
+    272_000,
     95_000,
     "gpt-5.6-sol",
     "high",
@@ -4249,7 +4304,7 @@ test("both response loops check explicit Stopped thinking before acknowledging f
   const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
   for (const method of ["private async waitForMultipartAcknowledgement(", "private async runBrowserTurn("]) {
     const loop = worker.slice(worker.indexOf(method));
-    const failure = loop.indexOf("if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();");
+    const failure = loop.indexOf("snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();");
     const acknowledgement = loop.indexOf(".acknowledgeToolBatch(", failure);
     expect(failure).toBeGreaterThan(0);
     expect(acknowledgement).toBeGreaterThan(failure);

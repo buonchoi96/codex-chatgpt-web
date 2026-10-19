@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-18",
+  "goal_status": "ACTIVE",
+  "phase": "P0-C native parallel child receipt routing across overlapping batches",
+  "web_head": "66bc09beddadf629d142e5bca132096066901258",
+  "source_files": [
+    "src/adapters/chatgpt-web/mcp-server.ts",
+    "tests/parallel-native-commands.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/mcp-server.ts": "64ECF1B518016666F48563B9121C474ECD043D04A3E140963DB9CCA952536FEF",
+    "tests/parallel-native-commands.test.ts": "BA83A65C5BB4E0ADB2C5BA1352A04AA3EBB704DE6554D0AA5FE7740F74EBDD80"
+  },
+  "failure_mode": "An already-reserved parallel native child result was recorded with an owner-wide reservation lookup before the parallel runner could associate it with the batch's exact lease. A later batch that completed first could consume an earlier batch's reservation, causing an erroneous child failure and retained uncertain capacity.",
+  "fix": "Skip owner-wide session observation for reserved parallel exec_command/shell_command children; retain exact lease attribution in runParallelNativeCommands, while preserving nested write_stdin and ordinary command handling.",
+  "test_evidence": {
+    "red": "Focused overlapping-batch integration regression FAIL / expected secondResult.isError false, received true; after fixing the fixture delivery ordering, 374 ms run",
+    "green_focused": "1 PASS / 0 FAIL / 8 assertions",
+    "green_targeted": "92 PASS / 0 FAIL / 337 assertions in parallel-native-commands and parallel-native-capacity tests",
+    "typecheck": "PASS / exit 0",
+    "git_diff_check": "PASS / exit 0",
+    "full_suite_this_phase": "NOT_RUN",
+    "previous_full_suite": "1681 PASS / 93 SKIP / 2 Windows symlinkSync EPERM FAIL before this patch"
+  },
+  "limitations": {
+    "native_parallel_exec_advertised": false,
+    "real_native_parallel_e2e": "NOT_RUN",
+    "model_effort": "UNVERIFIED_BY_NATIVE_CONNECTOR",
+    "safety_review_tool_advertised": false
+  },
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "edbae3ca464b091cecbd76da64e2d521b5fb697c77b96dd2ba57c9a244647014",
+    "unresolved_count": 19,
+    "state": "PENDING_SAFETY_REVIEW",
+    "original_operations_retried": 0
+  },
+  "acceptance": {
+    "total": 175,
+    "PASS": 5,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT_RUN": 21,
+    "status_upgrades": 0
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0
+}

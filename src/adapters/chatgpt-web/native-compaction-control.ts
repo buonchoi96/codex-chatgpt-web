@@ -2,6 +2,23 @@ import { COMPACT_PROMPT } from "../../responses/compaction";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 
 export const CODEX_COMPACTION_CONTROL_WIRE_NAME = "codex.control.compaction_handoff";
+export const CODEX_RECOVERY_CHECKPOINT_WIRE_NAME = "codex.control.recovery_checkpoint";
+
+/** Cumulative, side-effect-free recovery receipt, not native context compaction. */
+export function passiveRecoveryCheckpointInstruction(transaction: CompactionTransactionHandle): string {
+  return [
+    "<codex_recovery_checkpoint>",
+    "This is a private recovery summary, not a Codex /compact operation or new user request.",
+    "Consume the exact tool result above. Preserve objective, user instructions, verified work, exact probes, tool completion states, and pending operations.",
+    "Previous recovery summaries are cumulative history. Merge with new evidence; never claim incomplete outputs or missing images were read.",
+    "Before another work tool, submit exactly one codex_tool_call with:",
+    `turn_token ${transaction.token}`,
+    `wire_name ${CODEX_RECOVERY_CHECKPOINT_WIRE_NAME}`,
+    `arguments ${JSON.stringify({handoff_id:transaction.handoffId,summary:"<complete recovery summary>"})}`,
+    "After submitted=true, continue with your original task capability; do not show the checkpoint to the user.",
+    "</codex_recovery_checkpoint>",
+  ].join("\n");
+}
 export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_REQUEST";
 
 function compactionControlBinding(transaction: CompactionTransactionHandle): string[] {

@@ -1,0 +1,158 @@
+{
+  "recorded_at": "2026-10-15T20:15:29.259Z",
+  "classification": "MODEL_PIN_VERIFIED_BUT_CHILD_LIFECYCLE_SCOPE_UNAVAILABLE",
+  "actors": [
+    {
+      "id": "01a1411b-909e-7743-b7fd-d99792070e29",
+      "role": "Coding / implementation",
+      "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T02-48-08-01a1411b-909e-7743-b7fd-d99792070e29.jsonl",
+      "session_meta_line": 1,
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1411b-92a3-72d2-ae2e-94e37f3dbad3",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          },
+          "approval_policy": "never"
+        },
+        {
+          "line": 184,
+          "turn_id": "01a1412b-388a-72b0-b6d8-bb2f5a4627e4",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "sandbox": {
+            "type": "read-only"
+          },
+          "permission_profile": {
+            "type": "managed",
+            "file_system": {
+              "type": "restricted",
+              "entries": [
+                {
+                  "path": {
+                    "type": "special",
+                    "value": {
+                      "kind": "root"
+                    }
+                  },
+                  "access": "read"
+                }
+              ]
+            },
+            "network": "restricted"
+          },
+          "approval_policy": "on-request"
+        }
+      ],
+      "controls": [
+        {
+          "line": 14425,
+          "call_id": "call_a7b94b438d9344ccb344f4570984dc96",
+          "wrapper": "exec",
+          "not_found": true,
+          "raw_result_sha256": "5e94786f419e5f4433216f15fa796ca1fc73a292bf302ce957d618aa25657602"
+        }
+      ]
+    },
+    {
+      "id": "01a1411b-93d9-7920-a5fe-ed546f4c8ad0",
+      "role": "UI / research / test supervisor",
+      "file": "E:/Codex/sessions/2026/10/16/rollout-2026-10-16T02-48-09-01a1411b-93d9-7920-a5fe-ed546f4c8ad0.jsonl",
+      "session_meta_line": 1,
+      "contexts": [
+        {
+          "line": 6,
+          "turn_id": "01a1411b-963b-7960-baf7-7ce962343a00",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          },
+          "approval_policy": "never"
+        },
+        {
+          "line": 149,
+          "turn_id": "01a14122-c6a6-7d51-aed4-9f1a5cb6086f",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          },
+          "approval_policy": "never"
+        },
+        {
+          "line": 270,
+          "turn_id": "01a14126-3b75-76c0-ad81-0cea61a9ce00",
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "collaboration_model": "gpt-6-luna",
+          "collaboration_effort": "high",
+          "sandbox": {
+            "type": "danger-full-access"
+          },
+          "permission_profile": {
+            "type": "disabled"
+          },
+          "approval_policy": "never"
+        }
+      ],
+      "controls": [
+        {
+          "line": 14425,
+          "call_id": "call_a7b94b438d9344ccb344f4570984dc96",
+          "wrapper": "exec",
+          "not_found": true,
+          "raw_result_sha256": "5e94786f419e5f4433216f15fa796ca1fc73a292bf302ce957d618aa25657602"
+        },
+        {
+          "line": 14444,
+          "call_id": "call_bd11e4a9af0c429698c83033a2c9c485",
+          "wrapper": "exec",
+          "not_found": true,
+          "raw_result_sha256": "83d911a412e94ec0544408efc5097ecc7c62e422fcdad27f7e4a137088b0a5e5"
+        }
+      ]
+    }
+  ],
+  "implementer": {
+    "status": "interrupted after waitingOnApproval",
+    "last_context": 184,
+    "actual_model": "gpt-6-luna",
+    "effort": "high",
+    "permission_drift": "Initial danger-full-access/never -> app follow-up read-only/on-request",
+    "task_executed": "NOT VERIFIED; no regression/build receipt",
+    "resolution": "Gate revoked, owned child close acknowledged and app turn interrupted. New pending approval record retained, no retry."
+  },
+  "supervisor": {
+    "status": "notLoaded; prior turn completed",
+    "new_followup_delivered": false,
+    "last_context": 270,
+    "attempts": 2,
+    "result": "thread not found both times; exact UUID read_thread remained accessible between attempts; no third identity created"
+  },
+  "new_campaign_identities": 0,
+  "active_owned_work": 0,
+  "native_resume_send_work_dispatched": false,
+  "production_config_changed": false,
+  "boundary": "Explicit app model override proof does not establish scope preservation or universal closed-thread resumption. Independent main native/Web test continues."
+}

@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { unzipSync } from "fflate";
 import type { AppConfig, BrowserInteractionMode, TunnelConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
+import { parseNativeScreenObserverConfig } from "./native-screen-observer-config";
 import { runCommand, runChecked } from "./process";
 
 export const TUNNEL_VERSION = "0.0.16";
@@ -251,6 +252,7 @@ function tunnelCommandQuoted(value: string): string {
 
 export function mcpCommand(config: AppConfig, platform = process.platform): string {
   const contract = config.browserInteractionMode === "manual" ? "safe" : "native";
+  const observer = parseNativeScreenObserverConfig(config.nativeScreenObserver);
   const command = [
     ...config.runtimeCommand,
     "mcp",
@@ -259,6 +261,15 @@ export function mcpCommand(config: AppConfig, platform = process.platform): stri
     "--broker-socket",
     config.brokerSocketPath,
   ];
+  if (observer && config.mode === "full" && config.browserInteractionMode === "automatic") {
+    if (platform !== "win32") throw new Error("Native screen observer requires a Windows MCP host");
+    command.push(
+      "--screen-observer-pipe",
+      observer.readerPipe,
+      "--screen-observer-grant-tool",
+      observer.grantWireName,
+    );
+  }
   if (platform === "win32") {
     return command.map(tunnelCommandQuoted).join(" ");
   }

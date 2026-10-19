@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-18",
+  "phase": "P0-A2/A4 prevent old native input-owner epochs from replacing a newer grant",
+  "goal_status": "ACTIVE",
+  "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "workspace": {
+    "web": "main@bca4b395e3fbff8a3aa23d357ac5638221165084",
+    "swift": "main@30d3fe4570761943464947894a4e1e0b863b3574",
+    "preexisting_dirty_worktrees_preserved": true,
+    "production_config_git_refs_modified": false
+  },
+  "implementation": {
+    "source": "src/adapters/chatgpt-web/screen-observation.ts",
+    "test": "tests/screen-observation.test.ts",
+    "behavior": "For the same broker binding, owner and native session, reject any grant with owner_epoch below the currently accepted epoch before replacing grant state or clearing frame ACK caches.",
+    "scope": "A genuinely new attached native session may start at a lower epoch; native reader authorization, broker binding, current capability and expiry are still validated independently."
+  },
+  "red": {
+    "command": "bun test tests/screen-observation.test.ts",
+    "result": "13 PASS / 1 FAIL before source patch",
+    "failure": "older owner epoch successfully overwrote newer native grant; test expected SCREEN_READER_STALE_GRANT"
+  },
+  "green": {
+    "targeted": "92 PASS / 0 FAIL / 499 assertions in 9 exact observer, MCP stdio, formatting and native-screen-config test files",
+    "targeted_log": "output/day10-screen-grant-epoch-fidelity-targeted-20261018.log",
+    "root_typecheck": "PASS (bun run typecheck)",
+    "web_git_diff_check": "PASS",
+    "swift_git_diff_check": "PASS (existing LF/CRLF notices only)"
+  },
+  "review": {
+    "kind": "single-agent self-review",
+    "finding": "Epoch comparisons are only meaningful within one native session. Preserve valid session reattachment, and never authorize an older grant from the same session.",
+    "model_effort": "UNVERIFIED_BY_CURRENT_CONNECTOR",
+    "subagents_created": 0
+  },
+  "live_acceptance": {
+    "actual_native_owned_observer": "NOT_RUN; previous owned fixture reported FOCUS_FAILED with LockApp foreground",
+    "actual_web_model_semantic_e2e": "NOT_RUN",
+    "model_visible_pixels": "UNVERIFIED; image mode remains DISABLED",
+    "cpu_auto_multiworker": "UNVERIFIED",
+    "native_parallel_exec": "NOT_ADVERTISED",
+    "latest_full_web_suite": "Previous phase: 1637 PASS / 93 SKIP / 2 FAIL on Windows symlink fixture EPERM; not rerun in this phase"
+  },
+  "safety_review": {
+    "receipt": "docs/superpowers/day10-scoped-safety-advisory-20261018.json",
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "6473d247239e3b792c79ae785dd4a867017b263a85004bfab903286313054578",
+    "advisory_count": 10,
+    "status": "PENDING_SAFETY_REVIEW",
+    "native_review_tool": "NOT_ADVERTISED",
+    "original_calls_retried": 0
+  },
+  "matrix": {"total":175,"PASS":5,"PARTIAL":137,"BLOCKED":12,"NOT RUN":21,"status_upgrades":0},
+  "next_safe_step": "Continue P0 observer integration after restoring an authorized owned fixture foreground. Verify live semantic receipts and investigate Windows symlink test prerequisites without changing system policy; preserve all original safety refusals."
+}

@@ -11,6 +11,30 @@ import { parseRequest } from "../src/responses/parser";
 const model = "chatgpt-web/high";
 const summary = "The repository was inspected. Continue by implementing the bounded Web context contract.";
 
+test("missing canonical compaction source rejects before starting any adapter or browser work", async () => {
+  let adapterCalls = 0;
+  const body = {
+    model, stream: false,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+      thread_id: "thread_goal_preflight", turn_id: "turn_goal_compact", request_kind: "compaction",
+    }) },
+    input: [
+      { type: "message", role: "user", id: "msg_goal_fragment",
+        content: [{ type: "input_text", text: '<codex_internal_context source="goal">Continue working</codex_internal_context>' }] },
+      { type: "compaction_trigger" },
+    ],
+  };
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify(body),
+  }), defaultConfig("full"), () => ({ name: "must-not-run", async runTurn() { adapterCalls++; } }));
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ error: {
+    code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING",
+    message: expect.stringContaining("canonical source user message"),
+  } });
+  expect(adapterCalls).toBe(0);
+});
+
 test("native responses/memento compaction returns assistant text, not an encrypted compaction item", async () => {
   const metadata = {
     request_kind: "compaction", thread_id: "thread_memento", turn_id: "turn_memento",
@@ -60,6 +84,127 @@ test("native responses/memento compaction returns assistant text, not an encrypt
 const responseRequest: typeof respond = (request, config, factory, options) =>
   respond(request, config, factory, { ...options, rememberState: false });
 
+
+for (const stream of [false, true]) test(`browser prompt-too-long auto compacts and retries once (stream=${stream})`, async () => {
+  const config = defaultConfig("full");
+  let normalAttempts = 0;
+  let compactionAttempts = 0;
+  const body = {
+    model,
+    stream,
+    client_metadata: {'x-codex-turn-metadata':JSON.stringify({thread_id:`thread_prompt_size_${stream}`,turn_id:'turn_prompt_size'})},
+    input: [{
+      type: "message",
+      id: "msg_prompt_too_long_source",
+      role: "user",
+      content: [{ type: "input_text", text: "Continue the task after reducing browser prompt size." }],
+    }],
+  };
+
+  const factory = (): ProviderAdapter => ({
+    name: "prompt-too-long-auto-compact",
+    async runTurn(parsed, _incoming, emit) {
+      if (parsed._compactionRequest) {
+        compactionAttempts += 1;
+        emit({ type: "text_delta", text: "Compact checkpoint for retry", phase: "final_answer" });
+        emit({ type: "done", stopReason: "stop", endTurn: true });
+        return;
+      }
+      normalAttempts += 1;
+      if (normalAttempts === 1) {
+        emit({
+          type: "error",
+          message: "ChatGPT rejected the browser composer before submission because the prompt is too long",
+          status: 413,
+          errorType: "browser_transport_error",
+          code: "browser_prompt_too_long",
+          retryable: true,
+        });
+        return;
+      }
+      expect(parsed.context.messages.some(message => (
+        typeof message.content === "string"
+          ? message.content.includes(SUMMARY_PREFIX)
+          : JSON.stringify(message.content).includes(SUMMARY_PREFIX)
+      ))).toBeTrue();
+      emit({ type: "text_delta", text: "Retried after automatic compaction", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  });
+
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }), config, factory);
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  const json = stream
+    ? JSON.parse(text.split("\n").find(line => line.startsWith('data: {"type":"response.completed"'))!.slice(6)).response
+    : JSON.parse(text);
+  expect(json.status).toBe("completed");
+  expect(JSON.stringify(json.output)).toContain("Retried after automatic compaction");
+  expect(normalAttempts).toBe(2);
+  expect(compactionAttempts).toBe(1);
+});
+
+test("manual and automatic compaction both normalize to the same compaction request flag", async () => {
+  const seen: Array<{ compaction: boolean; last: unknown }> = [];
+  const factory = (): ProviderAdapter => ({
+    name: "manual-auto-compaction-parity",
+    async runTurn(parsed, _incoming, emit) {
+      seen.push({
+        compaction: parsed._compactionRequest === true,
+        last: parsed.context.messages.at(-1)?.content,
+      });
+      emit({ type: "text_delta", text: summary, phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  });
+  const config = defaultConfig("full");
+
+  const manual = await compactRequest(new Request("http://127.0.0.1/v1/responses/compact", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      input: [{ type: "message", role: "user", id: "msg_manual_source", content: [{ type: "input_text", text: "manual source" }] }],
+    }),
+  }), config, factory);
+  expect(manual.status).toBe(200);
+
+  const metadata = {
+    request_kind: "compaction",
+    thread_id: "thread_auto_compaction_parity",
+    turn_id: "turn_auto_compaction_parity",
+    compaction: {
+      trigger: "auto",
+      reason: "context_limit",
+      implementation: "responses",
+      phase: "pre_turn",
+      strategy: "memento",
+    },
+  };
+  const automatic = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) },
+      input: [{ type: "message", role: "user", id: "msg_auto_compaction_source",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn_auto_compaction_parity" },
+        content: [{ type: "input_text", text: "auto source" }] }],
+    }),
+  }), config, factory);
+  expect(automatic.status).toBe(200);
+
+  expect(seen).toHaveLength(2);
+  expect(seen.every(entry => entry.compaction)).toBeTrue();
+  expect(seen.every(entry => JSON.stringify(entry.last).includes("CONTEXT CHECKPOINT COMPACTION"))).toBeTrue();
+});
+
 function compactionAdapterFactory(
   seenProviders: CodexProviderConfig[] = [],
   expectedPreviousSummary?: string,
@@ -105,7 +250,7 @@ test("compacts ChatGPT Web v1 through a dedicated read-only browser summarizatio
         { type: "message", role: "user", content: [{ type: "input_text", text: "First request" }] },
         { type: "message", role: "assistant", content: [{ type: "output_text", text: "First answer" }] },
         { type: "message", role: "user", content: [{ type: "input_text", text: previousSummary }] },
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Latest request" }] },
+        { type: "message", role: "user", id: "msg_v1_latest", content: [{ type: "input_text", text: "Latest request" }] },
       ],
     }),
   }), config, compactionAdapterFactory(providers, previousSummary));
@@ -131,7 +276,7 @@ test("compacts legacy and named Pro tasks with Pro effort and preserves the sele
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model,
-        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Inspect" }] }],
+        input: [{ type: "message", role: "user", id: "msg_pro_source", content: [{ type: "input_text", text: "Inspect" }] }],
       }),
     }), config, () => ({
       name: "pro-compaction-effort-check",
@@ -429,7 +574,10 @@ test("returns exactly one native compaction item for a ChatGPT Web v2 request", 
       tool_choice: "auto",
       parallel_tool_calls: true,
       tools: [{ type: "function", name: "codex_exec", description: "Run", parameters: { type: "object" } }],
-      input: [{ type: "compaction_trigger" }],
+      input: [
+        { type: "message", role: "user", id: "msg_v2_source", content: [{ type: "input_text", text: "Summarize the current work" }] },
+        { type: "compaction_trigger" },
+      ],
     }),
   }), config, compactionAdapterFactory(providers));
 
@@ -455,7 +603,7 @@ test("v2 recompaction reads the previous checkpoint once and replaces it with on
       model,
       stream: false,
       input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: "First request" }] },
+        { type: "message", role: "user", id: "msg_first_recompact_source", content: [{ type: "input_text", text: "First request" }] },
         { type: "compaction_trigger" },
       ],
     }),
@@ -476,7 +624,7 @@ test("v2 recompaction reads the previous checkpoint once and replaces it with on
       stream: false,
       input: [
         previousCompaction,
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Latest request" }] },
+        { type: "message", role: "user", id: "msg_latest_recompact_source", content: [{ type: "input_text", text: "Latest request" }] },
         { type: "compaction_trigger" },
       ],
     }),
@@ -513,7 +661,10 @@ test("streams one compaction item without leaking the summary as a normal assist
   const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, stream: true, input: [{ type: "compaction_trigger" }] }),
+    body: JSON.stringify({ model, stream: true, input: [
+      { type: "message", role: "user", id: "msg_stream_source", content: [{ type: "input_text", text: "Summarize work" }] },
+      { type: "compaction_trigger" },
+    ] }),
   }), defaultConfig("full"), compactionAdapterFactory());
 
   expect(response.status).toBe(200);
@@ -591,7 +742,7 @@ test("Luna rejects a remote-v2 compaction trigger before opening another browser
 test("Luna Bigger Context accepts native v1 and v2 compaction", async () => {
   const config = { ...defaultConfig("browser-only"), solAvailable: false, experimentalBiggerContext: true };
   for (const v2 of [false, true]) {
-    const input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "Keep the project requirements." }] }];
+    const input = [{ type: "message", role: "user", id: "msg_luna_big_source", content: [{ type: "input_text", text: "Keep the project requirements." }] }];
     const response = await (v2 ? responseRequest : compactRequest)(new Request("http://127.0.0.1/v1/responses", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "chatgpt-web/luna", stream: false,
@@ -629,7 +780,7 @@ test("preserves a structured browser preflight failure through the v1 compaction
   const response = await compactRequest(new Request("http://127.0.0.1:17841/v1/responses/compact", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, input: [] }),
+    body: JSON.stringify({ model, input: [{ type: "message", role: "user", id: "msg_browser_preflight_source", content: [{ type: "input_text", text: "Summarize the previous work" }] }] }),
   }), defaultConfig("browser-only"), () => ({
     name: "preflight-error",
     async runTurn(_parsed, _incoming, emit) {
@@ -669,4 +820,12 @@ test("refuses a ChatGPT Web continuation when local previous-response state is u
   expect(response.status).toBe(409);
   const body = await response.json() as { error: { message: string } };
   expect(body.error.message).toContain("partial Codex context");
+});
+
+test('structured handoff cleanup is bounded even after backend compaction finishes', () => {
+  const source=require('node:fs').readFileSync('src/adapters/chatgpt-web/index.ts','utf8');
+  const cleanup=source.match(/\/\/ Cleanup must obey the same bounded compaction deadline\.[\s\S]{0,1200}?operationSignal,\s*\);/);
+  expect(cleanup).toBeTruthy();
+  expect(source).toContain('native_compaction_result_ready');
+  expect(source).toContain('native_compaction_result_emitted');
 });

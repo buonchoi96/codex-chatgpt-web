@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-19",
+  "phase": "P0-D ZIP-01/02/03 archive consistency and source-level acceptance",
+  "goal_status": "ACTIVE",
+  "goal_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "web_branch": "main",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "swift_branch": "main",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "owned_source_changes": [
+    "src/adapters/chatgpt-web/context-archive.ts"
+  ],
+  "owned_regression_changes": [
+    "tests/archive-cache.test.ts"
+  ],
+  "defect": "validateContextArchive verified listed file hashes but permitted manifest.images and manifest.skills to omit, redirect or contradict those hashed file entries",
+  "reproduction": {
+    "command": "bun test tests/archive-cache.test.ts",
+    "red": "9 PASS / 1 FAIL: dropping manifest.images preserved a valid file hash inventory and was accepted",
+    "green": "10 PASS / 0 FAIL / 135 assertions",
+    "regression_cases": [
+      "omitted image mapping",
+      "image mapping redirected to context.txt",
+      "image MIME inconsistent with hashed entry",
+      "skill mapping redirected to image",
+      "context mapping redirected to image"
+    ]
+  },
+  "other_verification": {
+    "command": "bun test tests/transport-selector.test.ts tests/browser-worker-contract.test.ts tests/same-tab-recovery-integration.test.ts tests/prompt-contract.test.ts",
+    "result": "203 PASS / 0 FAIL / 1349 assertions",
+    "typecheck": "bun run typecheck: exit 0",
+    "source_hygiene": "git diff --check: exit 0 (Windows LF/CRLF conversion warning only)",
+    "actual_native_web_archive_ingestion": "NOT_RUN",
+    "actual_retained_zip_upload_count": "NOT_MEASURED",
+    "actual_lost_tab_recovery": "NOT_RUN",
+    "dev_status": "bun run src/cli.ts dev status: launcher not ready (browser host pid 60328 not running); config full (dev-harness), MCP runtime ready, Codex route isolated/unused"
+  },
+  "archive_reuse": {
+    "source_lineage": [
+      "3c1567a6153124a3ee18713ba57365cdd7cba69d: bounded archive reuse and original archive-cache tests",
+      "b7ed23d8c89f71a1920a5c81d2dd94c870e249ee: cache-key and Unicode archive metadata"
+    ],
+    "current_integration": "Existing context-archive cache, deterministic builder, file hashes and browser-worker validator reused unchanged; extended only semantic manifest cross-checks",
+    "history_access_limit": "Archive branch name missing locally; referenced commit objects were present"
+  },
+  "acceptance": {
+    "ZIP-01": "PARTIAL: fixture-level manifest/cache checked; genuine archive ingestion outstanding",
+    "ZIP-02": "PARTIAL: retained-delta fixtures pass; genuine zero-upload and fresh token receipt outstanding",
+    "ZIP-03": "PARTIAL: recovery fixtures pass; genuine lost-tab/invalid-proof replay safety outstanding",
+    "requirement_counts": {"PASS": 5, "PARTIAL": 140, "BLOCKED": 12, "NOT RUN": 18, "total": 175}
+  },
+  "safety_scope": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "d15e25fd28e099989f33a0af7d837e54d3455341a5e51a10b8f3d62018f1629f",
+    "unresolved_total": 23,
+    "visible_entries": 20,
+    "remaining_pages": "UNAVAILABLE: codex_safety_review not advertised",
+    "retry_allowed": false,
+    "desktop_observe_actions_retried": 0
+  },
+  "model": "GPT-6 Sol (Web) High routing UNVERIFIED; user-selected picker cannot be established from these receipts",
+  "subagents_spawned": 0,
+  "production_config_mutations": 0,
+  "git_reference_mutations": 0,
+  "next_safe_step": "Continue separate isolated native/DEV ZIP-01/02/03 ingestion and exact-once acceptance, preserving pending safety reviews and 272000/258400 context targets"
+}

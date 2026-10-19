@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-19",
+  "phase": "P0-D authentic isolated DEV browser transport and attempted retained follow-up",
+  "goal_status": "ACTIVE",
+  "goal_original_path": "C:/Users/Long-PC/Documents/GOAL.md",
+  "goal_read_current_attempt": "UNAVAILABLE: original path does not exist on this machine as of 2026-10-19 00:56 +07:00",
+  "goal_last_verified_sha256": "AD898B0F6908595D4C3D0AAC20E32097958D755B53F439A558E0E2A3AB01115C",
+  "goal_source_note": "The previously read GOAL and 175-row PLAN remain historical context; unrelated GOAL files from other workspaces were not substituted",
+  "web_branch": "main",
+  "web_head": "cfe8e049936d5b541008bd14794df69e737a9839",
+  "swift_head": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "dev_profile": "isolated full (dev-harness); simulated tools; production Codex route isolated and unused",
+  "dev_launcher_pid": 63388,
+  "dev_model_requested": "chatgpt-web/gpt-6-sol",
+  "actual_model_effort_at_web_backend": "UNVERIFIED: model selector and effort-selection stages observed, but no independent backend model+effort attestation",
+  "dev_chat": "day10-zip-20261019-smoke",
+  "first_turn": {
+    "command": "bun run dev:chat day10-zip-20261019-smoke --model gpt-6-sol <short exact-response prompt>",
+    "result": "PASS: DAY10 DEV READY, exit 0",
+    "trace_id": "4b47abc2e671",
+    "transport": "INLINE",
+    "prepared_zip": false,
+    "accepted_send_count": 1,
+    "submission_evidence": "generation_running",
+    "final_outcome": "final; broker completion committed; pendingTools=0; activeMcpRequests=0",
+    "context_policy": "Native next-turn budget reported 258400; canonical transport account budget reported 71808",
+    "limitations": "One genuine Web reply; no ZIP attachment, archive ingestion, retained delta, native side effect or image-model proof"
+  },
+  "retained_followup_attempt": {
+    "command": "bun run dev:chat day10-zip-20261019-smoke <short exact-response follow-up>",
+    "result": "FAIL: launcher session inspection timed out after 30000ms; exit 1",
+    "failed_at": "src/dev-chat/cli.ts assertLauncherReady() before DevChatDriver initialization and message submission",
+    "accepted_send_receipt": "NONE OBSERVED for follow-up",
+    "persisted_dev_chat_turns_after_failure": 1,
+    "launcher_liveness_after_failure": "running pid 63388; MCP runtime ready; Codex route isolated and unused",
+    "primary_cause": "UNCONFIRMED: the /v1/session/inspect helper did not complete within the 30-second client deadline",
+    "replay": "No retry or alternate controller executed",
+    "limitation": "Follow-up zero-ZIP and retained-history acceptance not demonstrated"
+  },
+  "zip_requirements": {
+    "ZIP-01": "PARTIAL: previously validated local ZIP manifest regression; actual ingestion still unverified",
+    "ZIP-02": "PARTIAL: live initial Send succeeded; real retained follow-up failed before submission",
+    "ZIP-03": "PARTIAL: existing recovery fixtures only; actual lost tab recovery not tested"
+  },
+  "safety_review": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "snapshot_sha256": "d15e25fd28e099989f33a0af7d837e54d3455341a5e51a10b8f3d62018f1629f",
+    "unresolved_count": 23,
+    "visible_entries": 20,
+    "unread_remaining": 3,
+    "native_safety_review_advertised": false,
+    "retry_allowed": false,
+    "desktop_observe_retry_count": 0
+  },
+  "requirement_counts": {"PASS": 5, "PARTIAL": 140, "BLOCKED": 12, "NOT RUN": 18, "total": 175},
+  "source_code_changes_this_phase": 0,
+  "subagents_spawned": 0,
+  "production_config_mutations": 0,
+  "git_reference_mutations": 0,
+  "next_safe_step": "Diagnose the isolated DEV launcher session helper timeout using owned telemetry and a reproducible RED regression; preserve first-turn Send evidence and avoid uncertain repeat submission"
+}

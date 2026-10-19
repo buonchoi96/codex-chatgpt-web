@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-17",
+  "goal_status": "ACTIVE",
+  "scope": "P0-A4 UIA semantic state fidelity in projected snapshots and incremental tree ACK responses",
+  "classification": "RED_GREEN_MCP_FIXTURE; AUTHENTICATED_WEB_MODEL_E2E_UNVERIFIED",
+  "root_cause": "The native UIA helper emitted is_enabled/is_offscreen/is_focused and the Web observer validated those fields, but the tree projector discarded them; comparisonKey consequently missed focus, availability, and visibility transitions.",
+  "source_files": [
+    "src/adapters/chatgpt-web/screen-tree.ts",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts"
+  ],
+  "test_files": [
+    "tests/screen-tree.test.ts",
+    "tests/screen-tree-diff.test.ts",
+    "tests/mcp-screen-tree.test.ts"
+  ],
+  "source_sha256": {
+    "src/adapters/chatgpt-web/screen-tree.ts": "49F837D97059FE91E5E61FCC2D811101AC68A3DED1957B517DD5DAA1842780C0",
+    "src/adapters/chatgpt-web/screen-tree-diff.ts": "83DF383FD887478EB2B55DA199329FE21E0B01469A11844237F5F6252CAF368F"
+  },
+  "validation": {
+    "red_test": "bun test tests/screen-tree-diff.test.ts: 4 PASS, 1 FAIL; failed because projected UIA snapshot omitted all three provider boolean state fields",
+    "green_command": "bun test tests/screen-tree.test.ts tests/screen-tree-diff.test.ts tests/mcp-screen-tree.test.ts tests/screen-observation-ordering.test.ts tests/screen-observation-publication.test.ts",
+    "green": "52 PASS, 0 FAIL, 366 assertions across five Web test files",
+    "green_log": "docs/superpowers/day10-a4-uia-state-regression-20261017.log",
+    "green_log_sha256": "F1E811F61317FB40E7B29E5C19286A39DF4D40283AC09F21B192205FB84BC039",
+    "typecheck": "PASS: bun run typecheck",
+    "git_diff_check": "PASS: git diff --check",
+    "mcp_scope": "Isolated in-process SDK MCP client with synthetic native provider; verified mixed-diff reply includes changed UIA state with ACK"
+  },
+  "verified_implementation": [
+    "Full JSON and compact trees preserve true/false UIA enabled, offscreen, and focused flags.",
+    "Stable-provider UIA diff comparison includes the state fields and sends updated nodes even if other labels and bounds do not change.",
+    "Mixed-diff MCP regression preserves flags and does not expose raw unprojected native nodes.",
+    "Non-UIA provenance and wrong-typed flags are rejected by tree projection."
+  ],
+  "limitations": [
+    "The model-facing route did not advertise codex_screen_observe in this native connector session; no authenticated Web-model semantic ACK or live UIA-only two-frame test was performed.",
+    "The previous owned Swift stdio mixed-source evidence is unchanged; no native executable was started or altered in this phase.",
+    "No claim that explicit ACK proves an actual model received an entire prior snapshot through the Web backend.",
+    "Actual routed GPT-6 Sol (Web) High model and effort were not independently exposed for verification."
+  ],
+  "runtime": "Windows, Bun 1.4.0, local Web repository main@e530f5b3c62d1d8a563266c75b6d424aaca0de64",
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "status_upgrades": 0,
+  "safety_scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+  "safety_snapshot_sha256": "9158a6a76321cf6cad2cd0ec8342653a12fb08eac46541e804297ff01449c39e",
+  "pending_safety_review": 6,
+  "safety_retry_allowed": false,
+  "native_safety_review_advertised": false,
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0,
+  "remaining_p0": ["A4 live authorized Web-model observation and real UIA-only ACK", "B verified multithread CPU budget", "C native parallel policy-limited", "D archive/272K recall", "E replay/compact edge cases", "F safety review", "G model-visible pixel delivery"]
+}

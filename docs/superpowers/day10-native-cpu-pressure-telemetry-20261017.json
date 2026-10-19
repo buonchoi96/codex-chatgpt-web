@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-17",
+  "scope": "Day-10 P0-B local Windows observer CPU pressure collection and conservative initial dispatch",
+  "status": "RED_TO_GREEN_NATIVE_CPU_PRESSURE_INTEGRATION; AUTO_MULTIWORKER_UNVERIFIED",
+  "goal_status": "ACTIVE",
+  "actual_changes": [
+    "ObserverCpuPool now starts with concurrency_limit=1 even when an independently verified budget provisioned additional sleeping workers.",
+    "Read-only GetSystemTimes idle/kernel/user counter deltas produce real Windows busy_fraction readings; counter resets, missing readings, zero intervals and inconsistent deltas remain unknown.",
+    "High-frequency frames cache only the latest valid busy sample between 100 ms sampling intervals; ObserverEngine supplies these measured readings to PressureGovernor rather than an unconditional empty sample.",
+    "Worker growth still requires measured throughput improvement and sustained low load. No such real measurement is currently supplied, so real AUTO scaling remains incomplete."
+  ],
+  "red": {
+    "command": "cmake --build native/build --target swift_observer_cpu_tests --parallel 2",
+    "result": "FAIL: SystemCpuTimes and cpu_busy_fraction did not exist",
+    "scope": "New regression compiled before implementation, no production execution"
+  },
+  "green": {
+    "command": "cmake --build native/build --target swift_observer_cpu_tests swift_observer_engine_tests --parallel 2; ctest --test-dir native/build -R '^swift_observer_(cpu|engine)_tests$' --output-on-failure",
+    "build": "PASS",
+    "ctest_groups": "2 PASS, 0 FAIL",
+    "cpu_policy_only": "8 PASS, 0 FAIL including a real Windows GetSystemTimes interval",
+    "git_diff_check": "PASS (tracked diff; line-ending warnings only)",
+    "test_log": "ComputerUseSwift-MCP/output/day10-cpu-pressure-telemetry-green-20261017.log",
+    "test_log_sha256": "6309DBEFAA3E966CFD5ECD41FC896341B957D2DB39A90FAC078C043D145A3A90",
+    "engine_pressure_integration": "Actual GetSystemTimes reading goes from unknown on the first frame to known after 150 ms; engine keeps concurrency_limit=1 until independently measured throughput evidence exists."
+  },
+  "current_live_allocation_read_only": {
+    "system_logical": 12,
+    "cpu_set_logical": 7,
+    "allocation_uncertain": true,
+    "reasons": ["job_ancestor_limits_unverified", "unresolved_allocation_safe_one_worker"],
+    "effective_worker_budget": 1
+  },
+  "paired_synthetic_benchmark": {
+    "receipt": "ComputerUseSwift-MCP/output/day10-cpu-pressure-telemetry-matched-bench-20261017.json",
+    "sha256": "9CC77348BC2170A958150E862C43333282C3ACEA33249CC45A9C5BCE2A7BC304",
+    "paired_orders": 2,
+    "actual_auto_worker_threads_each": 1,
+    "actual_parallel_overlap_each": 1,
+    "conclusion": "No real multiple-worker AUTO speedup established; timing differences under identical one-worker allocations must not be attributed to parallelism."
+  },
+  "native_files_sha256": {
+    "native/include/observer_cpu.hpp": "33803007557CC8823C58457E186C9BC642A9C7737E4A869133B9762382274769",
+    "native/src/observer_cpu.cpp": "BF334668ADDB5918CAB4266F68625DC1A56B7302292C1AB3766DEF54C6C671BC",
+    "native/include/observer_engine.hpp": "A566C45FE106A76B15C40B24AE600A9FE5A5D46F4CCF71E501BDE76EE1510C8C",
+    "native/src/observer_engine.cpp": "E7CD5F85325011A3016C64E7AF69D21666A4D98949F3FD63AF5A6C9AA1CD80A4",
+    "native/tests/observer_cpu_tests.cpp": "1D725B1C239E2D1892403640F459443560F6E9B27955D742B7FB570AEDF37703",
+    "native/tests/observer_engine_tests.cpp": "19C5D99594D21B41326B8413C3DF6182503EFEF601394842A3F3E0CCCE832A05"
+  },
+  "acceptance_remaining": [
+    "Authoritative inherited Job Object/CPU capacity verification; present host remains conservative at one worker.",
+    "Matched observed throughput recovery signal and true concurrent AUTO work on a verified multiworker allocation.",
+    "Capture, OCR, CV, readiness, total observation, CPU, RSS, foreground-game FPS and cancellation percentiles under real authorized workload.",
+    "Real Swift foreground semantic observation and authenticated GPT-6 Sol Web High model loop."
+  ],
+  "requirements_total": 175,
+  "requirements_counts": {"PASS": 5, "PARTIAL": 137, "BLOCKED": 12, "NOT RUN": 21},
+  "status_upgrades": 0,
+  "safety": {
+    "scope_sha256": "e697504cf59ff1fcc8f656e679a07664c0beda1374066c3217003e7f174f9111",
+    "pending_review": 6,
+    "retry_allowed": false,
+    "native_safety_review_available": false
+  },
+  "model_and_effort_verified": false,
+  "subagents_spawned": 0,
+  "production_service_mutations": 0,
+  "git_reference_mutations": 0
+}

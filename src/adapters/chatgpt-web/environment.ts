@@ -3,7 +3,9 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isReadableCompactionSummaryText, OPAQUE_COMPACTION_NOTE } from "../../responses/compaction";
 import { isNativeAgentsMdContext } from "../../responses/native-context";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
+import { ChatGptWebAdapterError } from "./adapter-error";
 import { isAcceptedCompactionContinuation, recoverCompactionInstruction } from "./compaction-continuation";
+import { isAuthenticatedNativeCompactionSource, isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
 
 export type ChatGptSandboxPolicy =
   | { type: "dangerFullAccess" }
@@ -50,9 +52,11 @@ export interface ChatGptTurnUserRevision {
 export const CHATGPT_TURN_REVISION_CONFLICT_MESSAGE =
   "ChatGPT web current user message conflicts with native Codex turn_id metadata";
 
-export class MissingTrustedCodexEnvironmentError extends Error {
+export class MissingTrustedCodexEnvironmentError extends ChatGptWebAdapterError {
   constructor(field: string) {
-    super(`ChatGPT web turn is missing ${field} in trusted Codex environment context`);
+    super(`ChatGPT web turn is missing ${field} in trusted Codex environment context. `
+      + 'Supply an authentic Codex turn with its current workspace and permissions; preserve the existing task and do not replay tool actions.',
+      {status:400,errorType:'invalid_request_error',code:'TRUSTED_CWD_MISSING_OR_UNVERIFIED',retryable:false});
     this.name = "MissingTrustedCodexEnvironmentError";
   }
 }
@@ -182,6 +186,9 @@ function contextualUserMessage(value: Record<string, unknown>): boolean {
   return hasEnvironmentContextFragment(value)
     || isNativeAgentsMdContext(value)
     || isNativeOpenPageContext(value)
+    || /^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(text)
+    || /^<goal_context>[\s\S]*<\/goal_context>$/.test(text)
+    || /^<turn_aborted>[\s\S]*<\/turn_aborted>$/.test(text)
     || /^<subagent_notification>[\s\S]*<\/subagent_notification>$/.test(text)
     || isReadableCompactionSummaryText(text)
     || text === OPAQUE_COMPACTION_NOTE;
@@ -218,7 +225,13 @@ function isNativeInstruction(
   item: Record<string, unknown> | undefined,
   metadata?: Record<string, unknown>,
 ): item is Record<string, unknown> {
-  if (item?.type === "message" && item.role === "user") return !contextualUserMessage(item);
+  if (item?.type === "message" && item.role === "user") {
+    // A current-turn user may ask about literal <turn_aborted> markup. Only
+    // foreign/prior-turn notices are contextual; never lose an actual instruction.
+    if (isTurnAbortedNotice(item) && typeof metadata?.turn_id === "string"
+      && itemTurnId(item) === metadata.turn_id) return true;
+    return !contextualUserMessage(item);
+  }
   if (isDelegatedInstruction(item)) return true;
   if (item?.type !== "agent_message" || typeof item.id !== "string" || !item.id
     || metadata?.subagent_kind !== "thread_spawn"
@@ -266,16 +279,22 @@ export function priorChatGptAbortedTurnIds(parsed: CodexParsedRequest): string[]
 export function extractChatGptTurnUserRevision(parsed: CodexParsedRequest): unknown {
   const identity = extractChatGptTurnIdentity(parsed);
   const turnId = identity.turnId;
-  if (!turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!turnId) throw new ChatGptWebAdapterError(
+    'ChatGPT web requires native Codex turn_id metadata for browser-session replay. Supply an authentic Codex turn before retrying.',
+    {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
   const revision = latestChatGptTurnUserRevision(parsed, turnId);
-  if (!revision) throw new Error("ChatGPT web requires a current-turn user message for browser-session replay");
+  if (!revision) throw new ChatGptWebAdapterError(
+    'ChatGPT web requires a current-turn user message for browser-session replay. Supply an authentic Codex instruction or an acknowledged native compaction checkpoint; preserve existing tools and task state.',
+    {status:400,errorType:'invalid_request_error',code:'CURRENT_TURN_USER_REVISION_MISSING',retryable:false});
   // A pre-turn compact may summarize an earlier user message before native Codex continues
   // under its new turn id without adding a new human message. Accept only our exact completed
   // checkpoint; an arbitrary older prompt is still not a new instruction or a valid handoff.
   if (revision.turnId !== undefined && revision.turnId !== turnId
     && (priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
-      || !isAcceptedCompactionContinuation(parsed, identity, revision))) {
-    throw new Error(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE);
+      || !(isAuthenticatedNativeGoalContinuation(parsed, identity, revision)
+        || isAcceptedCompactionContinuation(parsed, identity, revision)))) {
+    throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
+      {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
   }
   return revision.content;
 }
@@ -284,22 +303,52 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   const body = record(parsed._rawBody);
   const input = Array.isArray(body?.input) ? body.input : [];
   const metadata = clientTurnMetadata(parsed);
-  const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed)) : undefined;
-  for (let index = input.length - 1; index >= 0; index -= 1) {
-    const revision = userRevision(input[index], expectedTurnId, metadata);
-    if (revision) {
-      // v1 retains the older human message but drops a synthetic delegation. Recover the
-      // actual task only for an exact producer-authenticated retained representation before
-      // our checkpoint. New steering and rewritten history keep their normal validation.
-      return recovered?.sourceWasDelegation && index < recovered.summaryIndex
-        && isAcceptedCompactionContinuation(parsed, extractChatGptTurnIdentity(parsed), revision)
-        ? recovered.source : revision;
-    }
+  const identity = extractChatGptTurnIdentity(parsed);
+  const latestIndex = input.findLastIndex(value => userRevision(value, expectedTurnId, metadata) !== undefined);
+  const latest = latestIndex >= 0 ? userRevision(input[latestIndex], expectedTurnId, metadata) : undefined;
+  // Fresh human input (or a native-rollout-authenticated /goal continuation) supersedes a
+  // stale checkpoint. Some native current user items have a server id but no item-level turn_id.
+  // Accept those only when they occur after the last checkpoint in the canonical input.
+  const checkpointIndex = input.findLastIndex(value => {
+    const item = record(value);
+    return item && (["compaction", "compaction_summary", "context_compaction"].includes(String(item.type))
+      || (item.type === "message" && item.role === "user"
+        && isReadableCompactionSummaryText(rawMessageText(item))));
+  });
+  if (latest && (latest.turnId === expectedTurnId
+    || (latest.turnId === undefined && latestIndex > checkpointIndex)
+    || (latest.itemId && parsed._compactionRequest
+      && latest.turnId === undefined && latestIndex <= checkpointIndex
+      // Native replay can strip item-level turn_id from the newest real human
+      // instruction while preserving a previous compact checkpoint after it.
+      // Do not consult that obsolete checkpoint first: authenticate the exact
+      // ID and full content against the latest *typed* human rollout item.
+      && isAuthenticatedNativeCompactionSource(parsed, identity, latest))
+    || (latest.turnId && expectedTurnId && !priorChatGptAbortedTurnIds(parsed).includes(latest.turnId)
+      && (isAuthenticatedNativeGoalContinuation(parsed, identity, latest)
+        || isAuthenticatedNativeCompactionSource(parsed, identity, latest))))) return latest;
+  // A fresh compact with a native-authenticated human source is independent of the
+  // previous checkpoint. Do not let stale checkpoint recovery mask this newer source.
+  const recovered = recoverCheckpoint ? recoverCompactionInstruction(parsed, identity) : undefined;
+  if (latest) {
+    // A completed compact may have dropped a delegated synthetic instruction.
+    return recovered?.sourceWasDelegation && latestIndex < recovered.summaryIndex
+      && isAcceptedCompactionContinuation(parsed, identity, latest)
+      ? recovered.source : latest;
   }
   return recovered?.source;
 }
 
-function userRevision(value: unknown, expectedTurnId?: string, metadata?: Record<string, unknown>): ChatGptTurnUserRevision | undefined {
+/** A transport may carry the authentic historical instruction only when the
+ * canonical request omitted all instruction items. It never mutates history. */
+export function recoveredChatGptInstruction(parsed:CodexParsedRequest):ReturnType<typeof recoverCompactionInstruction>{
+  const body=record(parsed._rawBody),input=Array.isArray(body?.input)?body.input:[];
+  const identity=extractChatGptTurnIdentity(parsed),metadata=clientTurnMetadata(parsed);
+  if(input.some(value=>userRevision(value,identity.turnId,metadata)))return undefined;
+  return recoverCompactionInstruction(parsed,identity);
+}
+
+export function userRevision(value: unknown, expectedTurnId?: string, metadata?: Record<string, unknown>): ChatGptTurnUserRevision | undefined {
   const item = record(value);
   if (!isNativeInstruction(item, metadata)) return undefined;
   const messageTurnId = itemTurnId(item);
@@ -318,8 +367,38 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
   const body = record(parsed._rawBody);
   const turnId = extractChatGptTurnIdentity(parsed).turnId;
   const metadata = clientTurnMetadata(parsed);
-  const recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
   const input = Array.isArray(body?.input) ? body.input : [];
+  const nativeRevision = input.map(value => userRevision(value, turnId, metadata)).filter(
+    (value): value is ChatGptTurnUserRevision => value !== undefined).at(-1);
+  // A new instruction or independently authenticated goal resumes without forcing
+  // validation of an unrelated/stale historical compact record.
+  const newestUserIndex = input.findLastIndex(value => userRevision(value, turnId, metadata) !== undefined);
+  const newestCheckpointIndex = input.findLastIndex(value => {
+    const item = record(value);
+    return item && (["compaction", "compaction_summary", "context_compaction"].includes(String(item.type))
+      || (item.type === "message" && item.role === "user"
+        && isReadableCompactionSummaryText(rawMessageText(item))));
+  });
+  const hasActiveSource = nativeRevision && (nativeRevision.turnId === turnId
+    || (nativeRevision.turnId === undefined && newestUserIndex > newestCheckpointIndex)
+    || (nativeRevision.turnId && !priorChatGptAbortedTurnIds(parsed).includes(nativeRevision.turnId)
+      && isAuthenticatedNativeGoalContinuation(parsed, extractChatGptTurnIdentity(parsed), nativeRevision)));
+  // A valid new steering revision still needs the exact completed checkpoint in
+  // instruction lineage (notably when v1 dropped a synthetic delegation).
+  // Only a stale native rollout lookup may be ignored for a separately authenticated
+  // active instruction; never promote that lookup into checkpoint evidence.
+  let recovered: ReturnType<typeof recoverCompactionInstruction>;
+  if (hasActiveSource) {
+    try {
+      recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
+    } catch (error) {
+      if (!(error instanceof ChatGptWebAdapterError)
+        || error.code !== "REPLAY_PROVENANCE_UNVERIFIED") throw error;
+      recovered = undefined;
+    }
+  } else {
+    recovered = recoverCompactionInstruction(parsed, extractChatGptTurnIdentity(parsed));
+  }
   const prefix = recovered?.sourceWasDelegation ? input.slice(0, recovered.summaryIndex) : [];
   const retained = prefix.map(value => userRevision(value, turnId, metadata)).filter(value => value !== undefined).at(-1);
   const recoverDelegation = recovered?.sourceWasDelegation && (!retained
@@ -329,24 +408,83 @@ export function chatGptTurnUserRevisionHistory(parsed: CodexParsedRequest): Chat
     return revision ? [revision] : [];
   });
   if (recoverDelegation) return [recovered!.source, ...revisions];
-  return revisions.length > 0 ? revisions : recovered ? [recovered.source] : [];
+  // A verified native installation or completed checkpoint may retain the prior
+  // source even when a fresh steering instruction follows the summary.
+  if (recovered && !revisions.some(revision => revision.itemId === recovered.source.itemId)) {
+    return [recovered.source, ...revisions];
+  }
+  return revisions;
 }
 
 /** A remote compaction may summarize an instruction from an earlier turn. */
 export function extractChatGptCompactionSourceRevision(
   parsed: CodexParsedRequest,
-  options: { recoverCheckpoint?: boolean } = {},
+  options: { recoverCheckpoint?: boolean; allowAbortedRetainedComparison?: boolean } = {},
 ): ChatGptTurnUserRevision {
   if (!parsed._compactionRequest) throw new Error("ChatGPT web compaction source requires a compaction request");
-  const revision = latestChatGptTurnUserRevision(parsed, extractChatGptTurnIdentity(parsed).turnId, options.recoverCheckpoint !== false);
-  if (!revision) throw new Error("ChatGPT web compaction requires a source user message");
-  return revision;
+  const identity = extractChatGptTurnIdentity(parsed);
+  const trusted = parsed._trustedCompactionSource;
+  // Only the bridge can attach a source from an actual accepted native browser
+  // submission under the same thread, turn, model and effort.
+  const trustedMatches = trusted !== undefined
+    && identity.threadId === trusted.threadId
+    && identity.turnId === trusted.turnId
+    && parsed.modelId === trusted.modelId
+    && parsed.options.reasoning === trusted.reasoning
+    && (!trusted.revision.turnId || trusted.revision.turnId === identity.turnId);
+  let revision: ChatGptTurnUserRevision | undefined;
+  try {
+    revision = latestChatGptTurnUserRevision(parsed, identity.turnId, options.recoverCheckpoint !== false);
+  } catch (error) {
+    // A stale installed checkpoint must not disable a stronger, independently
+    // authenticated accepted source from THIS native turn.
+    if (!trustedMatches || !(error instanceof ChatGptWebAdapterError)
+      || error.code !== "REPLAY_PROVENANCE_UNVERIFIED") throw error;
+  }
+  const restored = !revision && trustedMatches ? trusted!.revision : undefined;
+  const source = revision ?? restored;
+  // Enforce an independent rollout witness for actual native compaction
+  // identities. Lightweight legacy/SDK fixture IDs are not Codex task IDs;
+  // they retain their existing simulated checkpoint behavior.
+  const metadata = clientTurnMetadata(parsed);
+  const nativeId = (id: unknown): id is string => typeof id === "string"
+    && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id);
+  const nativeCompaction = metadata?.request_kind === "compaction"
+    && nativeId(identity.threadId) && nativeId(identity.turnId)
+    && typeof record(parsed._rawBody)?.model === "string";
+  const input = record(parsed._rawBody)?.input;
+  const priorHuman = nativeCompaction && source?.turnId !== undefined
+    && source.turnId !== identity.turnId && Array.isArray(input)
+    && input.some(value => {
+      const item = record(value);
+      return item?.type === "message" && item.role === "user"
+        && item.id === source.itemId && itemTurnId(item) === source.turnId;
+    });
+  if (priorHuman && source && !isAuthenticatedNativeCompactionSource(parsed, identity, source)
+    && !isAcceptedCompactionContinuation(parsed, identity, source)) {
+    throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
+      { status: 400, errorType: "invalid_request_error", code: "REPLAY_PROVENANCE_UNVERIFIED", retryable: false });
+  }
+  if (!source || (!options.allowAbortedRetainedComparison && source.turnId && priorChatGptAbortedTurnIds(parsed).includes(source.turnId))) {
+    // A tool-only round or /goal runtime fragment is not an authenticated native instruction.
+    // Do not fabricate one from the browser summary, a ZIP or an unrelated older task.
+    throw new ChatGptWebAdapterError(
+      "ChatGPT web compaction requires a canonical source user message; preserve the active task and supply an authentic Codex instruction before retrying.",
+      { status: 409, errorType: "invalid_request_error", code: "COMPACTION_SOURCE_USER_MESSAGE_MISSING", retryable: false },
+    );
+  }
+  return source;
 }
 
 /** A completed checkpoint identifies the current turn's rebuilt environment preamble. */
 export function isChatGptCompactionContinuation(parsed: CodexParsedRequest): boolean {
+  // A new /compact operation is the producer of a checkpoint, not a consumer of
+  // an earlier checkpoint's continued native turn. Its source is checked separately.
+  if (parsed._compactionRequest) return false;
   const identity = extractChatGptTurnIdentity(parsed);
   const revision = latestChatGptTurnUserRevision(parsed, identity.turnId);
+  if (revision?.turnId && identity.turnId && revision.turnId !== identity.turnId
+    && isAuthenticatedNativeGoalContinuation(parsed, identity, revision)) return false;
   return revision?.turnId !== undefined && identity.turnId !== undefined
     && !priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
     // Pre-turn compaction can append the new instruction after the checkpoint. It still
@@ -982,6 +1120,7 @@ export function extractChatGptThreadSpawnLineage(
   const sandboxType = sandboxTypeFromMetadata(canonicalSandboxMetadata(metadata));
   if (!sandboxType || sandboxType === "platform") return undefined;
   const workspaces = record(metadata.workspaces);
+  if(metadata.workspaces!==undefined&&!workspaces)return undefined;
   const workspacePaths = workspaces ? Object.keys(workspaces) : [];
   if (workspacePaths.some(path => !isAbsolute(path))) return undefined;
   const workspaceRoots = [...new Set(workspacePaths.map(path => resolve(path)))];
@@ -997,6 +1136,7 @@ export function extractChatGptRootThreadMetadata(parsed: CodexParsedRequest): Ch
   const threadId = typeof metadata.thread_id === "string" ? metadata.thread_id.trim() : "";
   const sandboxType = sandboxTypeFromMetadata(canonicalSandboxMetadata(metadata));
   const workspaces = record(metadata.workspaces);
+  if(metadata.workspaces!==undefined&&!workspaces)return undefined;
   const workspacePaths = workspaces ? Object.keys(workspaces) : [];
   if (!threadId || !sandboxType || workspacePaths.some(path => !isAbsolute(path))) return undefined;
   return { threadId, sandboxType, workspaceRoots: [...new Set(workspacePaths.map(path => resolve(path)))] };

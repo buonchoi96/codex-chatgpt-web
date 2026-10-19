@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-17",
+  "kind": "native_reader_named_pipe_split_utf8_decode",
+  "classification": "RED_GREEN_REAL_WINDOWS_NAMED_PIPE_FIXTURE",
+  "root_cause": "Per-chunk Buffer.toString('utf8') replaced OCR glyphs split across named-pipe data events with U+FFFD.",
+  "reproduction": {
+    "command": "bun test tests/screen-reader-pipe-framing.test.ts",
+    "real_transport": "private Windows named-pipe server/client using node:net",
+    "split": "after first byte of UTF-8 à",
+    "expected": "Chào 世界",
+    "observed_before_fix": "Ch��o 世界",
+    "failed": 1,
+    "native_exec_chunk_id": "81c970"
+  },
+  "fix": {
+    "source": "src/adapters/chatgpt-web/screen-observation.ts",
+    "source_sha256": "1ad7c2317c17da813d43727a8216a9a6eeca8d2a75f8a757d37af6459002abde",
+    "test": "tests/screen-reader-pipe-framing.test.ts",
+    "test_sha256": "bc8480ed5922b98191653eac807f3bba18706cecc0e0cd5dd873c2c93ec3144b",
+    "behavior": "Incremental StringDecoder('utf8') assembles code points across chunks before NDJSON parsing."
+  },
+  "verification": {
+    "command": "bun test tests/screen-reader-pipe-framing.test.ts tests/screen-observation-publication.test.ts tests/mcp-screen-tree.test.ts tests/screen-tree-diff.test.ts tests/screen-tree.test.ts tests/mcp-stdio-screen-observer.test.ts tests/native-screen-observer-config.test.ts",
+    "tests_passed": 47,
+    "tests_failed": 0,
+    "assertions": 310,
+    "test_log": "output/day10-screen-observer-framing-green-20261017.log",
+    "test_log_sha256": "1d6c9f6f7278b876153a8f537702f90ace3f21cd78e6c4c1d6babd6e8d0c9ca0",
+    "typecheck_log": "output/day10-screen-observer-framing-typecheck-20261017.log",
+    "typecheck_log_sha256": "8670e722a80795c2de9002bdb4d7040f339e9bb333122e4a9f9fdc1f36baf689",
+    "typecheck_exit": 0,
+    "diff_check_exit": 0
+  },
+  "real_native_swift_observer": "NOT_RUN_FOR_THIS_CHANGE",
+  "authenticated_web_model_e2e": "NOT_RUN",
+  "native_input": 0,
+  "screenshots": 0,
+  "production_mutations": 0,
+  "git_reference_mutations": 0,
+  "subagents": 0,
+  "web_head": "cb261f747b4ea01ee8ff8ab4d885796f50ed936f",
+  "matrix_status_upgrades": 0,
+  "full_scope": 175
+}

@@ -14,6 +14,8 @@ interface TransactionWaiter {
 
 interface CompactionTransaction extends CompactionTransactionHandle {
   traceId: string;
+  kind: "compaction" | "recovery";
+  beforeAccept?: (summary: string) => void;
   summary?: string;
   waiter?: TransactionWaiter;
   timer?: ReturnType<typeof setTimeout>;
@@ -27,7 +29,7 @@ function opaqueId(prefix: "control" | "handoff"): string {
 export class CompactionTransactionStore {
   private readonly transactions = new Map<string, CompactionTransaction>();
 
-  begin(traceId: string, ttlMs: number): CompactionTransactionHandle {
+  begin(traceId: string, ttlMs: number, beforeAccept?: (summary: string) => void): CompactionTransactionHandle {
     if (!traceId.trim()) throw new Error("compaction transaction trace id is required");
     if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
       throw new Error("compaction transaction TTL must be a positive finite number");
@@ -36,6 +38,8 @@ export class CompactionTransactionStore {
       token: opaqueId("control"),
       handoffId: opaqueId("handoff"),
       traceId,
+      kind: beforeAccept ? "recovery" : "compaction",
+      ...(beforeAccept ? { beforeAccept } : {}),
     };
     transaction.timer = setTimeout(() => {
       this.finishError(transaction, new Error("compaction transaction timed out"));
@@ -45,17 +49,20 @@ export class CompactionTransactionStore {
     return { token: transaction.token, handoffId: transaction.handoffId };
   }
 
-  submit(token: string, handoffId: string, summary: string): void {
+  submit(token: string, handoffId: string, summary: string, kind: "compaction" | "recovery" = "compaction"): void {
     const transaction = this.transactions.get(token);
     if (!transaction) throw new Error("compaction control token is invalid, expired, or consumed");
     if (transaction.summary !== undefined) throw new Error("compaction handoff was already submitted");
+    if (transaction.kind !== kind) throw new Error("recovery control operation does not match the bound transaction");
     if (handoffId !== transaction.handoffId) {
       throw new Error("compaction handoff id does not match the pending transaction");
     }
     const normalized = summary.trim();
     if (!normalized) throw new Error("compaction handoff summary is empty");
+    // Persist first: never acknowledge an unsafe or failed durable checkpoint.
+    transaction.beforeAccept?.(normalized);
     transaction.summary = normalized;
-    console.info(`[chatgpt-web] broker trace=${transaction.traceId} accepted structured compaction handoff`);
+    console.info(`[chatgpt-web] broker trace=${transaction.traceId} accepted structured ${transaction.kind} handoff`);
     if (transaction.timer) clearTimeout(transaction.timer);
     transaction.timer = undefined;
     if (transaction.waiter) this.consume(transaction);
@@ -65,12 +72,12 @@ export class CompactionTransactionStore {
     const transaction = this.transactions.get(token);
     if (!transaction) return Promise.reject(new Error("compaction control token is invalid, expired, or consumed"));
     if (transaction.waiter) return Promise.reject(new Error("compaction transaction already has a waiter"));
-    if (transaction.summary !== undefined) return Promise.resolve(this.consume(transaction));
     if (signal?.aborted) {
       const error = new DOMException("compaction transaction aborted", "AbortError");
       this.finishError(transaction, error);
       return Promise.reject(error);
     }
+    if (transaction.summary !== undefined) return Promise.resolve(this.consume(transaction));
     return new Promise<string>((resolve, reject) => {
       const waiter: TransactionWaiter = { resolve, reject, ...(signal ? { signal } : {}) };
       if (signal) {
