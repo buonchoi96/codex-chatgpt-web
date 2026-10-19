@@ -1367,6 +1367,34 @@ describe("trusted Codex task environment continuity", () => {
     });
   }
 
+  test("calendar refresh may repeat a strict subset of native multi-workspace roots without changing authority", () => {
+    const { codexHome, request, delta, rolloutPath } = midnightRolloutFixture();
+    const additionalRoot = resolve(root, "additional-native-workspace");
+    const native = readFileSync(rolloutPath, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    // Native turn_context remains authoritative for the full workspace set.
+    native[1]!.payload.workspace_roots = [root, additionalRoot];
+    writeFileSync(rolloutPath, native.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const original = delta.content[0]!.text;
+    delta.content[0]!.text = original.replace("<filesystem>",
+      `<filesystem><workspace_roots><root>${root}</root></workspace_roots>`);
+    const store = new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome);
+    const resolved = store.resolve(request);
+    expect(resolved.cwd).toBe(root);
+    expect(resolved.roots).toEqual([root, additionalRoot]);
+    expect(resolved.writableRoots).toEqual([root, additionalRoot]);
+    expect(resolved.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
+    // A fragment cannot introduce an unrecognized root even when it also lists
+    // one already authorized by the native rollout.
+    delta.content[0]!.text = original.replace("<filesystem>",
+      `<filesystem><workspace_roots><root>${root}</root><root>${resolve(root, "foreign")}</root></workspace_roots>`);
+    expect(() => store.resolve(request)).toThrow(
+      "Calendar environment delta conflicts with its current Codex rollout",
+    );
+    // A different profile remains invalid even when the repeated roots agree.
+    delta.content[0]!.text = original.replace(dangerFullAccessProfileXml, readOnlyProfileXml);
+    expect(() => store.resolve(request)).toThrow();
+  });
+
   test("calendar worker inventories remain contextual across cache, rollout and policy conflicts", () => {
     const { codexHome, request, body, delta, rolloutPath } = midnightRolloutFixture();
     const original = delta.content[0]!.text;
