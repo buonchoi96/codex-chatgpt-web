@@ -4032,7 +4032,8 @@ export class ChatGptBrowserWorker {
     // connector pill in the ACTIVE empty composer is stronger, conversation-local
     // evidence than the absent picker. The configured connector route was already
     // checked above; never infer access from text or a retained boolean alone.
-    if (temporaryChat && /^\\/c\\/[\w-]+\\/?$/.test(connectorPageUrl.pathname)) {
+    if (temporaryChat && connectorPageUrl.pathname.startsWith("/c/")
+      && connectorPageUrl.pathname.length > 3) {
       composer = await this.activeComposer(page, 30_000, abortSignal);
       if (await this.connectorIsSelected(composer, abortSignal, expectedConnectorId)) {
         const existingDraft = await this.attachedPromptText(page, abortSignal);
