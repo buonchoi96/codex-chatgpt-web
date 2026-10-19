@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatGptModelFamilyMatches, selectChatGptModelFamily } from "../src/adapters/chatgpt-web/model-selection";
+import { assertChatGptModelFamily, chatGptModelFamilyMatches, selectChatGptModelFamily } from "../src/adapters/chatgpt-web/model-selection";
 
 test("model selection recognizes Latest in the launcher languages without accepting other model names", async () => {
   for (const [label, accepted] of [
@@ -48,4 +48,47 @@ test("model verification accepts Unicode announcement punctuation without weaken
   }
   expect(chatGptModelFamilyMatches(["\u2068６ Pro\u2069、position"], "6", "max")).toBeTrue();
   expect(chatGptModelFamilyMatches(["6 Pro for better answers"], "6", "max")).toBeFalse();
+});
+
+test("Android Temporary Chat split model 6 and High labels require an exact checked radio", () => {
+  // The user-provided Android screenshot has High selected on a 0..3 slider;
+  // the advanced model picker renders the separate, abbreviated name "6".
+  expect(chatGptModelFamilyMatches(["6", "High"], "6", "high", true)).toBe(true);
+  expect(chatGptModelFamilyMatches(["High, 3 of 4.", "6"], "6", "high", true)).toBe(true);
+  expect(chatGptModelFamilyMatches(["High"], "6", "high", true)).toBe(true);
+  // The same visible High label without selected-model radio proof is unsafe.
+  expect(chatGptModelFamilyMatches(["6", "High"], "6", "high")).toBe(false);
+  expect(chatGptModelFamilyMatches(["High"], "6", "high")).toBe(false);
+  for (const mismatch of [
+    ["5.6", "High"], ["6.1", "High"], ["7", "High"],
+    ["6", "Medium"], ["6", "Extra High"], ["6", "Pro"],
+    ["6 Medium, 2 of 4.", "High"],
+  ]) expect(chatGptModelFamilyMatches(mismatch, "6", "high", true)).toBe(false);
+  expect(chatGptModelFamilyMatches([], "6", "high", true)).toBe(false);
+  expect(chatGptModelFamilyMatches(["High"], "5.6", "high", true)).toBe(false);
+});
+
+test("Android compact GPT-6 radio plus owned High slider passes confirmation without a model-name shortcut", async () => {
+  const makeMenu = (selected: string, effortLabel = "High") => ({
+    menu: {
+      getByRole: (_role: string, options: {name: RegExp}) => ({
+        count: async () => options.name.test(selected) ? 1 : 0,
+        getAttribute: async (name: string) => name === "aria-checked" ? "true" : null,
+      }),
+    },
+    slider: {
+      getAttribute: async (name: string) => ({
+        "aria-valuemin": "0", "aria-valuemax": "3", "aria-valuenow": "2",
+      } as Record<string, string>)[name] ?? null,
+      evaluate: async () => [effortLabel],
+    },
+  }) as unknown as Parameters<typeof assertChatGptModelFamily>[0];
+
+  await expect(assertChatGptModelFamily(makeMenu("6"), "6", "high", 2)).resolves.toBeUndefined();
+  await expect(assertChatGptModelFamily(makeMenu("Latest"), "6", "high", 2))
+    .rejects.toThrow("could not be selected and verified");
+  await expect(assertChatGptModelFamily(makeMenu("6", "Medium"), "6", "high", 2))
+    .rejects.toThrow("could not be selected and verified");
+  await expect(assertChatGptModelFamily(makeMenu("5.6"), "6", "high", 2))
+    .rejects.toThrow("could not be selected and verified");
 });

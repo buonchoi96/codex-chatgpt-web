@@ -4,6 +4,7 @@ import { chromium } from "playwright-core";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { readChatGptUsageModel } from "../src/adapters/chatgpt-web/limits";
+import { readChatGptModelAnnouncements } from "../src/chatgpt-session";
 
 // Mirrors ChatGPT's power picker as captured live on 2026-09-29 (English, Pro account): the slider
 // announcement reads only "Pro, 5 of 5." and the model version appears in the "Select model"
@@ -149,5 +150,23 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("localized position punctuati
   for (const separator of ["、", "،", "；", "—"]) {
     const picker: Picker = { header: null, status: (effort, value) => `${value === 4 ? "6" : "5.6"} ${effort}${separator}5 件中 ${value + 1} 番目。` };
     expect(await selectGpt6Pro(picker)).toEqual({ ok: true, label: "Pro", usageModel: "gpt-6-pro", draft: "Draft" });
+  }
+}, 60_000);
+
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Android compact picker extracts only the owned, checked High effort radio", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<div role="menu" id="active">
+      <div role="menuitemradio" aria-checked="true">High</div>
+      <div role="menuitemradio" aria-checked="false">Medium</div>
+      <div role="menuitem"><div role="slider" id="owned" aria-valuemin="0" aria-valuemax="3" aria-valuenow="2"></div></div>
+    </div>
+    <div role="menu"><div role="menuitemradio" aria-checked="true">Pro</div></div>`);
+    expect(await readChatGptModelAnnouncements(page.locator("#owned"))).toEqual(["High"]);
+    await page.locator("#active").evaluate(el => el.setAttribute("hidden", ""));
+    expect(await readChatGptModelAnnouncements(page.locator("#owned"))).toEqual([]);
+  } finally {
+    await browser.close();
   }
 }, 60_000);
