@@ -6395,6 +6395,9 @@ export class ChatGptBrowserWorker {
         nativeToolCallsInFlight: false, approvalPending: false };
       const responseDomCache: ChatGptResponseDomCache = {};
       let consecutiveObservationRebinds = 0;
+      // A response may be temporarily unmounted during a long-lived ChatGPT page remount.
+      // Permit one same-surface reconnect per disappearance episode, never a new Send.
+      let missingDomReconnectAttempted = false;
       let internalObservationFaults = 0;
       let observedThisIteration = false;
       let completionFenceRevision: number | undefined;
@@ -6823,7 +6826,10 @@ export class ChatGptBrowserWorker {
         const interruptedNetworkVisible = await chatGptInterruptedNetworkVisible(page);
         const watchedErrorVisible = Boolean(redError || deliveryTimeoutVisible || interruptedNetworkVisible);
         if (!watchedErrorVisible && snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
-        if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
+        if (snapshot.responsePresent) {
+          consecutiveObservationRebinds = 0;
+          missingDomReconnectAttempted = false;
+        }
         // The page was read successfully, so the fault budget is genuinely consecutive even when
         // this iteration goes on to `continue` for a rebind, confirmation, or liveness pause.
         internalObservationFaults = 0;
@@ -7012,6 +7018,34 @@ export class ChatGptBrowserWorker {
             externalProgressLive,
             responseStreamActive,
           });
+          if (domError === "ChatGPT response DOM disappeared while the browser turn was active"
+            && !missingDomReconnectAttempted && launcherSurfaceId) {
+            // The old accepted Send is immutable. Reattach only the observer to its
+            // existing launcher surface and recheck the same turn identity after grace.
+            missingDomReconnectAttempted = true;
+            console.warn(`[chatgpt-web] response_dom_remount_probe ${JSON.stringify({
+              traceId: turn.traceId, reason: "owned_assistant_unmounted",
+              acceptedSend: finalSubmissionEvidence !== undefined, newSend: false,
+            })}`);
+            await rebindLauncherPage(1,
+              new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS),
+              turn.abortSignal);
+            submissionBaseline = {
+              ...submissionBaseline,
+              userTurns: page.locator(CHATGPT_USER_TURN_SELECTOR),
+              responseTurns: page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR),
+              domCache: {},
+            };
+            responseTurn = {
+              ...responseTurn,
+              locator: page.locator(chatGptAssistantTurnSelector(responseTurn.identity)),
+            };
+            responseDomCache.key = undefined;
+            responseDomCache.snapshot = undefined;
+            domHealthTracker.suspendForProgress();
+            await diagnostics.capture(page, "response-dom-remount-probe");
+            continue;
+          }
           if (domError) throw chatGptResponseIncompleteError(domError);
         }
         await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
