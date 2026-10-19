@@ -3870,63 +3870,6 @@ export class ChatGptBrowserWorker {
     return matches;
   }
 
-  private async expandedUserMessageContent(group: Locator, signal?: AbortSignal): Promise<Locator | undefined> {
-    const bubble = group.locator("[data-user-message-bubble]");
-    if (await bubble.count() !== 1) return undefined;
-    // Inline links have their own search targets. Only the outer message target
-    // identifies the complete user content.
-    const content = bubble.locator("[data-search-result-target]:not([data-search-result-target] [data-search-result-target])");
-    if (await content.count() !== 1) return undefined;
-    // Captured on 2026-10-15: long messages are truncated in the DOM, not just
-    // clipped by CSS. Expand the message using its semantic control in any locale.
-    const expand = bubble.locator('button[type="button"][aria-expanded][data-thread-find-skip="true"][data-markdown-copy="exclude"]');
-    const count = await expand.count();
-    if (count > 1) return undefined;
-    if (count !== 1 || await expand.getAttribute("aria-expanded") !== "false") return read(content);
-    // Expanding a large historical message can move the viewport far enough to
-    // unmount the active answer. Read it temporarily, then restore the same view.
-    const view = await group.evaluateHandle(element => {
-      const scroll: { node: Element; top: number; left: number; bottom: boolean }[] = [];
-      for (let node: Element | null = element.parentElement; node; node = node.parentElement) {
-        if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
-          scroll.push({ node, top: node.scrollTop, left: node.scrollLeft,
-            bottom: node.scrollHeight - node.clientHeight - node.scrollTop <= 1 });
-        }
-      }
-      return { scroll, focus: document.activeElement };
-    });
-    try {
-      await expand.evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
-      await expand.press("Enter", { signal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
-      await expand.locator('xpath=self::*[@aria-expanded="true"]').waitFor({
-        state: "attached", signal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-      });
-      return await read(content);
-    } finally {
-      // Cleanup owns a separate bounded window even when the read was cancelled.
-      try {
-        if (await expand.count() !== 1) throw new Error("ChatGPT removed the message expansion control during verification");
-        if (await expand.getAttribute("aria-expanded") === "true") {
-          await expand.evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
-          await expand.press("Enter", { timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
-          await expand.locator('xpath=self::*[@aria-expanded="false"]').waitFor({
-            state: "attached", timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-          });
-        }
-      } finally {
-        try {
-          await withChatGptBrowserObservationTimeout(view.evaluate(async saved => {
-            if (saved.focus instanceof HTMLElement && saved.focus.isConnected) saved.focus.focus({ preventScroll: true });
-            for (const { node, top, left, bottom } of saved.scroll) {
-              if (node.isConnected) node.scrollTo({ left, top: bottom ? node.scrollHeight - node.clientHeight : top, behavior: "instant" });
-            }
-            await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-          }));
-        } finally { await view.dispose(); }
-      }
-    }
-  }
-
   private async userMessageMatchesSubmission(group: Locator, submitted: string, signal?: AbortSignal, turnToken?: string): Promise<boolean> {
     return (await this.withExpandedUserMessage(group, async content => {
       if (turnToken !== undefined) {
