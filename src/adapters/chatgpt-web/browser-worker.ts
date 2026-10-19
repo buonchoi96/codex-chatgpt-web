@@ -4026,7 +4026,27 @@ export class ChatGptBrowserWorker {
     const appResult = menuRows.filter({
       has: page.getByText(this.config.appName, { exact: true }),
     });
-    if (new URL(page.url()).searchParams.get("temporary-chat") === "true") await ensureChatGptPersonalizedConnectorAccess(
+    const connectorPageUrl = new URL(page.url());
+    const temporaryChat = connectorPageUrl.searchParams.get("temporary-chat") === "true";
+    // Existing threads can hide the fresh-chat Personalized menu. The exact
+    // connector pill in the ACTIVE empty composer is stronger, conversation-local
+    // evidence than the absent picker. The configured connector route was already
+    // checked above; never infer access from text or a retained boolean alone.
+    if (temporaryChat && /^\\/c\\/[\w-]+\\/?$/.test(connectorPageUrl.pathname)) {
+      composer = await this.activeComposer(page, 30_000, abortSignal);
+      if (await this.connectorIsSelected(composer, abortSignal, expectedConnectorId)) {
+        const existingDraft = await this.attachedPromptText(page, abortSignal);
+        if (existingDraft.length !== 0) {
+          throw new ChatGptPromptAttachmentIntegrityError(
+            `Retained ChatGPT composer had an unowned draft (characters=${existingDraft.length})`,
+          );
+        }
+        await capture("retained-connector-exact-pill");
+        return composer;
+      }
+      await capture("retained-connector-pill-not-found");
+    }
+    if (temporaryChat) await ensureChatGptPersonalizedConnectorAccess(
       page,
       capture,
       async (personalizationSignal) => {
