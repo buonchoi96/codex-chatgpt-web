@@ -847,7 +847,9 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
-const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN = /Message delivery timed out\. Please try again\./i;
+// Archive recovery supported both the older "timed out" and newer "failed" red banners.
+export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN =
+  /Message delivery (?:timed out|failed)\. Please try again\./i;
 
 /** Error UI is not proof that an already-running model or MCP task has stopped. */
 export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<boolean> {
@@ -855,18 +857,41 @@ export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<
     .filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN }).last();
   if (await alert.isVisible().catch(() => false)) return true;
   // Some ChatGPT deployments render the identical red banner without role="alert".
-  const plainBanner = page.locator('text="Message delivery timed out. Please try again."').last();
-  return plainBanner.isVisible().catch(() => false);
+  const timedOut = page.locator('text="Message delivery timed out. Please try again."').last();
+  if (await timedOut.isVisible().catch(() => false)) return true;
+  return page.locator('text="Message delivery failed. Please try again."').last()
+    .isVisible().catch(() => false);
 }
 
 /** Begin the red-error silence budget only after the delivery error becomes visible. */
 export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_GRACE_MS = CHATGPT_FRONTEND_ERROR_STALL_MS;
 
-/** Status surfaces only: quoted task/answer prose cannot start a recovery watchdog. */
+// Restore the known archive banner variants. Keep matches on status/alert surfaces only:
+// a user quoting these sentences in code, task data or an answer is not an outage.
+export const CHATGPT_INTERRUPTED_NETWORK_PATTERN =
+  /^(?:(?:connecting|connection|connectiong|network)\s+interrupted|interrupted\s+(?:connection|network))\.?\s*waiting for (?:the )?(?:complete|final) answer(?:\s|[.…])*$/i;
+export const CHATGPT_HARD_NETWORK_ERROR_PATTERN =
+  /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
+
+/** Soft network warnings keep the 180-second semantic-progress watchdog. */
 export async function chatGptInterruptedNetworkVisible(page: Page): Promise<boolean> {
   return page.locator('[role="status"], [role="alert"], [data-testid="conversation-status"]')
-    .filter({ hasText: /^Interrupted network\.\s*Waiting for final answer(?:\s|[.…])*$/i })
+    .filter({ hasText: CHATGPT_INTERRUPTED_NETWORK_PATTERN })
     .filter({ visible: true }).count().then(count => count > 0);
+}
+
+/** Hard network failures use the existing 60-second red-error watchdog, never a blind Retry. */
+export async function chatGptHardNetworkErrorVisible(page: Page): Promise<boolean> {
+  return page.locator('[role="alert"], [data-testid="conversation-status"]')
+    .filter({ hasText: CHATGPT_HARD_NETWORK_ERROR_PATTERN })
+    .filter({ visible: true }).count().then(count => count > 0);
+}
+
+/** Archive fallback: only a Retry control contained inside a visible red alert is evidence. */
+export async function chatGptPageRetryErrorVisible(page: Page): Promise<boolean> {
+  return page.locator('[role="alert"]')
+    .getByRole("button", { name: "Retry", exact: true })
+    .last().isVisible().catch(() => false);
 }
 
 export class ChatGptMessageDeliveryTimeoutGrace {
@@ -6478,8 +6503,13 @@ export class ChatGptBrowserWorker {
           const deliveryTimeoutNow = await chatGptMessageDeliveryTimeoutVisible(page);
           const interruptedNow = !responseErrorPresent && !deliveryTimeoutNow
             && await chatGptInterruptedNetworkVisible(page);
+          const hardNetworkNow = !responseErrorPresent && !deliveryTimeoutNow && !interruptedNow
+            && await chatGptHardNetworkErrorVisible(page);
+          const pageRetryNow = !responseErrorPresent && !deliveryTimeoutNow && !interruptedNow
+            && !hardNetworkNow && await chatGptPageRetryErrorVisible(page);
           const freshObservation: RecoveryWatchdogObservation = {
-            errorKind: responseErrorPresent || deliveryTimeoutNow ? 'red' : interruptedNow ? 'interrupted' : null,
+            errorKind: responseErrorPresent || deliveryTimeoutNow || hardNetworkNow || pageRetryNow
+              ? 'red' : interruptedNow ? 'interrupted' : null,
             visibleText: snapshot.visibleText,
             traceBlocks: snapshot.traceBlocks,
             nativeLastProgressAt: currentProgress?.lastProgressAt,
@@ -6766,8 +6796,14 @@ export class ChatGptBrowserWorker {
           }
         }
         const deliveryTimeoutVisible = await chatGptMessageDeliveryTimeoutVisible(page);
-        const interruptedNetworkVisible = await chatGptInterruptedNetworkVisible(page);
-        const watchedErrorVisible = Boolean(redError || deliveryTimeoutVisible || interruptedNetworkVisible);
+        const interruptedNetworkVisible = !deliveryTimeoutVisible
+          && await chatGptInterruptedNetworkVisible(page);
+        const hardNetworkErrorVisible = !deliveryTimeoutVisible && !interruptedNetworkVisible
+          && await chatGptHardNetworkErrorVisible(page);
+        const pageRetryErrorVisible = !deliveryTimeoutVisible && !interruptedNetworkVisible
+          && !hardNetworkErrorVisible && await chatGptPageRetryErrorVisible(page);
+        const watchedErrorVisible = Boolean(redError || deliveryTimeoutVisible || interruptedNetworkVisible
+          || hardNetworkErrorVisible || pageRetryErrorVisible);
         if (!watchedErrorVisible && snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
         if (snapshot.responsePresent) {
           consecutiveObservationRebinds = 0;
@@ -6805,7 +6841,8 @@ export class ChatGptBrowserWorker {
             {status:409,errorType:'server_error',code:'steering_delivery_blocked',retryable:false});
         }
         lastWatchdogObservation = {
-          errorKind: redError || deliveryTimeoutVisible ? "red" : interruptedNetworkVisible ? "interrupted" : null,
+          errorKind: redError || deliveryTimeoutVisible || hardNetworkErrorVisible || pageRetryErrorVisible
+            ? "red" : interruptedNetworkVisible ? "interrupted" : null,
           visibleText: snapshot.visibleText,
           traceBlocks: snapshot.traceBlocks,
           nativeLastProgressAt: externalProgressSnapshot?.lastProgressAt,
