@@ -38,6 +38,14 @@ function androidTemporaryChatUserAgent(desktopUserAgent) {
 function shouldUseAndroidTemporaryChatUserAgent(temporaryChat, optIn, platform = process.platform) {
   return temporaryChat === true && optIn === true && platform === "win32";
 }
+
+// Log only coarse classifications, never a complete UA string or private thread URL.
+function temporaryChatUserAgentClass(userAgent) {
+  if (typeof userAgent !== "string" || !userAgent) return "unobserved";
+  if (/\bAndroid\b/i.test(userAgent) && /\bMobile\b/i.test(userAgent)) return "android-mobile";
+  if (/\bWindows NT\b/i.test(userAgent)) return "windows-desktop";
+  return "other";
+}
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const IDLE_BROWSER_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
 const PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS = 10_000;
@@ -2641,6 +2649,42 @@ class BrowserHost {
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
     if (existing) {
       const reused = existing.status === "ready";
+      if (reused) {
+        const contents = existing.view?.webContents;
+        const expectedAndroid = shouldUseAndroidTemporaryChatUserAgent(
+          this.getUseSavedChats?.() === false,
+          this.getTemporaryChatAndroidUserAgent?.() === true,
+        );
+        const hostUaClass = temporaryChatUserAgentClass(
+          typeof contents?.getUserAgent === "function" ? contents.getUserAgent() : undefined,
+        );
+        // The Electron UA and the hydrated document's navigator.userAgent can diverge.
+        // A bounded read provides evidence without waiting indefinitely for a stalled renderer.
+        let navigatorUaClass = "unobserved";
+        if (expectedAndroid && typeof contents?.executeJavaScript === "function") {
+          navigatorUaClass = await Promise.race([
+            Promise.resolve().then(() => contents.executeJavaScript("navigator.userAgent", true))
+              .then(temporaryChatUserAgentClass, () => "probe-error"),
+            new Promise(resolve => { const timer = setTimeout(() => resolve("probe-timeout"), 750); timer.unref?.(); }),
+          ]);
+        }
+        const currentUrl = typeof contents?.getURL === "function" ? contents.getURL() : "";
+        const urlKind = /^https:\/\/chatgpt\.com\/c\//.test(currentUrl)
+          ? "retained-thread" : currentUrl.startsWith(TEMPORARY_CHAT_URL)
+            ? "temporary-home" : /^https:\/\/chatgpt\.com\//.test(currentUrl)
+              ? "chatgpt-other" : "unexpected";
+        this.logger.info("browser.retained_user_agent", {
+          tabId: existing.id, traceId, expectedAndroid,
+          hostUaClass, navigatorUaClass, urlKind,
+        });
+        // Never reload an accepted retained conversation or silently swap its UA.
+        if (expectedAndroid && (hostUaClass === "windows-desktop"
+          || navigatorUaClass === "windows-desktop")) {
+          const error = new Error("Retained Temporary Chat no longer has its Android User-Agent");
+          error.code = "retained_conversation_ua_mismatch";
+          throw error;
+        }
+      }
       if (existing.status === "running" && existing.helperPid !== helperPid) {
         if (processRunning(existing.helperPid)) {
           throw new Error(`ChatGPT browser turn ${traceId} is owned by another helper process`);
