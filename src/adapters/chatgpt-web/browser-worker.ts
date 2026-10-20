@@ -1374,6 +1374,14 @@ export function remainingStageBudgetMs(
 }
 
 export const CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS = 5_000;
+/**
+ * The response Markdown/trace projection walks the existing assistant subtree.
+ * On a >500K-character saved chat it can exceed the 5s lightweight DOM probe
+ * even while the browser and completed answer remain healthy. Use a separate
+ * bounded post-Send budget: never treat a timed-out projection as proof that
+ * generation or the accepted Send failed. Pre-Send ownership checks stay 5s.
+ */
+export const CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS = 20_000;
 export const CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS = 30_000;
 export const MAX_CHATGPT_BROWSER_PAGE_REBINDS = 2;
 
@@ -5444,13 +5452,13 @@ export class ChatGptBrowserWorker {
       stoppedThinkingLabels: [...CHATGPT_STOPPED_THINKING_LABELS],
       knownKey: cache?.key,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
-    }, { timeout: CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS }).catch(error => {
+    }, { timeout: CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS }).catch(error => {
       // A busy 500K-character conversation can stall Playwright's DOM projection.
       // A timeout is NOT evidence that the response was unmounted. Propagate it to
       // the existing same-surface reconnect path without replaying the accepted Send.
       if (error instanceof Error && (error.name === "TimeoutError"
         || error instanceof ChatGptBrowserObservationTimeoutError)) {
-        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS);
+        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS);
       }
       // A detached locator during React remount remains a missing response:
       // the caller will reconcile the exact assistant/user turn binding.
