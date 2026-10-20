@@ -1451,6 +1451,28 @@ export interface ChatGptOwnedTurnLiveness {
   stopVisible: boolean;
   completionActionVisible: boolean;
   assistantTextChars: number;
+  /** Independent page activity is NOT proof that its content belongs to this Send. */
+  visibleStopCount: number;
+  activeAssistantGroupCount: number;
+  userBubbleCount: number;
+}
+
+/** Do not kill the accepted Send just because its Activity renderer replaced its group. */
+export function chatGptDetachedAcceptedTurnMayStillBeRunning(probe: ChatGptOwnedTurnLiveness): boolean {
+  return (!probe.ownerPresent || !probe.assistantPresent)
+    && probe.visibleStopCount === 1 && probe.activeAssistantGroupCount === 1
+    && probe.userBubbleCount === 0;
+}
+
+/** Compare stable grouped roles only; legacy turn IDs have their own validation path. */
+export function chatGptAssistantBelongsToAcceptedUser(
+  assistantIdentity: string,
+  acceptedUserIdentity?: string,
+): boolean {
+  if (!acceptedUserIdentity || !acceptedUserIdentity.startsWith("group:user:")
+    || !assistantIdentity.startsWith("group:assistant:")) return true;
+  return assistantIdentity.slice("group:assistant:".length)
+    === acceptedUserIdentity.slice("group:user:".length);
 }
 
 export function chatGptOwnedTurnStillGenerating(probe: ChatGptOwnedTurnLiveness): boolean {
@@ -1465,9 +1487,21 @@ export async function probeChatGptOwnedTurnLiveness(
   return withChatGptBrowserObservationTimeout(
     page.evaluate(({ ownerSelector, grouped, stopSelector, completedSelector }) => {
       const owner = document.querySelector<HTMLElement>(ownerSelector);
+      const visible = (node: HTMLElement): boolean => {
+        if (!node.isConnected || node.hidden) return false;
+        const style = getComputedStyle(node);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      };
+      const visibleStopCount = [...document.querySelectorAll<HTMLElement>(stopSelector)].filter(visible).length;
+      const activeAssistantGroupCount = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
+        .filter(group => group.querySelector(
+          '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
+        )).length;
+      const userBubbleCount = document.querySelectorAll('[data-user-message-bubble]').length;
       if (!owner) return {
-        ownerPresent: false, assistantPresent: false, stopVisible: false,
+        ownerPresent: false, assistantPresent: false, stopVisible: visibleStopCount > 0,
         completionActionVisible: false, assistantTextChars: 0,
+        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
       };
       const assistant = grouped
         ? owner.querySelector<HTMLElement>(
@@ -1477,12 +1511,7 @@ export async function probeChatGptOwnedTurnLiveness(
           ? owner : owner.querySelector<HTMLElement>(
             '[data-message-author-role="assistant"], [data-conversation-role="assistant"], .markdown',
           ));
-      const visible = (node: HTMLElement): boolean => {
-        if (!node.isConnected || node.hidden) return false;
-        const style = getComputedStyle(node);
-        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-      };
-      const stopVisible = [...document.querySelectorAll<HTMLElement>(stopSelector)].some(visible);
+      const stopVisible = visibleStopCount > 0;
       const completionActionVisible = [...owner.querySelectorAll<HTMLElement>(completedSelector)].some(visible);
       return {
         ownerPresent: true,
@@ -1490,6 +1519,7 @@ export async function probeChatGptOwnedTurnLiveness(
         stopVisible,
         completionActionVisible,
         assistantTextChars: assistant?.textContent?.length ?? 0,
+        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
       };
     }, {
       ownerSelector,
@@ -4920,8 +4950,23 @@ export class ChatGptBrowserWorker {
     // The strict assistant-turn binding has already admitted this immutable
     // identity. Avoid re-running a descendant :has(...) locator against a
     // huge saved conversation on every Markdown projection.
-    const projectionLocator = assistantIdentity?.startsWith("group:assistant:")
-      ? responseTurn.page().locator(chatGptTurnContainerSelector(assistantIdentity))
+    const grouped = assistantIdentity?.startsWith("group:assistant:") === true;
+    if (grouped) {
+      // A missing data-turn-key makes locator.evaluate wait for its full 20s
+      // timeout. Activity can unmount that key while ChatGPT still has a
+      // live assistant group. A cheap DOM query distinguishes this from a
+      // slow Markdown serializer; do not return a cached, stale answer.
+      const ownership = await probeChatGptOwnedTurnLiveness(responseTurn.page(), assistantIdentity!);
+      if (!ownership.ownerPresent || !ownership.assistantPresent) {
+        if (cache) {
+          cache.key = undefined;
+          cache.snapshot = undefined;
+        }
+        return absentResponseDomSnapshot();
+      }
+    }
+    const projectionLocator = grouped
+      ? responseTurn.page().locator(chatGptTurnContainerSelector(assistantIdentity!))
       : responseTurn;
     const observed = await projectionLocator.evaluate((element, options) => {
       // A retained group wrapper alone cannot establish an assistant response.
