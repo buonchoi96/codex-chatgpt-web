@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { bridgeToResponsesSSE } from "../src/bridge";
+import { HttpSseTerminalObserver } from "../src/http-sse-terminal";
 import type { AdapterEvent } from "../src/types";
 
 async function* completedEvents(chunks = 1): AsyncGenerator<AdapterEvent> {
@@ -132,4 +133,77 @@ test("terminal diagnostic callback failure cannot swallow a final answer", async
   expect(body).toContain("Final message.");
   expect(body).toContain("event: response.completed");
   expect(body).toEndWith("data: [DONE]\n\n");
+});
+
+
+test("large terminal frame is fragmented on Windows but its exact final answer and DONE reach the lifecycle tee", async () => {
+  const finalAnswer = "Start\\n" + "🌟".repeat(85_000) + "\\nEND FINAL LINE";
+  let canceled = 0;
+  async function* completed(): AsyncGenerator<AdapterEvent> {
+    yield { type: "text_delta", text: finalAnswer, phase: "final_answer" };
+    yield { type: "done", stopReason: "stop", endTurn: true };
+  }
+  const original = bridgeToResponsesSSE(completed(), "chatgpt-web/test",
+    undefined, undefined, undefined, () => { canceled++; }, 2_000,
+    { streamPlatform: "win32" });
+  const [httpBody, observerBody] = original.tee();
+  const observer = new HttpSseTerminalObserver();
+  const observedChunks: Uint8Array[] = [];
+  const observerPromise = (async () => {
+    const reader = observerBody.getReader();
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      observedChunks.push(next.value);
+      observer.observe(next.value);
+    }
+  })();
+  const httpBytes = await new Response(httpBody).arrayBuffer();
+  await observerPromise;
+  const httpText = new TextDecoder().decode(httpBytes);
+  const observedText = new TextDecoder().decode(
+    Buffer.concat(observedChunks.map(chunk => Buffer.from(chunk))),
+  );
+  expect(httpText).toBe(observedText);
+  expect(observedText).toContain("END FINAL LINE");
+  expect(observedText).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n", "\n"));
+  expect(observer.snapshot()).toEqual({ terminal: "completed", done: true });
+  const completedAt = observedChunks.findIndex(chunk =>
+    new TextDecoder().decode(chunk).includes("event: response.completed"));
+  expect(completedAt).toBeGreaterThanOrEqual(0);
+  expect(observedChunks.length - completedAt).toBeGreaterThan(2);
+  for (const chunk of observedChunks.slice(completedAt)) {
+    expect(chunk.byteLength).toBeLessThanOrEqual(32 * 1024);
+  }
+  // The final byte chunk carries the DONE marker rather than splitting it
+  // across two tear-down-sensitive native HTTP writes.
+  expect(new TextDecoder().decode(observedChunks.at(-1))).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n", "\n"));
+  expect(canceled).toBe(0);
+});
+
+test("large Windows SSE terminal passes through Bun.serve without losing DONE", async () => {
+  const text = "Large final" + "🏁".repeat(82_000) + "\\nFinal sentence survived.";
+  async function* completed(): AsyncGenerator<AdapterEvent> {
+    yield { type: "text_delta", text, phase: "final_answer" };
+    yield { type: "done", stopReason: "stop", endTurn: true };
+  }
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      const body = bridgeToResponsesSSE(completed(), "chatgpt-web/test",
+        undefined, undefined, undefined, undefined, 2_000, { streamPlatform: "win32" });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    },
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.port}/v1/responses`);
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain("Final sentence survived.");
+    expect(body).toContain("event: response.completed");
+    expect(body.match(/data: \\[DONE\\]/g)).toHaveLength(1);
+    expect(body).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n", "\n"));
+  } finally {
+    await server.stop(true);
+  }
 });
