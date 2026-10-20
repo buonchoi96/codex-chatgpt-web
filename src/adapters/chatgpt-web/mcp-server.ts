@@ -68,6 +68,33 @@ const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly 
 // letting the tunnel tear down and poison its long-lived stdio transport.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
 
+/**
+ * Native exec_command is expected to yield a session_id for slow commands.
+ * Waiting inside the initial native tool RPC for an unbounded command can
+ * consume the entire 90s MCP transport budget and retire the Codex goal turn
+ * despite a live browser. Supply a short default ONLY when the exact native
+ * registry advertises yield_time_ms and the caller did not choose a value.
+ * This never replays or cancels a dispatched command, and does not reinterpret
+ * shell_command's timeout_ms (which is an execution deadline).
+ */
+export const CHATGPT_WEB_NATIVE_EXEC_DEFAULT_YIELD_MS = 1_000;
+
+export function withShortNativeExecYield(
+  tool: Pick<CodexTool, "name" | "parameters">,
+  payload: { arguments?: Record<string, unknown>; input?: string },
+): typeof payload {
+  if (tool.name !== "exec_command" || payload.arguments === undefined
+    || Object.hasOwn(payload.arguments, "yield_time_ms")) return payload;
+  const properties = tool.parameters?.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)
+    || !Object.hasOwn(properties, "yield_time_ms")) return payload;
+  return { ...payload, arguments: {
+    ...payload.arguments,
+    yield_time_ms: CHATGPT_WEB_NATIVE_EXEC_DEFAULT_YIELD_MS,
+  } };
+}
+
+
 const ZERO_RISK_MCP_INSTRUCTIONS = [
   "For each pasted Codex Web GPT request, begin with codex_turn_start using the request_id in its request block.",
   "Use that request_id with the Codex tools needed for the task.",
@@ -618,6 +645,7 @@ export async function createChatGptMcpServer(options: {
   ) => {
     // Admission failure precedes dispatch and must not retire siblings already in flight.
     const commandOwner=bound.commandOwnerId??bindingId;
+    payload = withShortNativeExecYield(tool, payload);
     const nativeCommand=['exec_command','shell_command'].includes(tool.name);
     const opaqueGateway=tool.name==='exec'&&tool.freeform===true;
     const cmd=payload.arguments?.cmd??payload.arguments?.command;
