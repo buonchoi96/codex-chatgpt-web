@@ -901,7 +901,7 @@ export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_GRACE_MS = CHATGPT_FRONTEND_ERROR_
 /** Status surfaces only: quoted task/answer prose cannot start a recovery watchdog. */
 export async function chatGptInterruptedNetworkVisible(page: Page): Promise<boolean> {
   return chatGptRecoveryBannerVisible(page.locator('[role="status"], [role="alert"], [data-testid="conversation-status"]')
-    .filter({ hasText: CHATGPT_INTERRUPTED_NETWORK_PATTERN }), CHATGPT_INTERRUPTED_CONNECTION_PATTERN);
+    .filter({ hasText: /(?:connecting|connection|connectiong|network)\s+interrupted|interrupted\s+(?:network|connection)/i }), CHATGPT_INTERRUPTED_CONNECTION_PATTERN);
 }
 
 /** Hard network error banners arm the existing red-error watchdog. */
