@@ -6991,8 +6991,50 @@ export class ChatGptBrowserWorker {
           const uncertain = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
             .catch(() => undefined);
           if (uncertain && chatGptDetachedAcceptedTurnMayStillBeRunning(uncertain)) {
+            // A native exec_command can already be queued on this authenticated
+            // turn, but index.ts withholds it until its pre-tool Markdown boundary
+            // is recorded and acknowledged. Simply continuing here DEADLOCKS:
+            // native waits for the boundary, this worker waits for native DOM
+            // progress, and the MCP server retires the turn after 90 seconds.
+            const pending = turn.externalProgress?.snapshot();
+            const pendingToolBoundary = Boolean(
+              pending && completionTracker.needsToolBatchObservation(pending.lastToolBatchRevision),
+            );
+            const transientKey = chatGptDetachedToolBoundaryCandidate(uncertain, pendingToolBoundary);
+            if (transientKey && pending && turn.externalProgress) {
+              // A single unfinished assistant-only Activity group, one live Stop
+              // control, zero user bubbles and the SAME TURN'S authenticated
+              // pending native tool batch are needed. Recheck the DOM AFTER
+              // projection to defeat a concurrent remount/foreign Send.
+              const transientIdentity = `group:assistant:${transientKey}`;
+              const transientSnapshot = await this.responseDomSnapshot(
+                page.locator(chatGptTurnContainerSelector(transientIdentity)),
+                undefined,
+                transientIdentity,
+              );
+              const verified = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity);
+              if (transientSnapshot.responsePresent && !transientSnapshot.completionActionVisible
+                && chatGptDetachedToolBoundaryCandidate(verified, true) === transientKey) {
+                const delta = (() => {
+                  try { return markdownBuffer.observe(transientSnapshot.markdownSegments); }
+                  catch (error) { return throwMarkdownConsistencyError(error); }
+                })();
+                for (const trace of visibleTrace.observe(
+                  transientSnapshot.traceBlocks, transientSnapshot.completionActionVisible,
+                )) {
+                  if (trace.kind === "commentary") turn.onCommentary?.(trace.text, trace.continuation === true);
+                  else turn.onReasoningSummary?.(trace.text, trace.continuation === true);
+                }
+                if (delta) emitMarkdownDelta(delta);
+                completionTracker.observeToolBatch(pending.lastToolBatchRevision, transientSnapshot.visibleText);
+                await turn.externalProgress.acknowledgeToolBatch(pending.lastToolBatchRevision);
+                console.info(`[chatgpt-web] detached_tool_boundary_observed trace=${turn.traceId}`
+                  + ` revision=${pending.lastToolBatchRevision} chars=${transientSnapshot.visibleText.length}`);
+              }
+            }
             console.info(`[chatgpt-web] response_binding_detached_pending trace=${turn.traceId}`
-              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`);
+              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`
+              + ` boundaryPending=${pendingToolBoundary}`);
             await withBrowserTurnAbort(
               new Promise<void>(resolveSleep => setTimeout(resolveSleep, 1_000)),
               turn.abortSignal,
