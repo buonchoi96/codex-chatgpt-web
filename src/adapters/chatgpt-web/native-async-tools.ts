@@ -8,7 +8,7 @@ interface Entry<T>{
   id:string;owner:string;scope:string;tool:string;state:State;created:number;finished?:number;
   payload?:string;original?:T;error?:string;finishedPromise:Promise<void>;
 }
-export type AsyncToolTicket={status:"pending";job_id:string;tool:string;poll_with:"codex_tool_poll"};
+export type AsyncToolTicket={status:"pending";job_id:string;tool:string;poll_with:"codex.control.async_poll"};
 
 /**
  * A turn-bound, in-process transport continuation. Jobs never escape the
@@ -52,7 +52,7 @@ export class NativeAsyncToolJobs<T>{
       // until the capability expires or an operator reconciles it.
       if(entry.state!=="unknown")this.activeScopes.delete(scopeKey);
     });
-    return{status:"pending",job_id:entry.id,tool,poll_with:"codex_tool_poll"};
+    return{status:"pending",job_id:entry.id,tool,poll_with:"codex.control.async_poll"};
   }
   async quick(owner:string,id:string,timeoutMs:number):Promise<T|AsyncToolTicket>{
     const entry=this.require(owner,id);
@@ -62,7 +62,7 @@ export class NativeAsyncToolJobs<T>{
     }
     if((entry.state==="completed"||entry.state==="failed")&&entry.original!==undefined)
       return entry.original;
-    return{status:"pending",job_id:entry.id,tool:entry.tool,poll_with:"codex_tool_poll"};
+    return{status:"pending",job_id:entry.id,tool:entry.tool,poll_with:"codex.control.async_poll"};
   }
   poll(owner:string,id:string,offset=0,maxChars=8000):Record<string,unknown>{
     const entry=this.require(owner,id);

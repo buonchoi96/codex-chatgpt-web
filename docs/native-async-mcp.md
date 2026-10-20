@@ -8,7 +8,7 @@ The bridge's in-app MCP gateway automatically applies an 8-second fast-path to *
 
 - **Fast tools:** \`codex_tool_call\` returns the original structured MCP result.
 - **Slow tools:** instead of waiting for the native 90-second response ceiling, \`codex_tool_call\` returns \`{"status":"pending","job_id":"native_job_...","poll_with":"codex_tool_poll","tool":"..."}\`. The **original single native invocation keeps running**.
-- Use \`codex_tool_poll\` with the SAME \`turn_token\` and \`job_id\`. Repeated polls do not invoke the external MCP tool again. If completed or failed, \`chunk\` contains a JSON-serialized original MCP result; use \`next_offset\` until null and reconstruct it.
+- Use `codex_tool_poll` with the SAME `turn_token` and `job_id`. For an installed Native2 connector whose registry has not refreshed, call the existing `codex_tool_call` with `wire_name="codex.control.async_poll"` and `arguments={"job_id":"native_job_...","offset":0}`. Repeated polls do not invoke the external MCP tool again. If completed or failed, \`chunk\` contains a JSON-serialized original MCP result; use \`next_offset\` until null and reconstruct it.
 - For known slow tools, \`codex_tool_start\` bypasses the 8-second fast wait and immediately returns a receipt; it accepts the original exact \`wire_name\`, \`arguments\` or \`input\`. Works for every currently authenticated MCP namespace.
 
 No changes to \`[mcp_servers.rea]\`, \`[mcp_servers.*]\`, \`startup_timeout_sec\`, or \`tool_timeout_sec\` are necessary. No separate REA child process, duplicated login, or proxy configuration is introduced. Existing MCP connections and their state are used **as-is**.
@@ -28,3 +28,5 @@ Up to 128 terminal receipts are cached, at most 8,000,000 serialized result char
 This is implemented inside \`src/adapters/chatgpt-web/mcp-server.ts\` and \`native-async-tools.ts\`, not as a new third-party MCP service. Other built-in native commands (e.g. \`codex_exec\`) retain their own session/poll semantics and their existing safety controls. Reserved compaction/recovery actions and agent wait tools retain their special execution policies.
 
 Use the fork's current installer or launcher build containing this feature; **no manual MCP config change is needed**. The earlier stand-alone \`rea-async-proxy.ts\` is optional and should not be installed to use the integrated path.
+
+The installed Native2 `codex_tool_call` interface also accepts reserved `codex.control.async_start` with structured arguments `{wire_name,arguments?,input?}` if `codex_tool_start` is not in the tool registry. These operations are checked against the native turn token and are never listed as external MCP tools.

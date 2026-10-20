@@ -1,0 +1,31 @@
+name: Native Async MCP E2E
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/adapters/chatgpt-web/mcp-server.ts"
+      - "src/adapters/chatgpt-web/native-async-tools.ts"
+      - "src/rea-async-proxy.ts"
+      - "tests/native-async-tools.test.ts"
+      - "tests/native-async-e2e.test.ts"
+      - ".github/workflows/native-async-mcp.yml"
+  workflow_dispatch:
+jobs:
+  native-async-e2e:
+    name: Async MCP (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Install pinned dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck runtime and tests
+        run: bun run typecheck
+      - name: Run integration and lifecycle tests
+        run: bun test --timeout 15000 ./tests/native-async-tools.test.ts ./tests/native-async-e2e.test.ts ./tests/mcp-native-exec-yield.test.ts ./tests/turn-broker-diagnostics.test.ts
