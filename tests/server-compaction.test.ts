@@ -959,3 +959,83 @@ test('structured handoff cleanup is bounded even after backend compaction finish
   expect(source).toContain('native_compaction_result_ready');
   expect(source).toContain('native_compaction_result_emitted');
 });
+
+test("automatic browser compaction preserves same-request responses_lite native and MCP tools", async () => {
+  const native = { type: "function", name: "exec_command", description: "Run native command", parameters: { type: "object" } };
+  const namespace = { type: "namespace", name: "mcp__sakura", tools: [
+    { type: "function", name: "sakura_status", description: "Read-only status", parameters: { type: "object" } },
+  ] };
+  const input = [
+    { type: "additional_tools", role: "user", tools: [native, namespace] },
+    { type: "message", role: "user", id: "msg_auto_tools_source",
+      content: [{ type: "input_text", text: "Read local state without mutating it." }] },
+  ];
+  let attempts = 0;
+  let compactions = 0;
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify({
+      model, stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+        thread_id: "thread_auto_catalog_preserved", turn_id: "turn_auto_catalog_preserved",
+      }) },
+      input,
+    }),
+  }), defaultConfig("full"), () => ({ name: "verify-same-request-tools", async runTurn(parsed, _incoming, emit) {
+    if (parsed._compactionRequest) {
+      compactions++;
+      emit({ type: "text_delta", text: "Concise handoff", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+      return;
+    }
+    attempts++;
+    expect(parsed.context.tools?.map(tool => [tool.namespace, tool.name])).toEqual([
+      [undefined, "exec_command"], ["mcp__sakura", "sakura_status"],
+    ]);
+    if (attempts === 1) {
+      emit({ type: "error", status: 400, errorType: "invalid_request_error",
+        code: "canonical_context_budget_exceeded", retryable: false,
+        message: "Original canonical input exceeds browser token budget" });
+      return;
+    }
+    const raw = parsed._rawBody as { input: Array<{ type: string; tools?: unknown[] }> };
+    expect(raw.input.filter(item => item.type === "additional_tools")).toHaveLength(1);
+    expect(raw.input[0]!.tools).toEqual([native, namespace]);
+    emit({ type: "text_delta", text: "Native tools survived auto compaction", phase: "final_answer" });
+    emit({ type: "done", stopReason: "stop", endTurn: true });
+  } }));
+  expect(response.status).toBe(200);
+  const outcome = await response.json();
+  expect(outcome.status).toBe("completed");
+  expect(attempts).toBe(2);
+  expect(compactions).toBe(1);
+});
+
+test("automatic compact never invents native authority for tool-less outer requests", async () => {
+  let attempts = 0;
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify({ model, stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+        thread_id: "thread_auto_catalog_absent", turn_id: "turn_auto_catalog_absent",
+      }) },
+      input: [{ type: "message", role: "user", id: "msg_toolless_source",
+        content: [{ type: "input_text", text: "Summarize only." }] }],
+    }),
+  }), defaultConfig("full"), () => ({ name: "verify-no-privilege-invention", async runTurn(parsed, _incoming, emit) {
+    if (parsed._compactionRequest) {
+      emit({ type: "text_delta", text: "Short checkpoint", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+      return;
+    }
+    attempts++;
+    expect(parsed.context.tools ?? []).toEqual([]);
+    if (attempts === 1) {
+      emit({ type: "error", status: 400, errorType: "invalid_request_error",
+        code: "canonical_context_budget_exceeded", retryable: false, message: "Original prompt too long" });
+      return;
+    }
+    emit({ type: "text_delta", text: "Tool-free retry", phase: "final_answer" });
+    emit({ type: "done", stopReason: "stop", endTurn: true });
+  } }));
+  expect((await response.json()).status).toBe("completed");
+  expect(attempts).toBe(2);
+});

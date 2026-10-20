@@ -53,6 +53,7 @@ import type { CodexProviderConfig } from "./types";
 import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
 import { estimateTokens } from "./lib/token-estimate";
+import { restoreSameRequestAdditionalTools } from "./responses/compaction-retry-tools";
 
 type HttpTrackedEndpoint = "models" | "responses" | "compact" | "search" | "unspecified" | NativeImageEndpoint;
 
@@ -907,22 +908,49 @@ export async function responseRequest(
         },
       );
     }
+    // Tool definitions in Codex responses_lite are input sideband entries.
+    // A compaction replaces history, not the authority of the SAME active
+    // request. Restore exact original declarations before parsing the retry.
+    const restored = restoreSameRequestAdditionalTools(compactBody.input, compacted.output);
     const retryBody: Record<string, unknown> = {
       ...compactBody,
       stream: activeParsed.stream,
-      input: compacted.output,
+      input: restored.input,
     };
     const retryParsed = parseRequest(retryBody);
+    // Do not silently run the compacted turn with a smaller tool registry:
+    // deferred tool_search outputs may not be retained by the v1 summary.
+    // This is a pre-dispatch failure, never permission to recreate that tool.
+    const afterTools = new Set((retryParsed.context.tools ?? [])
+      .map(tool => JSON.stringify([tool.namespace ?? null, tool.name, tool.freeform ?? false])));
+    const lostTools = (activeParsed.context.tools ?? [])
+      .filter(tool => !afterTools.has(JSON.stringify([tool.namespace ?? null, tool.name, tool.freeform ?? false])));
+    if (lostTools.length > 0) {
+      console.warn("[chatgpt-web] auto_compaction_tool_catalog_loss " + JSON.stringify({
+        before: activeParsed.context.tools?.length ?? 0,
+        after: retryParsed.context.tools?.length ?? 0,
+        lost: lostTools.length,
+        restored_sideband_items: restored.restoredItems,
+      }));
+      throw new ChatGptWebAdapterError(
+        "Automatic context compaction could not retain every tool declared by the current Codex turn. No compacted browser retry was submitted; continue with a fresh Codex turn whose tool inventory is advertised by Codex.",
+        { status: 409, errorType: "invalid_request_error", code: "auto_compaction_tool_catalog_loss", retryable: false },
+      );
+    }
     // Only size/shape metrics are logged. The auto-compact result must not be
     // mistaken for a guarantee that the browser account can hold the new prompt.
     const originalInput = Array.isArray(compactBody.input) ? compactBody.input : [];
     console.info("[chatgpt-web] auto_compaction_retry_shape " + JSON.stringify({
       before_input_items: originalInput.length,
-      after_input_items: compacted.output.length,
+      after_input_items: restored.input.length,
       before_input_tokens: estimateTokens(JSON.stringify(originalInput)),
-      after_input_tokens: estimateTokens(JSON.stringify(compacted.output)),
+      after_input_tokens: estimateTokens(JSON.stringify(restored.input)),
       before_messages: activeParsed.context.messages.length,
       after_messages: retryParsed.context.messages.length,
+      before_tools: activeParsed.context.tools?.length ?? 0,
+      after_tools: retryParsed.context.tools?.length ?? 0,
+      restored_sideband_items: restored.restoredItems,
+      restored_sideband_specs: restored.restoredSpecs,
     }));
     const retryRoute = routeChatGptWebRequest(retryParsed, config);
     if (retryRoute.slug !== route.slug) {
