@@ -17,7 +17,7 @@ No changes to \`[mcp_servers.rea]\`, \`[mcp_servers.*]\`, \`startup_timeout_sec\
 
 The original native broker, current Codex tool registry, sandbox/approval flow, and turn token remain authoritative. Job IDs are random, in-memory receipts, scoped to the *exact native turn*. Results never migrate across main-agent or subagent turns or token rotations.
 
-At most one async operation per same-turn backend namespace may be active at once; different MCP providers run independently. Errors, vanished browser sessions, and broker retirement DO NOT authorize replay of a dispatched operation.
+At most one async operation per same-turn backend namespace may be active at once. Different MCP providers may run independently when their tools are directly advertised; tools resolved through one shared native exec gateway serialize through that gateway's existing exclusive command-capacity policy. Errors, vanished browser sessions, and broker retirement DO NOT authorize replay of a dispatched operation.
 
 When a native call reports an unverified outcome, the namespace remains locked; the job reports \`unknown\` and \`retryable:false\`. Do not use a new route or replay to bypass the unknown state. The original operation might still be running.
 

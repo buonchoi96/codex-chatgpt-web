@@ -1260,7 +1260,31 @@ export async function createChatGptMcpServer(options: {
         && !isGatewayAgentWaitTool(wire);
       if(mode==="start"&&!mcpTool)
         throw Error("Async start only accepts MCP tools from this native Codex turn");
-      const scope=nativeAsyncToolScope(wire,found?.namespace);
+      // Guard before a job is registered: invalid arguments or an invisible
+      // tool were NEVER dispatched and must not poison a namespace as unknown.
+      if(mcpTool){
+        if(found){
+          if(found.freeform){
+            if(input===undefined || (args&&Object.keys(args).length>0))
+              throw Error("Async freeform MCP tool requires input only");
+          }else{
+            if(input!==undefined)throw Error("Async function MCP tool accepts structured arguments only");
+            assertBrowserToolArguments(found,args??{});
+          }
+        }else{
+          const gateway=execGateway(claimed.environment);
+          if(!gateway || !gatewayToolNameIsValid(wire)
+            || claimed.environment.tools.some(item=>wireName(item)===wire))
+            throw Error("MCP tool was not advertised by the current native Codex registry");
+          if(input!==undefined && args && Object.keys(args).length>0)
+            throw Error("Nested MCP tool accepts input or arguments, never both");
+        }
+      }
+      // Nested MCP calls share the single native exec gateway, whose command
+      // capacity is exclusive. Serialize this shared backend rather than
+      // advertising false cross-provider parallelism.
+      const scope=found?.namespace ? nativeAsyncToolScope(wire,found.namespace)
+        : (mcpTool?"codex_nested_gateway":nativeAsyncToolScope(wire));
       if(!mcpTool){
         return await dispatchBoundTool(claimed,wire,args,input,extra.signal);
       }
