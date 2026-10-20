@@ -242,7 +242,10 @@ test("canonical preflight overflow never compact-loops after its single retry", 
   } }));
   const result = await response.json();
   expect(result.status).toBe("failed");
-  expect(result.error.code).toBe("message_length_exceeds_limit");
+  expect(result.error.code).toBe("canonical_context_budget_exceeded");
+  expect(result.error.message).toContain("after one automatic compaction retry");
+  expect(result.error.message).toContain("117926 tokens");
+  expect(result.error.message).toContain("71808");
   expect(normalAttempts).toBe(2);
   expect(compactions).toBe(1);
 });
