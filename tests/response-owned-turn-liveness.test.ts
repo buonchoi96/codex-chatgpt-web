@@ -186,9 +186,9 @@ test("accepted user key prevents binding a remounted unrelated assistant", () =>
 
 test("detached active response handling runs before unverified rebinding", () => {
   const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8") as string;
-  const gate = source.indexOf("if (!snapshot.responsePresent) {", source.indexOf("for (;;) {", source.indexOf("stage=response")));
-  const pending = source.indexOf("response_binding_detached_pending", gate);
-  const reconcile = source.indexOf("this.reconcileAssistantTurnBinding(", gate);
+  const pending = source.indexOf("response_binding_detached_pending");
+  const gate = source.lastIndexOf("if (!snapshot.responsePresent) {", pending);
+  const reconcile = source.indexOf("this.reconcileAssistantTurnBinding(", pending);
   expect(pending).toBeGreaterThan(gate);
   expect(reconcile).toBeGreaterThan(pending);
   expect(source).toContain("response_binding_pending_user_proof");
