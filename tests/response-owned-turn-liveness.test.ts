@@ -105,3 +105,34 @@ test("exhausted projection path preserves the accepted Send and defers completio
   expect(failure).toBeGreaterThan(nextIteration);
   expect(source.slice(probe, failure)).not.toMatch(/(?:sendAttachedPrompt|onSubmitted|emitBrowserCompletion)\(/);
 });
+
+test("grouped assistant projection uses its stable turn key instead of a nested :has locator", async () => {
+  let observedSelector = "";
+  let invokedOriginalLocator = false;
+  const fakePage = {
+    isClosed: () => false,
+    locator: (selector: string) => {
+      observedSelector = selector;
+      return {
+        evaluate: async () => ({
+          key: "owned:unchanged",
+          snapshot: {
+            responsePresent: true, visibleText: "", fullHtml: "", markdownSegments: [],
+            completionActionVisible: false, stoppedThinkingVisible: false, traceBlocks: [],
+          },
+        }),
+        page: () => fakePage,
+      };
+    },
+  };
+  const strictLocator = {
+    evaluate: async () => { invokedOriginalLocator = true; throw new Error("slow nested :has selector used"); },
+    page: () => fakePage,
+  };
+  const worker = Object.create(require("../src/adapters/chatgpt-web/browser-worker").ChatGptBrowserWorker.prototype);
+  const snapshot = await worker.responseDomSnapshot(strictLocator, {}, "group:assistant:accepted-01");
+  expect(snapshot.responsePresent).toBe(true);
+  expect(invokedOriginalLocator).toBe(false);
+  expect(observedSelector).toBe('[data-turn-key="accepted-01"]');
+  expect(observedSelector).not.toContain(":has");
+});
