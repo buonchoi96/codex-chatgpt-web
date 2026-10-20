@@ -49,8 +49,8 @@ function call(client:Client,turn_token:string,wire_name:string,args:Record<strin
   turn_token,wire_name,arguments:args,
  }},undefined,{timeout:5000,maxTotalTimeout:5000}));
 }
-function body(response:{structuredContent?:unknown}):Record<string,any>{
- const v=response.structuredContent;
+function body(response:unknown):Record<string,any>{
+ const v=(response as {structuredContent?:unknown})?.structuredContent;
  if(!v||typeof v!=="object"||Array.isArray(v))throw Error("Structured MCP result missing");
  return v as Record<string,any>;
 }

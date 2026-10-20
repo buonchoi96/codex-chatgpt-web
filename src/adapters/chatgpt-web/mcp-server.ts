@@ -523,7 +523,8 @@ export async function createChatGptMcpServer(options: {
   const contract = options.contract ?? "native";
   const blockedOperationLedger = options.blockedOperationLedger ?? new BlockedOperationLedger();
   const commandCapacity = new NativeCommandCapacity();
-  const asyncTools = new NativeAsyncToolJobs<ReturnType<typeof asMcpResult>>();
+  type NativeToolResponse=ReturnType<typeof asMcpResult>|ReturnType<typeof result>;
+  const asyncTools = new NativeAsyncToolJobs<NativeToolResponse>();
   const screenObservers=options.screenObserver?new ScreenObservationRegistry(options.screenObserver.provider):undefined;
   const legacyObserverNotices=new Set<string>();
   const server = new McpServer(
@@ -1207,7 +1208,7 @@ export async function createChatGptMcpServer(options: {
     claimed:ClaimedTurn,wire_name:string,
     args:Record<string,unknown>|undefined,input:string|undefined,
     signal?:AbortSignal,unbounded=false,
-  ):Promise<ReturnType<typeof asMcpResult>>=>{
+  ):Promise<NativeToolResponse>=>{
 
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
@@ -1271,9 +1272,9 @@ export async function createChatGptMcpServer(options: {
         }
       });
       background=true;
-      if(mode==="start")return result(ticket);
+      if(mode==="start")return result({...ticket});
       const quick=await asyncTools.quick(turnToken,ticket.job_id,NATIVE_ASYNC_AUTO_WAIT_MS);
-      return "status" in quick&&quick.status==="pending"?result(quick):quick;
+      return "job_id" in quick ? result({...quick}) : quick;
     }finally{
       if(!background)await settleTurnActivity(turnToken,claimed.activityId);
     }
@@ -1289,7 +1290,7 @@ export async function createChatGptMcpServer(options: {
         max_chars:z.number().int().min(1).max(NATIVE_ASYNC_POLL_MAX_CHARS).default(8000)},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async(input,extra)=>withClaimedTurn("codex_tool_poll",turnReference(contract,input),extra,
-      ()=>result(asyncTools.poll(input.turn_token,input.job_id,input.offset,input.max_chars))));
+      ()=>result(asyncTools.poll(turnReference(contract,input),input.job_id,input.offset,input.max_chars))));
     server.registerTool("codex_tool_start",{
       title:"Start a potentially long-running Codex MCP tool",
       description:"Dispatch an exact MCP wire_name in the current Codex turn and immediately return job_id. Poll with codex_tool_poll. Applies to every configured MCP server without a separate proxy. Never retries or bypasses permission.",
@@ -1297,7 +1298,7 @@ export async function createChatGptMcpServer(options: {
         wire_name:z.string().min(1).max(1000),
         arguments:jsonArgumentsSchema.optional(),input:z.string().max(5000000).optional()},
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
-    },async(input,extra)=>runBoundTool(input.turn_token,input.wire_name,input.arguments,input.input,extra,"start"));
+    },async(input,extra)=>runBoundTool(turnReference(contract,input),input.wire_name,input.arguments,input.input,extra,"start"));
   }
 
   server.registerTool(
