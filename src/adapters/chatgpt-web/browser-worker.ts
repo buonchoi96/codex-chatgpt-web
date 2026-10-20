@@ -1457,6 +1457,9 @@ export interface ChatGptOwnedTurnLiveness {
   /** Independent page activity is NOT proof that its content belongs to this Send. */
   visibleStopCount: number;
   activeAssistantGroupCount: number;
+  /** Unique active assistant-only group key; identity alone does not grant tool execution. */
+  activeAssistantGroupKey?: string;
+  activeAssistantGroupCompletionVisible: boolean;
   userBubbleCount: number;
 }
 
@@ -1465,6 +1468,23 @@ export function chatGptDetachedAcceptedTurnMayStillBeRunning(probe: ChatGptOwned
   return (!probe.ownerPresent || !probe.assistantPresent)
     && probe.visibleStopCount === 1 && probe.activeAssistantGroupCount === 1
     && probe.userBubbleCount === 0;
+}
+
+/**
+ * An authenticated native tool batch is waiting on a pre-tool text boundary.
+ * The accepted anchor may be unmounted in Activity, but a single still-running
+ * group with no completion actions can be projected provisionally on the exact
+ * owned browser surface. Never treat this as completed output or a new Send.
+ */
+export function chatGptDetachedToolBoundaryCandidate(
+  probe: ChatGptOwnedTurnLiveness,
+  nativeToolBatchPending: boolean,
+): string | undefined {
+  if (!nativeToolBatchPending
+    || !chatGptDetachedAcceptedTurnMayStillBeRunning(probe)
+    || probe.activeAssistantGroupCompletionVisible) return undefined;
+  const key = probe.activeAssistantGroupKey;
+  return key && key.length > 0 && key.length <= 512 ? key : undefined;
 }
 
 /** An unacknowledged grouped assistant needs a newly visible paired user group. */
@@ -1506,15 +1526,23 @@ export async function probeChatGptOwnedTurnLiveness(
         return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
       };
       const visibleStopCount = [...document.querySelectorAll<HTMLElement>(stopSelector)].filter(visible).length;
-      const activeAssistantGroupCount = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
+      const activeGroups = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
         .filter(group => group.querySelector(
           '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
-        )).length;
+        ));
+      const activeAssistantGroupCount = activeGroups.length;
+      const uniqueGroup = activeGroups.length === 1 ? activeGroups[0] : undefined;
+      const activeAssistantGroupKey = uniqueGroup?.getAttribute('data-turn-key') || undefined;
+      const activeAssistantGroupCompletionVisible = uniqueGroup
+        ? [...uniqueGroup.querySelectorAll<HTMLElement>(completedSelector)].some(visible)
+        : false;
       const userBubbleCount = document.querySelectorAll('[data-user-message-bubble]').length;
       if (!owner) return {
         ownerPresent: false, assistantPresent: false, stopVisible: visibleStopCount > 0,
         completionActionVisible: false, assistantTextChars: 0,
-        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
+        visibleStopCount, activeAssistantGroupCount,
+        ...(activeAssistantGroupKey ? { activeAssistantGroupKey } : {}),
+        activeAssistantGroupCompletionVisible, userBubbleCount,
       };
       const assistant = grouped
         ? owner.querySelector<HTMLElement>(
@@ -1532,7 +1560,9 @@ export async function probeChatGptOwnedTurnLiveness(
         stopVisible,
         completionActionVisible,
         assistantTextChars: assistant?.textContent?.length ?? 0,
-        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
+        visibleStopCount, activeAssistantGroupCount,
+        ...(activeAssistantGroupKey ? { activeAssistantGroupKey } : {}),
+        activeAssistantGroupCompletionVisible, userBubbleCount,
       };
     }, {
       ownerSelector,
@@ -6984,8 +7014,50 @@ export class ChatGptBrowserWorker {
           const uncertain = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
             .catch(() => undefined);
           if (uncertain && chatGptDetachedAcceptedTurnMayStillBeRunning(uncertain)) {
+            // A native exec_command can already be queued on this authenticated
+            // turn, but index.ts withholds it until its pre-tool Markdown boundary
+            // is recorded and acknowledged. Simply continuing here DEADLOCKS:
+            // native waits for the boundary, this worker waits for native DOM
+            // progress, and the MCP server retires the turn after 90 seconds.
+            const pending = turn.externalProgress?.snapshot();
+            const pendingToolBoundary = Boolean(
+              pending && completionTracker.needsToolBatchObservation(pending.lastToolBatchRevision),
+            );
+            const transientKey = chatGptDetachedToolBoundaryCandidate(uncertain, pendingToolBoundary);
+            if (transientKey && pending && turn.externalProgress) {
+              // A single unfinished assistant-only Activity group, one live Stop
+              // control, zero user bubbles and the SAME TURN'S authenticated
+              // pending native tool batch are needed. Recheck the DOM AFTER
+              // projection to defeat a concurrent remount/foreign Send.
+              const transientIdentity = `group:assistant:${transientKey}`;
+              const transientSnapshot = await this.responseDomSnapshot(
+                page.locator(chatGptTurnContainerSelector(transientIdentity)),
+                undefined,
+                transientIdentity,
+              );
+              const verified = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity);
+              if (transientSnapshot.responsePresent && !transientSnapshot.completionActionVisible
+                && chatGptDetachedToolBoundaryCandidate(verified, true) === transientKey) {
+                const delta = (() => {
+                  try { return markdownBuffer.observe(transientSnapshot.markdownSegments); }
+                  catch (error) { return throwMarkdownConsistencyError(error); }
+                })();
+                for (const trace of visibleTrace.observe(
+                  transientSnapshot.traceBlocks, transientSnapshot.completionActionVisible,
+                )) {
+                  if (trace.kind === "commentary") turn.onCommentary?.(trace.text, trace.continuation === true);
+                  else turn.onReasoningSummary?.(trace.text, trace.continuation === true);
+                }
+                if (delta) emitMarkdownDelta(delta);
+                completionTracker.observeToolBatch(pending.lastToolBatchRevision, transientSnapshot.visibleText);
+                await turn.externalProgress.acknowledgeToolBatch(pending.lastToolBatchRevision);
+                console.info(`[chatgpt-web] detached_tool_boundary_observed trace=${turn.traceId}`
+                  + ` revision=${pending.lastToolBatchRevision} chars=${transientSnapshot.visibleText.length}`);
+              }
+            }
             console.info(`[chatgpt-web] response_binding_detached_pending trace=${turn.traceId}`
-              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`);
+              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`
+              + ` boundaryPending=${pendingToolBoundary}`);
             await withBrowserTurnAbort(
               new Promise<void>(resolveSleep => setTimeout(resolveSleep, 1_000)),
               turn.abortSignal,
