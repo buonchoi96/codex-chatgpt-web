@@ -148,6 +148,101 @@ for (const stream of [false, true]) test(`browser prompt-too-long auto compacts 
   expect(compactionAttempts).toBe(1);
 });
 
+for (const stream of [false, true]) test(`canonical pre-send context budget compacts once while retaining the active goal (stream=${stream})`, async () => {
+  const goalText = "<codex_internal_context source=\"goal\">Goal status PURSUING; continue the full objective.</codex_internal_context>";
+  const body = {
+    model, stream,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+      thread_id: `thread_canonical_budget_${stream}`, turn_id: "turn_canonical_budget",
+    }) },
+    input: [{ type: "message", role: "user", id: "msg_canonical_budget_source",
+      content: [{ type: "input_text", text: `Implement the active task. ${goalText}` }] }],
+  };
+  let attempts = 0;
+  let compactions = 0;
+  const factory = (): ProviderAdapter => ({
+    name: "canonical-budget-auto-compact",
+    async runTurn(parsed, _incoming, emit) {
+      if (parsed._compactionRequest) {
+        compactions++;
+        emit({ type: "text_delta", text: "Compacted state; active goal remains PURSUING", phase: "final_answer" });
+        emit({ type: "done", stopReason: "stop", endTurn: true });
+        return;
+      }
+      attempts++;
+      if (attempts === 1) {
+        emit({ type: "error", message: "ChatGPT Web transport blocked: canonical context requires 117926 tokens, exceeding the measured account budget of 71808", status: 400,
+          errorType: "invalid_request_error", code: "canonical_context_budget_exceeded", retryable: false });
+        return;
+      }
+      expect(parsed.modelId).toBe("gpt-5.6-sol");
+      const messages = parsed.context.messages.map(message => typeof message.content === "string"
+        ? message.content : JSON.stringify(message.content));
+      expect(messages.some(text => text.includes(goalText))).toBe(true);
+      expect(messages.some(text => text.includes("active goal remains PURSUING"))).toBe(true);
+      emit({ type: "text_delta", text: "Task resumed with GOAL PURSUING", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  });
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }), defaultConfig("full"), factory);
+  expect(response.status).toBe(200);
+  const result = await response.text();
+  expect(result).toContain("Task resumed with GOAL PURSUING");
+  expect(attempts).toBe(2);
+  expect(compactions).toBe(1);
+});
+
+test("an ambiguous browser context rejection never initiates automatic compaction", async () => {
+  let calls = 0;
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify({ model, stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({thread_id: "thread_ambiguous_rejection", turn_id: "turn_ambiguous_rejection"}) },
+      input: [{ type: "message", role: "user", id: "msg_ambiguous_rejection", content: [{ type: "input_text", text: "Keep task state." }] }],
+    }),
+  }), defaultConfig("full"), () => ({ name: "ambiguous-context-rejection", async runTurn(_parsed, _incoming, emit) {
+    calls++;
+    emit({ type: "error", status: 400, errorType: "invalid_request_error",
+      code: "context_length_exceeded", retryable: false, message: "Context was rejected after an uncertain browser send" });
+  } }));
+  expect(calls).toBe(1);
+  expect(response.status).toBe(200);
+  expect((await response.json()).status).toBe("failed");
+});
+
+test("canonical preflight overflow never compact-loops after its single retry", async () => {
+  let normalAttempts = 0;
+  let compactions = 0;
+  const body = {
+    model, stream: false,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+      thread_id: "thread_canonical_retry_limit", turn_id: "turn_canonical_retry_limit",
+    }) },
+    input: [{ type: "message", role: "user", id: "msg_canonical_retry_limit",
+      content: [{ type: "input_text", text: "Continue the original task." }] }],
+  };
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify(body),
+  }), defaultConfig("full"), () => ({ name: "canonical-overflow-single-retry", async runTurn(parsed, _incoming, emit) {
+    if (parsed._compactionRequest) {
+      compactions++;
+      emit({ type: "text_delta", text: "Compacted source", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+      return;
+    }
+    normalAttempts++;
+    emit({ type: "error", status: 400, errorType: "invalid_request_error",
+      code: "canonical_context_budget_exceeded", retryable: false,
+      message: "ChatGPT Web transport blocked: canonical context requires 117926 tokens, exceeding the measured account budget of 71808" });
+  } }));
+  const result = await response.json();
+  expect(result.status).toBe("failed");
+  expect(result.error.code).toBe("message_length_exceeds_limit");
+  expect(normalAttempts).toBe(2);
+  expect(compactions).toBe(1);
+});
+
 test("manual and automatic compaction both normalize to the same compaction request flag", async () => {
   const seen: Array<{ compaction: boolean; last: unknown }> = [];
   const factory = (): ProviderAdapter => ({

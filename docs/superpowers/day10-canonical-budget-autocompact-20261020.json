@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "baseline_head": "6147eaffa74f90f6260864f4e9c50ba38749de4f",
+  "scope": "Pre-Send canonical Web account-budget overflow fallback; local unit/integration fixtures plus a separate small authenticated DEV smoke",
+  "incident": "canonical context requires 117926 or 78468 tokens, exceeding the measured account budget of 71808",
+  "source_changes": [
+    "src/adapters/chatgpt-web/prompt.ts: canonical budget BLOCK emits canonical_context_budget_exceeded before browser Send; other BLOCK causes retain context_transport_unsupported",
+    "src/server.ts: existing bounded auto compaction intercepts that distinct typed preflight and retries once with unchanged routed model",
+    "src/adapters/chatgpt-web/usage.ts: multipart candidate selection recognizes the distinct typed canonical overflow"
+  ],
+  "regression_tests": [
+    "tests/chatgpt-web-usage.test.ts: oversized canonical history has specific preflight code",
+    "tests/server-compaction.test.ts: streaming and nonstreaming one compact plus one continuation with GOAL PURSUING text retained",
+    "tests/server-compaction.test.ts: ambiguous post-Send context_length_exceeded is not automatically retried",
+    "tests/server-compaction.test.ts: repeated canonical overflow stops after exactly one compact and retry"
+  ],
+  "focused": {
+    "command": "bun test tests/server-compaction.test.ts tests/chatgpt-web-usage.test.ts",
+    "passed": 43,
+    "failed": 0,
+    "assertions": 357
+  },
+  "related": {
+    "command": "bun test tests/prompt-contract.test.ts tests/enhanced-recovery-checkpoint.test.ts tests/chatgpt-web-harness.test.ts tests/compaction-preflight-retry.test.ts tests/browser-retained-preflight.test.ts",
+    "passed": 157,
+    "failed": 0,
+    "assertions": 1234
+  },
+  "typecheck": "PASS: bun run typecheck",
+  "diff_check": "PASS: git diff --check",
+  "dev_smoke": {
+    "command": "bun run dev:chat canonical-budget-smoke-20261020 --model gpt-6-sol \"Reply with exactly: DEV READY\"",
+    "trace_id": "95aaee652e13",
+    "transport": "INLINE",
+    "canonical_tokens": 1431,
+    "measured_account_budget": 71808,
+    "accepted_send_count": 1,
+    "assistant_answer": "DEV READY",
+    "terminal": "completed",
+    "broker_pending_after_retirement": 0,
+    "native_route": "isolated and unused",
+    "tools": "DEV simulated",
+    "scope_limit": "Small authenticated browser route and one-Send proof; canonical overflow and auto-compaction not injected live"
+  },
+  "invariants": {
+    "goal_marker_preserved": "PASS in deterministic source-to-retry fixture only; native Codex /goal PURSUING runtime status not independently inspected after real compact",
+    "duplicate_browser_send": "No duplicate in short DEV smoke; deterministic canonical overflow fixture performs only a safe pre-Send failure followed by one compact and one retry",
+    "post_send_ambiguous_replay": "Forbidden and regression tested",
+    "production_restart_or_edit": false,
+    "git_commit_or_push": false,
+    "subagents_created": 0
+  },
+  "unresolved": [
+    "Authenticated DEV replay with complete tool-result-heavy canonical context above 71808 and a verifiable real native user source",
+    "Native Codex /goal remains PURSUING after an actual canonical-overflow compact and continuation",
+    "Durable acceptance across a real retained browser owner and pending tool/approval, with no duplicate tool side effect",
+    "23 historical Swift desktop_observe safety-review entries remain pending; only first 20 scoped entries visible; retry_allowed=false"
+  ],
+  "requirement_status_changes": 0,
+  "status_classification": "PARTIAL: source and simulated regression proven; live overflow not proven"
+}

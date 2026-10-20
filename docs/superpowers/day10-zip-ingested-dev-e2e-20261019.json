@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-19",
+  "goal_status": "ACTIVE",
+  "acceptance_id": "ZIP-01",
+  "acceptance_status": "PASS",
+  "acceptance_scope": "Isolated DEV Web ZIP ingestion with native-control archive acknowledgment, plus current-head archive and cache regressions",
+  "goal_original_path": "C:/Users/Long-PC/Documents/GOAL.md",
+  "goal_original_read": "MISSING_ON_FRESH_READ",
+  "web_branch": "main",
+  "web_head": "7dcce114784fba4f3b1d7a3b7b635cdac6061e27",
+  "dev_conversation": "day10-zip-12png-20261019-a",
+  "synthetic_fixture": {
+    "history_items_before_send": 1,
+    "historical_image_occurrences": 12,
+    "image_media_type": "image/png",
+    "image_dimensions": "2x2",
+    "user_data": "none; repeated repository test-fixture bytes",
+    "existing_dev_chats_modified": false
+  },
+  "browser_receipt": {
+    "trace_id": "8c1d0fb2b15e",
+    "transport": "ZIP_SINGLE_MESSAGE",
+    "transport_reason": "Inline attachments exceed measured limits while the complete ZIP fits one message and the account budget",
+    "canonical_tokens": 50921,
+    "measured_account_canonical_token_limit": 71808,
+    "attachment_count_before_archiving": 12,
+    "inline_max_attachment_count": 10,
+    "archive_media_type": "application/zip",
+    "archive_bytes": 4171,
+    "archive_image_count": 12,
+    "archive_skill_count": 0,
+    "accepted_send_count": 1,
+    "prepared_zip": true,
+    "submission_receipt_id": "53726f05-1985-4c4d-a988-b9aa405e02ac",
+    "archive_acknowledgment": "context_archive_ingested trace=8c1d0fb2b15e proof=native_control",
+    "model_reply": "DEV ZIP ARCHIVE ACK OK",
+    "process_exit": 0,
+    "browser_outcome": "final",
+    "broker_completion_committed": true,
+    "pending_tools_at_retirement": 0,
+    "queued_tools_at_retirement": 0,
+    "active_mcp_requests_at_retirement": 0,
+    "independent_dev_chat_turns": 1,
+    "independent_dev_chat_items": 5
+  },
+  "cache_manifest_regression": {
+    "command": "bun test tests/archive-cache.test.ts tests/transport-selector.test.ts tests/attachment-upload.test.ts",
+    "pass": 23,
+    "skip": 10,
+    "fail": 0,
+    "assertions": 223,
+    "coverage": "Manifest content and asset digests, image references, path safety, archive cache identity/invalidation, and transport selection"
+  },
+  "additional_source_repair": {
+    "file": "src/adapters/chatgpt-web/browser-worker.ts",
+    "cause": "Upstream merge left an unused duplicate expandedUserMessageContent method invoking nonexistent read(content)",
+    "red": "bun run typecheck: TS2304 Cannot find name read on two lines",
+    "repair": "Remove 57-line unused duplicate method; preserve used withExpandedUserMessage helper and callsite",
+    "green": "bun run typecheck PASS; git diff --check PASS",
+    "changed_dev_launcher_process": false
+  },
+  "limits": {
+    "native_control_proves": "Exact archive context boundary digests and image/skill inventory counts; local archive validator checks full member integrity",
+    "production_native_side_effects": "NOT_RUN",
+    "model_backend_effort_attestation": "UNVERIFIED",
+    "actual_model_recall_272k": "UNVERIFIED",
+    "lost_tab_recovery": "ZIP-03 remains PARTIAL",
+    "screen_observer_safety": "23 pending review, 20 visible and 3 unread; no retries permitted"
+  },
+  "requirement_counts_after_acceptance": {
+    "PASS": 7,
+    "PARTIAL": 138,
+    "BLOCKED": 12,
+    "NOT RUN": 18,
+    "total": 175
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "process_restarts": 0,
+  "git_reference_mutations": 0
+}

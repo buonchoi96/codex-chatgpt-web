@@ -144,8 +144,38 @@ class BrowserControlServer {
           error.code = "manual_browser_inspection_disabled";
           throw error;
         }
-        const result = await host.inspectSession(body?.detectCapabilities === true);
-        writeJson(response, 200, result);
+        const detectCapabilities = body?.detectCapabilities === true;
+        const startedAt = Date.now();
+        let clientDisconnected = false;
+        const onClose = () => {
+          if (response.writableEnded) return;
+          clientDisconnected = true;
+          this.logger.warn("browser.session_inspection_client_disconnected", {
+            clientDisconnected: true,
+            elapsedMs: Date.now() - startedAt,
+          });
+        };
+        response.once("close", onClose);
+        this.logger.info("browser.session_inspection_started", { detectCapabilities });
+        try {
+          const result = await host.inspectSession(detectCapabilities);
+          this.logger.info("browser.session_inspection_finished", {
+            status: "success",
+            clientDisconnected,
+            elapsedMs: Date.now() - startedAt,
+          });
+          if (!response.destroyed) writeJson(response, 200, result);
+        } catch (error) {
+          this.logger.warn("browser.session_inspection_finished", {
+            status: "error",
+            clientDisconnected,
+            elapsedMs: Date.now() - startedAt,
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          });
+          throw error;
+        } finally {
+          response.off("close", onClose);
+        }
         return;
       }
       if (isTurnRelease) {
@@ -360,6 +390,7 @@ class BrowserControlServer {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn("browser.control_rejected", { message });
+      if (response.destroyed) return;
       const cancelled = error?.code === "turn_cancelled";
       const retainedUnavailable = error?.code === "retained_conversation_unavailable";
       const ownerLost = error?.code === "turn_owner_lost";

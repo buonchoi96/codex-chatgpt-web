@@ -832,7 +832,12 @@ export function compileChatGptWebPrompt(
       }
       throw new ChatGptWebAdapterError(
         `ChatGPT Web transport blocked: ${transportDecision.reason}`,
-        { status: 400, errorType: "invalid_request_error", code: "context_transport_unsupported", retryable: false },
+        { status: 400, errorType: "invalid_request_error",
+          // This typed pre-Send failure is the only canonical overflow eligible for
+          // a bounded native compact/retry. Post-Send context errors are ambiguous.
+          code: canonicalTokens > accountCanonicalTokenLimit
+            ? "canonical_context_budget_exceeded" : "context_transport_unsupported",
+          retryable: false },
       );
     }
     if (transportDecision.choice === "ZIP_SINGLE_MESSAGE") {

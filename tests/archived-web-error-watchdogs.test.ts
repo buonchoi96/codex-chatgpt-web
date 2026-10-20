@@ -14,6 +14,9 @@ import {
 type BannerKind = "status" | "alert" | "plain" | "transcript";
 function bannerPage(text: string, kind: BannerKind, retry = false): Page {
   return {
+    getByText(pattern: RegExp) {
+      return bannerPage(text, kind, retry).locator(`text="${text}"`).filter({ hasText: pattern });
+    },
     locator(selector: string) {
       const isPlainExact = selector.startsWith('text="')
         && selector.slice(6, -1) === text;
@@ -28,6 +31,9 @@ function bannerPage(text: string, kind: BannerKind, retry = false): Page {
           if (condition.hasText && !condition.hasText.test(text)) matches = false;
           return locator;
         },
+        evaluateAll: async (_fn: unknown, options: { patternSource: string; patternFlags: string }) =>
+          matches && kind !== "transcript"
+          && new RegExp(options.patternSource, options.patternFlags).test(text),
         last() { return locator; },
         count: async () => matches ? 1 : 0,
         isVisible: async () => matches,

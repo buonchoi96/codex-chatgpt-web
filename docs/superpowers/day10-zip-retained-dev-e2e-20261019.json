@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-19",
+  "goal_status": "ACTIVE",
+  "acceptance_id": "ZIP-02",
+  "acceptance_status": "PASS",
+  "acceptance_scope": "Genuine isolated DEV Web browser and DEV simulated tool broker",
+  "requirement": "Verified retained follow-up with zero new ZIP uploads and current tool token inline",
+  "web_branch": "main",
+  "web_head": "7dcce114784fba4f3b1d7a3b7b635cdac6061e27",
+  "dev_conversation": "day10-zip-20261019-smoke",
+  "dev_model_requested": "chatgpt-web/gpt-6-sol",
+  "initial_turn": {
+    "receipt": "docs/superpowers/day10-zip-dev-followup-20261019.json",
+    "result": "One genuine INLINE accepted Send and exact response DAY10 DEV READY"
+  },
+  "bootstrap_followup": {
+    "trace_id": "373d2e7cd3b2",
+    "result": "DAY10 FOLLOWUP OCT19",
+    "process_exit": 0,
+    "transport": "INLINE",
+    "retained_proof_before_turn": "proof_missing",
+    "accepted_send_count": 1,
+    "prepared_zip": false,
+    "broker_completion_committed": true,
+    "pending_tools_at_retirement": 0,
+    "historical_items_after_turn": 6
+  },
+  "retained_delta_followup": {
+    "trace_id": "13a1d8f51c1c",
+    "result": "DAY10 RETAINED THIRD",
+    "process_exit": 0,
+    "transport": "RETAINED_DELTA",
+    "transport_reason": "retained history is proven and this delta fits the current message limits",
+    "accepted_send_count": 1,
+    "prepared_zip": false,
+    "attachment_count": 0,
+    "broker_completion_committed": true,
+    "pending_tools_at_retirement": 0,
+    "historical_items_after_turn": 9
+  },
+  "tool_capable_retained_delta": {
+    "trace_id": "9ed59c3994f6",
+    "process_exit": 0,
+    "transport": "RETAINED_DELTA",
+    "accepted_send_count": 1,
+    "prepared_zip": false,
+    "attachment_count": 0,
+    "current_broker_claim_valid": true,
+    "delivered_tool_calls": 1,
+    "tool": "exec_command",
+    "tool_receipt_type": "codex_dev_simulated_tool_result",
+    "simulated": true,
+    "side_effects_performed": false,
+    "broker_completion_committed": true,
+    "pending_tools_at_retirement": 0,
+    "queued_tools_at_retirement": 0,
+    "active_mcp_requests_at_retirement": 0,
+    "historical_items_after_turn": 14,
+    "note": "A fresh broker token was accepted and a simulated tool call was delivered once; the command did not execute on the host"
+  },
+  "independent_dev_chat_check": {
+    "turns": 4,
+    "compactions": 0,
+    "items": 14,
+    "last_updated_utc": "2026-10-19T16:25:14.847Z"
+  },
+  "remaining_limitations": {
+    "production_native_effect": "NOT_TESTED; separate acceptance scope",
+    "web_backend_model_and_effort": "UNVERIFIED",
+    "model_recall_272k": "UNVERIFIED",
+    "actual_zip_ingestion": "UNVERIFIED; ZIP-01 remains PARTIAL",
+    "lost_tab_recovery": "UNVERIFIED; ZIP-03 remains PARTIAL",
+    "original_session_inspection_timeout_cause": "UNCONFIRMED",
+    "screen_observer_safety_review": "23 unresolved, 20 visible, 3 unread, retry forbidden"
+  },
+  "source_validation": {
+    "control_server_regression": "RED 0 PASS / 1 FAIL, GREEN 1 PASS / 0 FAIL",
+    "related_launcher_tests": "153 PASS / 0 FAIL / 0 SKIP",
+    "launcher_typecheck": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "requirement_counts_after_acceptance": {
+    "PASS": 6,
+    "PARTIAL": 139,
+    "BLOCKED": 12,
+    "NOT RUN": 18,
+    "total": 175
+  },
+  "subagents_spawned": 0,
+  "production_or_dev_process_mutations": 0,
+  "configuration_mutations": 0,
+  "git_reference_mutations": 0
+}

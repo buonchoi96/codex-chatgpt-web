@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "acceptance_id": "INT-01",
+  "acceptance_status": "PARTIAL",
+  "required_evidence": "Production route, tunnel and browser untouched during isolated DEV work",
+  "web_head": "2d91881021f877f896343e13c7ce981631cd683a",
+  "verification": "Live read-only native process, profile, socket and health inspection plus focused source tests",
+  "production": {
+    "home": "C:/Users/Long-PC/.codex-chatgpt-web",
+    "config_sha256": "2E111F8DFA8C7AC9E6B52379B0EE022AA83F2E2A1D29903D7D7E0479F3D1BC79",
+    "config_modified_utc": "2026-10-19T15:48:55.7479073Z",
+    "app_name": "Codex Native2",
+    "mode": "full",
+    "launcher_profile": "production",
+    "launcher_pid": 19368,
+    "launcher_started_utc": "2026-10-19T15:47:38.5622894Z",
+    "descriptor_sha256": "ED59FBA77B7595AE9E59C2B2E5E0734E3993F1C16FF2D1C8195B535E43E37787",
+    "descriptor_modified_utc": "2026-10-19T18:42:01.5121316Z",
+    "responses_listen": "127.0.0.1:17841",
+    "responses_pid": 12296,
+    "health": "ok",
+    "accepting_turns": true
+  },
+  "development": {
+    "home": "C:/Users/Long-PC/.codex-chatgpt-web-dev",
+    "config_sha256": "266CCC5B1695C9F9308AEC60D557C6140939328A6A44A1B2D25C1141CB2C5D5C",
+    "config_modified_utc": "2026-10-19T15:52:45.4568476Z",
+    "app_name": "Codex Native2 DEV",
+    "mode": "full",
+    "purpose": "dev-harness",
+    "launcher_profile": "development",
+    "launcher_pid": 17848,
+    "launcher_started_utc": "2026-10-19T15:52:03.6893702Z",
+    "descriptor_sha256": "708DE649E92127710F67CA71AC744B910159947ABBA6BAA1CB3CD8D8D73FB319",
+    "descriptor_modified_utc": "2026-10-19T18:33:47.4276554Z",
+    "responses_listener_started": false,
+    "codex_route": "isolated and unused",
+    "mcp_runtime": "ready"
+  },
+  "checks": {
+    "different_home_browser_and_connector": true,
+    "different_launcher_pids": true,
+    "production_listener_healthy": true,
+    "dev_responses_listener_absent": true,
+    "focused_command": "bun test tests/dev-profile.test.ts tests/cli.test.ts",
+    "focused_result": "24 PASS / 0 FAIL / 107 expectations",
+    "production_mutations_from_current_check": 0,
+    "process_restarts_from_current_check": 0,
+    "subagents_spawned": 0
+  },
+  "limits": {
+    "historical_production_browser_integrity": "UNVERIFIED: no matched before-and-after snapshot enclosing earlier DEV E2E",
+    "descriptor_modification_causality": "UNVERIFIED: production descriptor has a later modification timestamp; read-only checks do not attribute causes",
+    "acceptance": "PARTIAL"
+  },
+  "requirement_counts_after": {
+    "PASS": 8,
+    "PARTIAL": 138,
+    "BLOCKED": 12,
+    "NOT RUN": 17,
+    "total": 175
+  }
+}

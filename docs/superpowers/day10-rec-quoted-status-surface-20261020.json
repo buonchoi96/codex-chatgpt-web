@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "branch": "main",
+  "head": "6147eaffa74f90f6260864f4e9c50ba38749de4f",
+  "goal_sha256": "C58F7B41A0DF7BDF7FC15DBD1F1C56FE876B3782A9A0E182BF307199BC0B7087",
+  "issue": "A marked status/alert wrapper containing only quoted message text can resemble a recovery banner.",
+  "change": "Exclude quoted message descendants before validating the full visible banner text; allow actual status text in the same wrapper to be recognized.",
+  "source": "src/adapters/chatgpt-web/browser-worker.ts",
+  "regression": "tests/same-tab-recovery-dom.test.ts",
+  "browser": "C:/Program Files/Google/Chrome/Application/chrome.exe (isolated headless fixture)",
+  "verified": {
+    "headless_dom": "5 PASS / 0 FAIL / 75 assertions",
+    "related_regression": "181 PASS / 0 FAIL / 1048 assertions",
+    "typecheck": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "covered_statuses": [
+    "Interrupted network. Waiting for final answer ...",
+    "Connection interrupted. Waiting for final answer …",
+    "Message delivery timed out. Please try again.",
+    "Message delivery failed. Please try again."
+  ],
+  "unverified": "Actual authenticated DEV browser error, in-flight MCP ownership, and live same-tab Stop/Send remain unverified; REC-00A/B/C remain PARTIAL.",
+  "matrix_status_changes": 0,
+  "production_effects": 0,
+  "subagents_spawned": 0,
+  "safety_unresolved": 23,
+  "safety_unread": 3
+}

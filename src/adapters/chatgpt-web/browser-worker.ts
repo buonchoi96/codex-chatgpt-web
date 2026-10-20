@@ -847,47 +847,73 @@ const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
 
-// Archive recovery supported both the older "timed out" and newer "failed" red banners.
-export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN =
-  /Message delivery (?:timed out|failed)\. Please try again\./i;
+export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN = /^Message delivery (?:timed out|failed)\.\s*Please try again\.$/i;
+const CHATGPT_MESSAGE_DELIVERY_ERROR_PATTERN = CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN;
+export const CHATGPT_INTERRUPTED_NETWORK_PATTERN =
+  /^(?:(?:connecting|connection|connectiong|network)\s+interrupted|interrupted\s+(?:connection|network))\.?\s*waiting for (?:the )?(?:complete|final) answer(?:\s|[.…])*$/i;
+const CHATGPT_INTERRUPTED_CONNECTION_PATTERN = CHATGPT_INTERRUPTED_NETWORK_PATTERN;
+export const CHATGPT_HARD_NETWORK_ERROR_PATTERN =
+  /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
+const CHATGPT_QUOTED_ERROR_CONTENT_SELECTOR = [
+  '[data-message-author-role]',
+  '[data-testid^="conversation-turn-"]',
+  '[data-testid="assistant-turn"]',
+  '[data-testid="user-turn"]',
+  '[data-turn-id]',
+  '.markdown',
+  'blockquote',
+  'pre',
+  'code',
+].join(', ');
+
+/** Recovery signals must originate outside quoted messages and assistant output. */
+async function chatGptRecoveryBannerVisible(candidates: Locator, pattern: RegExp): Promise<boolean> {
+  return candidates.filter({ visible: true }).evaluateAll((elements, options) =>
+    elements.some(element => {
+      if (element.closest(options.excludedAncestors)) return false;
+      // A status/alert wrapper may contain quoted turn text. Only its own
+      // remaining banner text can classify an active browser error.
+      const visibleSurface = element.cloneNode(true) as Element;
+      visibleSurface.querySelectorAll(options.excludedAncestors).forEach(node => node.remove());
+      return new RegExp(options.patternSource, options.patternFlags)
+        .test(visibleSurface.textContent?.trim() ?? "");
+    }), {
+      excludedAncestors: CHATGPT_QUOTED_ERROR_CONTENT_SELECTOR,
+      patternSource: pattern.source,
+      patternFlags: pattern.flags,
+    }
+  ).catch(() => false);
+}
 
 /** Error UI is not proof that an already-running model or MCP task has stopped. */
 export async function chatGptMessageDeliveryTimeoutVisible(page: Page): Promise<boolean> {
-  const alert = page.locator('[role="alert"]')
-    .filter({ hasText: CHATGPT_MESSAGE_DELIVERY_TIMEOUT_PATTERN }).last();
-  if (await alert.isVisible().catch(() => false)) return true;
-  // Some ChatGPT deployments render the identical red banner without role="alert".
-  const timedOut = page.locator('text="Message delivery timed out. Please try again."').last();
-  if (await timedOut.isVisible().catch(() => false)) return true;
-  return page.locator('text="Message delivery failed. Please try again."').last()
-    .isVisible().catch(() => false);
+  const markedBanner = page.locator('[role="alert"], [data-sonner-toast], [data-testid="conversation-status"]')
+    .filter({ hasText: /Message delivery (?:timed out|failed)/i });
+  if (await chatGptRecoveryBannerVisible(markedBanner, CHATGPT_MESSAGE_DELIVERY_ERROR_PATTERN)) return true;
+  // Some deployments render an unmarked red banner. Match its exact text while
+  // excluding quoted user or assistant prose, including Markdown and code.
+  return chatGptRecoveryBannerVisible(page.getByText(CHATGPT_MESSAGE_DELIVERY_ERROR_PATTERN), CHATGPT_MESSAGE_DELIVERY_ERROR_PATTERN);
 }
 
 /** Begin the red-error silence budget only after the delivery error becomes visible. */
 export const CHATGPT_MESSAGE_DELIVERY_TIMEOUT_GRACE_MS = CHATGPT_FRONTEND_ERROR_STALL_MS;
 
-// Restore the known archive banner variants. Keep matches on status/alert surfaces only:
-// a user quoting these sentences in code, task data or an answer is not an outage.
-export const CHATGPT_INTERRUPTED_NETWORK_PATTERN =
-  /^(?:(?:connecting|connection|connectiong|network)\s+interrupted|interrupted\s+(?:connection|network))\.?\s*waiting for (?:the )?(?:complete|final) answer(?:\s|[.…])*$/i;
-export const CHATGPT_HARD_NETWORK_ERROR_PATTERN =
-  /^(?:network error|a network error occurred\.?\s*please check your connection and try again\.?)$/i;
-
-/** Soft network warnings keep the 180-second semantic-progress watchdog. */
+/** Status surfaces only: quoted task/answer prose cannot start a recovery watchdog. */
 export async function chatGptInterruptedNetworkVisible(page: Page): Promise<boolean> {
-  return page.locator('[role="status"], [role="alert"], [data-testid="conversation-status"]')
-    .filter({ hasText: CHATGPT_INTERRUPTED_NETWORK_PATTERN })
-    .filter({ visible: true }).count().then(count => count > 0);
+  return chatGptRecoveryBannerVisible(page.locator('[role="status"], [role="alert"], [data-testid="conversation-status"]')
+    .filter({ hasText: /(?:connecting|connection|connectiong|network)\s+interrupted|interrupted\s+(?:network|connection)/i }), CHATGPT_INTERRUPTED_CONNECTION_PATTERN);
 }
 
-/** Hard network failures use the existing 60-second red-error watchdog, never a blind Retry. */
+/** Hard network error banners arm the existing red-error watchdog. */
 export async function chatGptHardNetworkErrorVisible(page: Page): Promise<boolean> {
-  return page.locator('[role="alert"], [data-testid="conversation-status"]')
-    .filter({ hasText: CHATGPT_HARD_NETWORK_ERROR_PATTERN })
-    .filter({ visible: true }).count().then(count => count > 0);
+  return chatGptRecoveryBannerVisible(
+    page.locator('[role="alert"], [data-testid="conversation-status"]')
+      .filter({ hasText: CHATGPT_HARD_NETWORK_ERROR_PATTERN }),
+    CHATGPT_HARD_NETWORK_ERROR_PATTERN,
+  );
 }
 
-/** Archive fallback: only a Retry control contained inside a visible red alert is evidence. */
+/** A Retry button alone cannot authorize an automatic click or replay. */
 export async function chatGptPageRetryErrorVisible(page: Page): Promise<boolean> {
   return page.locator('[role="alert"]')
     .getByRole("button", { name: "Retry", exact: true })
@@ -1369,6 +1395,14 @@ export function remainingStageBudgetMs(
 }
 
 export const CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS = 5_000;
+/**
+ * The response Markdown/trace projection walks the existing assistant subtree.
+ * On a >500K-character saved chat it can exceed the 5s lightweight DOM probe
+ * even while the browser and completed answer remain healthy. Use a separate
+ * bounded post-Send budget: never treat a timed-out projection as proof that
+ * generation or the accepted Send failed. Pre-Send ownership checks stay 5s.
+ */
+export const CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS = 20_000;
 export const CHATGPT_REBIND_OPERATIONAL_VIEWPORT_TIMEOUT_MS = 30_000;
 export const MAX_CHATGPT_BROWSER_PAGE_REBINDS = 2;
 
@@ -5439,13 +5473,13 @@ export class ChatGptBrowserWorker {
       stoppedThinkingLabels: [...CHATGPT_STOPPED_THINKING_LABELS],
       knownKey: cache?.key,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
-    }, { timeout: CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS }).catch(error => {
+    }, { timeout: CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS }).catch(error => {
       // A busy 500K-character conversation can stall Playwright's DOM projection.
       // A timeout is NOT evidence that the response was unmounted. Propagate it to
       // the existing same-surface reconnect path without replaying the accepted Send.
       if (error instanceof Error && (error.name === "TimeoutError"
         || error instanceof ChatGptBrowserObservationTimeoutError)) {
-        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS);
+        throw new ChatGptBrowserObservationTimeoutError(CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS);
       }
       // A detached locator during React remount remains a missing response:
       // the caller will reconcile the exact assistant/user turn binding.

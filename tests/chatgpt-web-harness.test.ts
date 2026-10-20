@@ -462,6 +462,10 @@ describe("ChatGPT outer-native harness v4", () => {
         expect(turn.prepareResume).toBeUndefined();
         expect(turn.retainConversation).not.toBe(true);
       }
+      if (browserMessages > 0 && !freshConversation) {
+        // A verified suffix must never reach a newly created browser tab.
+        expect(turn.requireRetainedConversation).toBe(true);
+      }
       expect(turn.captureLunaCheckpoint).toBeUndefined();
       const prepared = browserMessages === 0 || freshConversation ? await turn.prepare() : await turn.prepareResume!();
       preparedPrompts.push(prepared.text);
