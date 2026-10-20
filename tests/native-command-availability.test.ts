@@ -45,7 +45,9 @@ test("missing native commands never abort the whole browser turn, but fail befor
   const runtime = adapter.indexOf("const nativeIdentity = extractChatGptTurnIdentity(parsed);");
   expect(guard).toBeGreaterThan(0);
   expect(runtime).toBeGreaterThan(guard);
-  const diagnostic = adapter.slice(guard, runtime);
+  const compactionBoundary = adapter.indexOf("if (parsed._compactionRequest)", guard);
+  expect(compactionBoundary).toBeGreaterThan(guard);
+  const diagnostic = adapter.slice(guard, compactionBoundary);
   expect(diagnostic).toContain("raw_declared_tools:");
   expect(diagnostic).toContain("additional_tool_count:");
   expect(diagnostic).not.toContain('code: "native_command_unavailable"');
