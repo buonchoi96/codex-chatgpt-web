@@ -384,9 +384,16 @@ function replayEvents(events: AdapterEvent[], emit: (event: AdapterEvent) => voi
   for (const event of events) emit(event);
 }
 
-function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
+export function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
   if (normalized instanceof ChatGptWebAdapterError) return normalized;
+  // A completed broker retirement can cancel the out-of-process browser with
+  // a generic AbortError. Preserve the authoritative, same-turn native-tool
+  // failure rather than incorrectly reporting that ChatGPT stopped responding.
+  // A missing retirement receipt or unrelated cancellation never qualifies.
+  const retirement = session.runtime.mode === "tools"
+    ? session.runtime.externalProgress.retirementCause() : undefined;
+  if (retirement instanceof ChatGptWebAdapterError) return retirement;
   const phase = session.runtime.submission?.phase;
   if (!phase || phase === "prepared") return normalized;
   const ambiguous = phase === "send_activated";

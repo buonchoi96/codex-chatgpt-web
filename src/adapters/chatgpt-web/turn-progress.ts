@@ -152,6 +152,11 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
     this.advance(now, "tool_result");
   }
 
+  /** Exact current-turn broker retirement, never inferred from DOM inactivity. */
+  retirementCause(): Error | undefined {
+    return this.retirementError;
+  }
+
   /** Retire every unresolved batch when the broker capability can no longer accept its result. */
   retire(error: Error): boolean {
     if (!(error instanceof Error)) throw new Error("ChatGPT external progress retirement requires an error");
