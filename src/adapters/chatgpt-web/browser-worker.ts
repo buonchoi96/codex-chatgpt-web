@@ -1454,6 +1454,9 @@ export interface ChatGptOwnedTurnLiveness {
   /** Independent page activity is NOT proof that its content belongs to this Send. */
   visibleStopCount: number;
   activeAssistantGroupCount: number;
+  /** Unique active assistant-only group key; identity alone does not grant tool execution. */
+  activeAssistantGroupKey?: string;
+  activeAssistantGroupCompletionVisible: boolean;
   userBubbleCount: number;
 }
 
@@ -1462,6 +1465,23 @@ export function chatGptDetachedAcceptedTurnMayStillBeRunning(probe: ChatGptOwned
   return (!probe.ownerPresent || !probe.assistantPresent)
     && probe.visibleStopCount === 1 && probe.activeAssistantGroupCount === 1
     && probe.userBubbleCount === 0;
+}
+
+/**
+ * An authenticated native tool batch is waiting on a pre-tool text boundary.
+ * The accepted anchor may be unmounted in Activity, but a single still-running
+ * group with no completion actions can be projected provisionally on the exact
+ * owned browser surface. Never treat this as completed output or a new Send.
+ */
+export function chatGptDetachedToolBoundaryCandidate(
+  probe: ChatGptOwnedTurnLiveness,
+  nativeToolBatchPending: boolean,
+): string | undefined {
+  if (!nativeToolBatchPending
+    || !chatGptDetachedAcceptedTurnMayStillBeRunning(probe)
+    || probe.activeAssistantGroupCompletionVisible) return undefined;
+  const key = probe.activeAssistantGroupKey;
+  return key && key.length > 0 && key.length <= 512 ? key : undefined;
 }
 
 /** An unacknowledged grouped assistant needs a newly visible paired user group. */
@@ -1503,15 +1523,23 @@ export async function probeChatGptOwnedTurnLiveness(
         return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
       };
       const visibleStopCount = [...document.querySelectorAll<HTMLElement>(stopSelector)].filter(visible).length;
-      const activeAssistantGroupCount = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
+      const activeGroups = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
         .filter(group => group.querySelector(
           '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
-        )).length;
+        ));
+      const activeAssistantGroupCount = activeGroups.length;
+      const uniqueGroup = activeGroups.length === 1 ? activeGroups[0] : undefined;
+      const activeAssistantGroupKey = uniqueGroup?.getAttribute('data-turn-key') || undefined;
+      const activeAssistantGroupCompletionVisible = uniqueGroup
+        ? [...uniqueGroup.querySelectorAll<HTMLElement>(completedSelector)].some(visible)
+        : false;
       const userBubbleCount = document.querySelectorAll('[data-user-message-bubble]').length;
       if (!owner) return {
         ownerPresent: false, assistantPresent: false, stopVisible: visibleStopCount > 0,
         completionActionVisible: false, assistantTextChars: 0,
-        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
+        visibleStopCount, activeAssistantGroupCount,
+        ...(activeAssistantGroupKey ? { activeAssistantGroupKey } : {}),
+        activeAssistantGroupCompletionVisible, userBubbleCount,
       };
       const assistant = grouped
         ? owner.querySelector<HTMLElement>(
@@ -1529,7 +1557,9 @@ export async function probeChatGptOwnedTurnLiveness(
         stopVisible,
         completionActionVisible,
         assistantTextChars: assistant?.textContent?.length ?? 0,
-        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
+        visibleStopCount, activeAssistantGroupCount,
+        ...(activeAssistantGroupKey ? { activeAssistantGroupKey } : {}),
+        activeAssistantGroupCompletionVisible, userBubbleCount,
       };
     }, {
       ownerSelector,
