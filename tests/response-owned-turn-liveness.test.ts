@@ -7,6 +7,7 @@ import {
   MAX_CHATGPT_BROWSER_PAGE_REBINDS,
   chatGptOwnedTurnStillGenerating,
   chatGptDetachedAcceptedTurnMayStillBeRunning,
+  chatGptDetachedToolBoundaryCandidate,
   chatGptAssistantBelongsToAcceptedUser,
   chatGptAssistantHasUserGroupEvidence,
   probeChatGptOwnedTurnLiveness,
@@ -210,4 +211,51 @@ test("generation-running receipt cannot claim an unpaired remounted assistant", 
   expect(chatGptAssistantHasUserGroupEvidence(
     "group:assistant:new-accepted-send", "legacy-user-turn",
   )).toBe(false);
+});
+
+test("authenticated detached tool boundary requires one unfinished assistant-only group", async () => {
+  const observation = await probeChatGptOwnedTurnLiveness(
+    probeFixture({ owner: false, detachedAssistant: true }), "group:assistant:accepted-01",
+  );
+  expect(observation.activeAssistantGroupKey).toBe("temporary-02");
+  expect(observation.activeAssistantGroupCompletionVisible).toBe(false);
+  expect(chatGptDetachedToolBoundaryCandidate(observation, false)).toBeUndefined();
+  expect(chatGptDetachedToolBoundaryCandidate(observation, true)).toBe("temporary-02");
+  const oldCompletedGroup = {
+    ...observation,
+    activeAssistantGroupCompletionVisible: true,
+  };
+  expect(chatGptDetachedToolBoundaryCandidate(oldCompletedGroup, true)).toBeUndefined();
+  expect(chatGptDetachedToolBoundaryCandidate({
+    ...observation, activeAssistantGroupCount: 2,
+  }, true)).toBeUndefined();
+  expect(chatGptDetachedToolBoundaryCandidate({
+    ...observation, userBubbleCount: 1,
+  }, true)).toBeUndefined();
+  expect(chatGptDetachedToolBoundaryCandidate({
+    ...observation, visibleStopCount: 0,
+  }, true)).toBeUndefined();
+  expect(chatGptDetachedToolBoundaryCandidate({
+    ...observation, activeAssistantGroupKey: undefined,
+  }, true)).toBeUndefined();
+});
+
+test("detached Activity path captures Markdown and authenticated tool revision before broker dispatch", () => {
+  const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8") as string;
+  const start = source.indexOf("const pending = turn.externalProgress?.snapshot();", source.indexOf("if (!snapshot.responsePresent) {", source.indexOf("let snapshot: ChatGptResponseDomSnapshot;")));
+  const end = source.indexOf("response_binding_detached_pending", start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const snippet = source.slice(start, end);
+  expect(snippet).toContain("completionTracker.needsToolBatchObservation");
+  expect(snippet).toContain("chatGptDetachedToolBoundaryCandidate(uncertain, pendingToolBoundary)");
+  expect(snippet).toContain("this.responseDomSnapshot(");
+  expect(snippet).toContain("chatGptDetachedToolBoundaryCandidate(verified, true) === transientKey");
+  const markdown = snippet.indexOf("markdownBuffer.observe(transientSnapshot.markdownSegments)");
+  const barrier = snippet.indexOf("completionTracker.observeToolBatch(pending.lastToolBatchRevision");
+  const ack = snippet.indexOf("turn.externalProgress.acknowledgeToolBatch(pending.lastToolBatchRevision)");
+  expect(markdown).toBeGreaterThan(0);
+  expect(barrier).toBeGreaterThan(markdown);
+  expect(ack).toBeGreaterThan(barrier);
+  expect(snippet).not.toMatch(/(?:sendAttachedPrompt|executeNativeTool|emitBrowserCompletion|chatGptStopButton)\(/);
 });
