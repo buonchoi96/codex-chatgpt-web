@@ -3649,11 +3649,18 @@ export class ChatGptBrowserWorker {
         completionTracker.observeToolBatch(progress.lastToolBatchRevision, boundaryText);
         await externalProgress.acknowledgeToolBatch(progress.lastToolBatchRevision);
       }
-      if (identity) return {
+      if (identity && chatGptAssistantBelongsToAcceptedUser(identity, observationBaseline.acceptedUserIdentity)) return {
         identity,
         locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
         acceptedTurnIdentities: state.turnIdentities,
       };
+      // A remounted older assistant can briefly look new while the accepted
+      // user bubble is hidden. Never bind its response to a verified different
+      // user key: keep waiting for the correct relationship.
+      if (identity && observationBaseline.acceptedUserIdentity
+        && !chatGptAssistantBelongsToAcceptedUser(identity, observationBaseline.acceptedUserIdentity)) {
+        console.info("[chatgpt-web] response_binding_waiting_for_accepted_user_group");
+      }
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
       // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
       if (state.visibleStopButtonCount > 0 || generation?.active()) {
@@ -3827,6 +3834,13 @@ export class ChatGptBrowserWorker {
     // validate every post-baseline user, even if its key appeared in that shell.
     const newUsers = state.userIdentities.filter(identity => baseline.acceptedUserIdentity
       ? !acceptedTurns.has(identity) : !baseline.initialTurnIdentities.includes(identity));
+    if (identity && identity !== binding.identity && newUsers.length === 0) {
+      // The accepted user is temporarily virtualized out of the Activity
+      // renderer. A different assistant group without its user proof is not
+      // a valid rebinding, regardless of the current global Stop button.
+      console.info("[chatgpt-web] response_binding_pending_user_proof");
+      return binding;
+    }
     if (newUsers.length > 0) {
       // Activity can unmount the accepted user group while it renders a temporary
       // assistant group. Its return must match the ID that acknowledged Send. If no
@@ -6891,9 +6905,11 @@ export class ChatGptBrowserWorker {
             // current Stop control, without performing another Send, Stop or replay.
             const owned = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
               .catch(() => undefined);
-            if (owned && chatGptOwnedTurnStillGenerating(owned)) {
+            if (owned && (chatGptOwnedTurnStillGenerating(owned)
+              || chatGptDetachedAcceptedTurnMayStillBeRunning(owned))) {
               console.info(`[chatgpt-web] response_projection_deferred trace=${turn.traceId}`
-                + ` owned=true stop=true textChars=${owned.assistantTextChars}`
+                + ` owned=${chatGptOwnedTurnStillGenerating(owned)} stop=true`
+                + ` groups=${owned.activeAssistantGroupCount} users=${owned.userBubbleCount}`
                 + ` projectionTimeoutMs=${CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS}`);
               // Keep the observer attached to the original accepted Send; its
               // termination still needs a full, journaled response projection.
@@ -6926,6 +6942,21 @@ export class ChatGptBrowserWorker {
           continue;
         }
         if (!snapshot.responsePresent) {
+          // The Activity renderer can remove the accepted user/assistant
+          // wrapper while showing one active assistant-only group. We may
+          // wait for the original relationship to remount, but MUST NOT
+          // claim that group as the native response or dispatch its tools.
+          const uncertain = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
+            .catch(() => undefined);
+          if (uncertain && chatGptDetachedAcceptedTurnMayStillBeRunning(uncertain)) {
+            console.info(`[chatgpt-web] response_binding_detached_pending trace=${turn.traceId}`
+              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`);
+            await withBrowserTurnAbort(
+              new Promise<void>(resolveSleep => setTimeout(resolveSleep, 1_000)),
+              turn.abortSignal,
+            );
+            continue;
+          }
           try {
             const rebound = await withChatGptBrowserObservationTimeout(
               this.reconcileAssistantTurnBinding(
