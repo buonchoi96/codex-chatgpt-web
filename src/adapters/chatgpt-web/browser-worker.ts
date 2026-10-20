@@ -4603,7 +4603,7 @@ export class ChatGptBrowserWorker {
       }
       await throwIfChatGptSessionFailureAlert(page);
       await throwIfChatGptTerminalErrorAlert(page.locator(chatGptTurnContainerSelector(responseTurn.identity)));
-      let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+      let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, responseTurn.identity);
       if (!snapshot.responsePresent && await responseTurn.locator.count() !== 1) {
         const rebound = await this.reconcileAssistantTurnBinding(
           page,
@@ -4615,7 +4615,7 @@ export class ChatGptBrowserWorker {
           responseTurn = rebound;
           responseDomCache.key = undefined;
           responseDomCache.snapshot = undefined;
-          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, responseTurn.identity);
         }
       }
       if (snapshot.stoppedThinkingVisible) throw chatGptStoppedThinkingError();
@@ -4915,8 +4915,19 @@ export class ChatGptBrowserWorker {
   private async responseDomSnapshot(
     responseTurn: Locator,
     cache?: ChatGptResponseDomCache,
+    assistantIdentity?: string,
   ): Promise<ChatGptResponseDomSnapshot> {
-    const observed = await responseTurn.evaluate((element, options) => {
+    // The strict assistant-turn binding has already admitted this immutable
+    // identity. Avoid re-running a descendant :has(...) locator against a
+    // huge saved conversation on every Markdown projection.
+    const projectionLocator = assistantIdentity?.startsWith("group:assistant:")
+      ? responseTurn.page().locator(chatGptTurnContainerSelector(assistantIdentity))
+      : responseTurn;
+    const observed = await projectionLocator.evaluate((element, options) => {
+      // A retained group wrapper alone cannot establish an assistant response.
+      if (options.requireOwnedAssistant && !(element as HTMLElement).querySelector(
+        '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
+      )) return undefined;
       const root = element as HTMLElement;
       type ObserverState = {
         id: number;
@@ -5536,6 +5547,7 @@ export class ChatGptBrowserWorker {
       stoppedThinkingLabels: [...CHATGPT_STOPPED_THINKING_LABELS],
       knownKey: cache?.key,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
+      requireOwnedAssistant: assistantIdentity?.startsWith("group:assistant:") === true,
     }, { timeout: CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS }).catch(error => {
       // A busy 500K-character conversation can stall Playwright's DOM projection.
       // A timeout is NOT evidence that the response was unmounted. Propagate it to
@@ -6824,7 +6836,7 @@ export class ChatGptBrowserWorker {
 
         let snapshot: ChatGptResponseDomSnapshot;
         try {
-          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, responseTurn.identity);
         } catch (error) {
           if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
           consecutiveObservationRebinds += 1;
@@ -6882,7 +6894,7 @@ export class ChatGptBrowserWorker {
               responseTurn = rebound;
               responseDomCache.key = undefined;
               responseDomCache.snapshot = undefined;
-              snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+              snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, responseTurn.identity);
             }
           } catch (error) {
             if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
