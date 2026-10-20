@@ -61,3 +61,33 @@ test("both finalization paths journal the exact missing suffix before Responses 
   expect(tail).toBeGreaterThan(0);
   expect(done).toBeGreaterThan(tail);
 });
+
+
+test("tool-capable finalization refreshes the immutable final replay snapshot after the late answer suffix", () => {
+  const { ChatGptTurnSession } = require("../src/adapters/chatgpt-web/turn-execution");
+  const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/index.ts", "utf8") as string;
+  const from = source.indexOf("const finishBrowserOutcome =");
+  const to = source.indexOf("const waitForTrace =", from);
+  expect(from).toBeGreaterThan(0);
+  expect(to).toBeGreaterThan(from);
+  const finalizer = source.slice(from, to);
+  const tail = finalizer.indexOf("const missingTail = pendingJournaledFinalAnswerSuffix(");
+  const refresh = finalizer.lastIndexOf("session.setFinalEvents(session.roundEvents(roundKey))");
+  const terminal = finalizer.indexOf("emitRoundBatch(buffer => emitBrowserCompletion(", tail);
+  expect(tail).toBeGreaterThan(0);
+  expect(refresh).toBeGreaterThan(tail);
+  expect(terminal).toBeGreaterThan(refresh);
+
+  // The real session clones final replay events, so a snapshot taken before
+  // the last line is stale until it is explicitly refreshed.
+  const session = Object.create(ChatGptTurnSession.prototype);
+  session.rounds = new Map();
+  session.appendRoundEvent("round-1", { type: "text_delta", phase: "final_answer", text: "First line.\\n" });
+  session.setFinalEvents(session.roundEvents("round-1"));
+  session.appendRoundEvent("round-1", { type: "text_delta", phase: "final_answer", text: "Final goal: PURSUING.\\n" });
+  expect(session.eventsForFinalReplay().map((event: { text?: string }) => event.text ?? "").join(""))
+    .toBe("First line.\\n");
+  session.setFinalEvents(session.roundEvents("round-1"));
+  expect(session.eventsForFinalReplay().map((event: { text?: string }) => event.text ?? "").join(""))
+    .toBe("First line.\\nFinal goal: PURSUING.\\n");
+});
