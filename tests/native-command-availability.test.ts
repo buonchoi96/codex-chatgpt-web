@@ -34,17 +34,22 @@ test("tool-capable prompts warn about absent native commands without blocking in
   const token = "turn_12345678901234567890123456789012";
   const missing = compileChatGptWebPrompt(parsed, caps, token).text;
   expect(missing).toContain("CURRENT NATIVE COMMAND PREFLIGHT:");
-  expect(missing).toContain("Do not invoke codex_exec or codex_parallel_exec");
+  expect(missing).toContain("Do not call the command-running MCP operations");
   parsed.context.tools = [tool("exec", { freeform: true })];
   expect(compileChatGptWebPrompt(parsed, caps, token).text).not.toContain("CURRENT NATIVE COMMAND PREFLIGHT:");
 });
 
-test("missing native command metadata fails closed before the browser and never dispatches a command", () => {
+test("missing native commands never abort the whole browser turn, but fail before command dispatch", () => {
   const adapter = readFileSync("src/adapters/chatgpt-web/index.ts", "utf8");
-  const guard = adapter.indexOf("const surface = nativeCommandSurface(environment.tools);");
+  const guard = adapter.indexOf("&& !nativeCommandSurface(environment.tools)");
   const runtime = adapter.indexOf("const nativeIdentity = extractChatGptTurnIdentity(parsed);");
   expect(guard).toBeGreaterThan(0);
   expect(runtime).toBeGreaterThan(guard);
+  const diagnostic = adapter.slice(guard, runtime);
+  expect(diagnostic).toContain("raw_declared_tools:");
+  expect(diagnostic).toContain("additional_tool_count:");
+  expect(diagnostic).not.toContain('code: "native_command_unavailable"');
+  expect(diagnostic).not.toContain('emit({');
   const server = readFileSync("src/adapters/chatgpt-web/mcp-server.ts", "utf8");
   const command = server.indexOf("const { cmd, workdir, yield_time_ms");
   const gateway = server.indexOf("const gateway = execGateway(bound);", command);

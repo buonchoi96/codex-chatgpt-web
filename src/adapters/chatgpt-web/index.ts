@@ -1124,25 +1124,30 @@ export function createChatGptWebAdapter(
             throw error;
           }
         }
-        // A connected Full MCP plugin is not proof of a native command capability.
-        // Detect completely missing tool catalogs before submitting a browser task;
-        // never borrow command authority from another turn or retry a prior command.
-        if (mode.localTools && !manualRequest && !parsed._compactionRequest && environment) {
-          const surface = nativeCommandSurface(environment.tools);
-          if (!surface) {
-            console.warn(`[chatgpt-web] native_command_surface_missing tools=${environment.tools.length}`);
-            if (environment.tools.length === 0) {
-              emit({
-                type: "error",
-                message: "The current Codex turn advertised no native tools. No ChatGPT browser task or local command was dispatched. Reconnect the Full Codex harness and start a fresh Codex turn.",
-                status: 503,
-                errorType: "server_error",
-                code: "native_command_unavailable",
-                retryable: false,
-              });
-              return;
-            }
-          }
+        // A native compaction continuation can omit command declarations even when
+        // the task still has a valid browser/turn owner. A missing command surface
+        // must NOT abort the entire browser turn or prevent steering/finalization.
+        // Native command admission remains enforced at the MCP dispatch boundary.
+        if (mode.localTools && !manualRequest && !parsed._compactionRequest && environment
+          && !nativeCommandSurface(environment.tools)) {
+          const rawBody = parsed._rawBody;
+          const raw = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+            ? rawBody as Record<string, unknown> : {};
+          const input = Array.isArray(raw.input) ? raw.input : [];
+          const additionalToolItems = input.filter(item =>
+            item !== null && typeof item === "object" && !Array.isArray(item)
+            && (item as { type?: unknown }).type === "additional_tools");
+          console.warn("[chatgpt-web] native_command_surface_missing " + JSON.stringify({
+            parsed_tools: environment.tools.length,
+            raw_declared_tools: Array.isArray(raw.tools) ? raw.tools.length : null,
+            additional_tool_items: additionalToolItems.length,
+            additional_tool_count: additionalToolItems.reduce((count, item) => {
+              const tools = (item as { tools?: unknown }).tools;
+              return count + (Array.isArray(tools) ? tools.length : 0);
+            }, 0),
+            previous_response_id: typeof raw.previous_response_id === "string",
+            replay_prefix_items: parsed._replayPrefixLen ?? 0,
+          }));
         }
         if (parsed._compactionRequest) {
           // This preflight also protects callers that invoke the adapter without the HTTP route.

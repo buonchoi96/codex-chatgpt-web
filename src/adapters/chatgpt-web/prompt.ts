@@ -580,7 +580,7 @@ export function compileChatGptWebPrompt(
     ? [
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
       ...(!manualControl && !nativeCommandSurface(parsed.context.tools) ? [
-        "CURRENT NATIVE COMMAND PREFLIGHT: This Codex turn has not advertised exec_command, shell_command, or the freeform exec gateway. Do not invoke codex_exec or codex_parallel_exec. Other independently advertised tools may still be used for their documented purposes, but never substitute an unverified command interface or reuse one from another turn. If local commands are required, report that they were not dispatched and that the Full Codex harness must be reconnected for a fresh turn.",
+        "CURRENT NATIVE COMMAND PREFLIGHT: No native command interface is declared for this exact Codex turn. Do not call the command-running MCP operations. Independently declared tools remain available for their documented purposes. Never invent a missing command interface, reuse another turn's authority, or retry a previously dispatched command. If the task requires new local commands, report that command execution is unavailable in this turn.",
       ] : []),
       "These tools are connected by the user to their Codex runtime; local actions execute on that runtime's device under its configured sandbox and approval rules. Assess each action by its actual effects and the user's authorization; an authenticated connection does not make every action low risk.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",

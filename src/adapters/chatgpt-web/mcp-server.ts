@@ -945,7 +945,7 @@ export async function createChatGptMcpServer(options: {
             retryable: false,
             command_dispatched: false,
             advertised_tool_count: bound.tools.length,
-            message: "This Codex turn did not advertise exec_command, shell_command, or a freeform exec gateway. No command was dispatched. Reconnect the Full Codex harness and start a fresh Codex turn; do not replay this command or substitute another tool in this response.",
+            message: "This Codex turn did not advertise exec_command, shell_command, or a freeform exec gateway. No command was dispatched. Do not reuse previous-turn command authority or substitute another tool. Continue only with capabilities independently declared in this turn.",
           }, true);
         }
         commandDispatched=true;
