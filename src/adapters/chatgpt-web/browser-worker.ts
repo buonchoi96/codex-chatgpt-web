@@ -1464,6 +1464,16 @@ export function chatGptDetachedAcceptedTurnMayStillBeRunning(probe: ChatGptOwned
     && probe.userBubbleCount === 0;
 }
 
+/** An unacknowledged grouped assistant needs a newly visible paired user group. */
+export function chatGptAssistantHasUserGroupEvidence(
+  assistantIdentity: string,
+  candidateUserIdentity?: string,
+): boolean {
+  return !assistantIdentity.startsWith("group:assistant:")
+    || (Boolean(candidateUserIdentity)
+      && chatGptAssistantBelongsToAcceptedUser(assistantIdentity, candidateUserIdentity));
+}
+
 /** Compare stable grouped roles only; legacy turn IDs have their own validation path. */
 export function chatGptAssistantBelongsToAcceptedUser(
   assistantIdentity: string,
@@ -3649,16 +3659,18 @@ export class ChatGptBrowserWorker {
         completionTracker.observeToolBatch(progress.lastToolBatchRevision, boundaryText);
         await externalProgress.acknowledgeToolBatch(progress.lastToolBatchRevision);
       }
-      if (identity && chatGptAssistantBelongsToAcceptedUser(identity, observationBaseline.acceptedUserIdentity)) return {
+      // A generation-running receipt can precede the accepted user bubble.
+      // A remounted older answer must not be selected as this new response.
+      // Require its paired user key from the accepted evidence or a fresh
+      // post-baseline user identity; never infer owner from Stop alone.
+      const candidateUser = observationBaseline.acceptedUserIdentity
+        ?? chatGptNewTurnIdentity(observationBaseline.initialTurnIdentities, state.userIdentities);
+      if (identity && chatGptAssistantHasUserGroupEvidence(identity, candidateUser)) return {
         identity,
         locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
         acceptedTurnIdentities: state.turnIdentities,
       };
-      // A remounted older assistant can briefly look new while the accepted
-      // user bubble is hidden. Never bind its response to a verified different
-      // user key: keep waiting for the correct relationship.
-      if (identity && observationBaseline.acceptedUserIdentity
-        && !chatGptAssistantBelongsToAcceptedUser(identity, observationBaseline.acceptedUserIdentity)) {
+      if (identity) {
         console.info("[chatgpt-web] response_binding_waiting_for_accepted_user_group");
       }
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
