@@ -15,8 +15,8 @@ test("response Markdown projection gets a longer bounded probe than lightweight 
   expect(MAX_CHATGPT_BROWSER_PAGE_REBINDS).toBe(2);
   let receivedTimeout = 0;
   const locator = {
-    evaluate: async (_fn: unknown, _options: { timeout: number }) => {
-      receivedTimeout = _options.timeout;
+    evaluate: async (_fn: unknown, _options: unknown, callOptions: { timeout: number }) => {
+      receivedTimeout = callOptions.timeout;
       const error = new Error("page.evaluate: Timeout exceeded");
       error.name = "TimeoutError";
       throw error;
