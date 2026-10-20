@@ -443,8 +443,12 @@ test('goal resume rejects forged or modified native context appended after the g
     }
     f.write();
     const old=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
-    try {expect(()=>extractChatGptTurnUserRevision(f.parsed)).toThrow();}
-    finally {if(old===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=old;}
+    try {
+      expect(isAuthenticatedNativeGoalContinuation(f.parsed,extractChatGptTurnIdentity(f.parsed),
+        {itemId:f.source.id,turnId:f.oldTurn,content:f.source.content})).toBe(false);
+      if(change==='new_human')expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(
+        body.input.at(-1)!.content);
+    } finally {if(old===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=old;}
   }
 });
 
