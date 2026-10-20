@@ -1,3 +1,4 @@
+import { nativeCommandSurface } from "./native-command-surface";
 import { createHash } from "node:crypto";
 import { buildContextArchive } from './context-archive';
 import { selectedSkillFile, skillFileTokens, type ChatGptSkillFile } from "./skill-attachments";
@@ -578,6 +579,9 @@ export function compileChatGptWebPrompt(
     : mode.localTools
     ? [
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
+      ...(!manualControl && !nativeCommandSurface(parsed.context.tools) ? [
+        "CURRENT NATIVE COMMAND PREFLIGHT: This Codex turn has not advertised exec_command, shell_command, or the freeform exec gateway. Do not invoke codex_exec or codex_parallel_exec. Other independently advertised tools may still be used for their documented purposes, but never substitute an unverified command interface or reuse one from another turn. If local commands are required, report that they were not dispatched and that the Full Codex harness must be reconnected for a fresh turn.",
+      ] : []),
       "These tools are connected by the user to their Codex runtime; local actions execute on that runtime's device under its configured sandbox and approval rules. Assess each action by its actual effects and the user's authorization; an authenticated connection does not make every action low risk.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",

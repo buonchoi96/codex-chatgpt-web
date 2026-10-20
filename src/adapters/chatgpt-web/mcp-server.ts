@@ -937,7 +937,16 @@ export async function createChatGptMcpServer(options: {
         }
         const gateway = execGateway(bound);
         if (!gateway) {
-          throw new Error("This Codex turn did not advertise a native command tool or the native exec gateway");
+          // Capability absence is not a failed or uncertain command execution.
+          // Never dispatch through a different transport or retain an unused command slot.
+          console.warn(`[chatgpt-web-mcp] native_command_unavailable scope=${requestScopeSummary(extra)} advertised_tools=${bound.tools.length}`);
+          return result({
+            code: "native_command_unavailable",
+            retryable: false,
+            command_dispatched: false,
+            advertised_tool_count: bound.tools.length,
+            message: "This Codex turn did not advertise exec_command, shell_command, or a freeform exec gateway. No command was dispatched. Reconnect the Full Codex harness and start a fresh Codex turn; do not replay this command or substitute another tool in this response.",
+          }, true);
         }
         commandDispatched=true;
         const response=await invoke(claimed.bindingId, bound, gateway, {

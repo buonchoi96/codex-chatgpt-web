@@ -59,6 +59,7 @@ import { passiveRecoveryCheckpointInstruction } from './native-compaction-contro
 import { createSameTabRecoveryDelta } from './same-tab-recovery-policy';
 import { awaitFinalBrokerRetirement, pendingJournaledFinalAnswerSuffix } from './finalization-gate';
 import {LiveSteering} from './live-steering';
+import { nativeCommandSurface } from './native-command-surface';
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
   const configured = provider.chatgptWeb?.brokerSocketPath?.trim();
@@ -1121,6 +1122,26 @@ export function createChatGptWebAdapter(
               `[chatgpt-web] trusted environment unavailable (thread_id=${identity.threadId ? "present" : "missing"}, turn_id=${identity.turnId ? "present" : "missing"}, previous_response_id=${parsed.previousResponseId ?? "none"}, replay_prefix_items=${parsed._replayPrefixLen ?? 0}, context_messages=${parsed.context.messages.length})`,
             );
             throw error;
+          }
+        }
+        // A connected Full MCP plugin is not proof of a native command capability.
+        // Detect completely missing tool catalogs before submitting a browser task;
+        // never borrow command authority from another turn or retry a prior command.
+        if (mode.localTools && !manualRequest && !parsed._compactionRequest && environment) {
+          const surface = nativeCommandSurface(environment.tools);
+          if (!surface) {
+            console.warn(`[chatgpt-web] native_command_surface_missing tools=${environment.tools.length}`);
+            if (environment.tools.length === 0) {
+              emit({
+                type: "error",
+                message: "The current Codex turn advertised no native tools. No ChatGPT browser task or local command was dispatched. Reconnect the Full Codex harness and start a fresh Codex turn.",
+                status: 503,
+                errorType: "server_error",
+                code: "native_command_unavailable",
+                retryable: false,
+              });
+              return;
+            }
           }
         }
         if (parsed._compactionRequest) {
