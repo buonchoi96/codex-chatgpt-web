@@ -1745,6 +1745,10 @@ export function createChatGptWebAdapter(
                   console.warn(`[chatgpt-web] final_answer_journal_tail trace=${traceId} chars=${missingTail.length}`);
                   emitRoundBatch(buffer => emitTextDeltas([missingTail], buffer));
                 }
+                // setFinalEvents clones the array. A pre-retirement snapshot omits
+                // any late accepted final-answer suffix journaled above. Refresh it
+                // before terminal so a reconnect replays the *complete* final text.
+                session.setFinalEvents(session.roundEvents(roundKey));
                 console.info(`[chatgpt-web] finalization trace=${traceId} stage=final_answer_journal_verified chars=${completedOutcome.answer.length}`);
                 emitRoundBatch(buffer => emitBrowserCompletion(
                   completedOutcome,
