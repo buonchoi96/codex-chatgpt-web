@@ -1438,6 +1438,69 @@ export async function connectAfterClosingBrowserConnection<T>(
   return connect();
 }
 
+/**
+ * Lightweight, single-document DOM liveness evidence for the exact accepted
+ * assistant turn. The complete Markdown/trace projection may exhaust its CDP
+ * timeout on a huge saved conversation even though the model is still running.
+ * A global Stop button alone is NOT ownership proof: both the same stored turn
+ * container and an assistant subtree must still be present.
+ */
+export interface ChatGptOwnedTurnLiveness {
+  ownerPresent: boolean;
+  assistantPresent: boolean;
+  stopVisible: boolean;
+  completionActionVisible: boolean;
+  assistantTextChars: number;
+}
+
+export function chatGptOwnedTurnStillGenerating(probe: ChatGptOwnedTurnLiveness): boolean {
+  return probe.ownerPresent && probe.assistantPresent && probe.stopVisible;
+}
+
+export async function probeChatGptOwnedTurnLiveness(
+  page: Page,
+  assistantIdentity: string,
+): Promise<ChatGptOwnedTurnLiveness> {
+  const ownerSelector = chatGptTurnContainerSelector(assistantIdentity);
+  return withChatGptBrowserObservationTimeout(
+    page.evaluate(({ ownerSelector, grouped, stopSelector, completedSelector }) => {
+      const owner = document.querySelector<HTMLElement>(ownerSelector);
+      if (!owner) return {
+        ownerPresent: false, assistantPresent: false, stopVisible: false,
+        completionActionVisible: false, assistantTextChars: 0,
+      };
+      const assistant = grouped
+        ? owner.querySelector<HTMLElement>(
+          '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
+        )
+        : (owner.matches('[data-message-author-role="assistant"], [data-turn="assistant"]')
+          ? owner : owner.querySelector<HTMLElement>(
+            '[data-message-author-role="assistant"], [data-conversation-role="assistant"], .markdown',
+          ));
+      const visible = (node: HTMLElement): boolean => {
+        if (!node.isConnected || node.hidden) return false;
+        const style = getComputedStyle(node);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      };
+      const stopVisible = [...document.querySelectorAll<HTMLElement>(stopSelector)].some(visible);
+      const completionActionVisible = [...owner.querySelectorAll<HTMLElement>(completedSelector)].some(visible);
+      return {
+        ownerPresent: true,
+        assistantPresent: Boolean(assistant),
+        stopVisible,
+        completionActionVisible,
+        assistantTextChars: assistant?.textContent?.length ?? 0,
+      };
+    }, {
+      ownerSelector,
+      grouped: assistantIdentity.startsWith('group:assistant:'),
+      stopSelector: CHATGPT_STOP_BUTTON_SELECTOR,
+      completedSelector: CHATGPT_COMPLETION_ACTION_SELECTOR,
+    }),
+    CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS,
+  );
+}
+
 export const CHATGPT_MIN_OPERATIONAL_VIEWPORT = Object.freeze({ width: 320, height: 240 });
 
 async function waitForOperationalChatGptViewport(
@@ -6766,8 +6829,26 @@ export class ChatGptBrowserWorker {
           if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
           consecutiveObservationRebinds += 1;
           if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS) {
+            // A saturated full Markdown/trace projection is NOT evidence the accepted
+            // turn has stopped. Query only the immutable owned turn container and
+            // current Stop control, without performing another Send, Stop or replay.
+            const owned = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
+              .catch(() => undefined);
+            if (owned && chatGptOwnedTurnStillGenerating(owned)) {
+              console.info(`[chatgpt-web] response_projection_deferred trace=${turn.traceId}`
+                + ` owned=true stop=true textChars=${owned.assistantTextChars}`
+                + ` projectionTimeoutMs=${CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS}`);
+              // Keep the observer attached to the original accepted Send; its
+              // termination still needs a full, journaled response projection.
+              // No synthetic response.completed or error is issued while it runs.
+              await withBrowserTurnAbort(
+                new Promise<void>(resolveSleep => setTimeout(resolveSleep, 1_000)),
+                turn.abortSignal,
+              );
+              continue;
+            }
             throw new Error(
-              `ChatGPT response observation remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-surface rebinds`,
+              `ChatGPT response observation remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-surface rebinds and no owned active-generation evidence`,
               { cause: error },
             );
           }
