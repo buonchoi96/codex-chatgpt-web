@@ -89,7 +89,7 @@ test("v1 compaction bounds dense Unicode retained history by tokenizer tokens, n
   expect(estimateTokens(retained)).toBeLessThanOrEqual(COMPACT_V1_RETAINED_TOKEN_BUDGET);
   expect(output.at(-1)!.content).toEqual([{
     type: "input_text",
-    text: `${SUMMARY_PREFIX}\\nEvidence-preserving summary`,
+    text: `${SUMMARY_PREFIX}\nEvidence-preserving summary`,
   }]);
 });
 
@@ -103,5 +103,5 @@ test("v1 compaction counts multiple human messages against one shared token budg
     sum + (item.content as Array<{text?: string}>).reduce((subtotal, block) =>
       subtotal + estimateTokens(block.text ?? ""), 0), 0);
   expect(retainedTokens).toBeLessThanOrEqual(COMPACT_V1_RETAINED_TOKEN_BUDGET);
-  expect(output.at(-1)!.content).toEqual([{ type: "input_text", text: `${SUMMARY_PREFIX}\\nCheckpoint` }]);
+  expect(output.at(-1)!.content).toEqual([{ type: "input_text", text: `${SUMMARY_PREFIX}\nCheckpoint` }]);
 });
