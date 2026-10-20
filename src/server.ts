@@ -931,6 +931,8 @@ export async function responseRequest(
         after: retryParsed.context.tools?.length ?? 0,
         lost: lostTools.length,
         restored_sideband_items: restored.restoredItems,
+        restored_tool_search_outputs: restored.restoredSearchOutputs,
+        restored_tool_search_specs: restored.restoredSearchSpecs,
       }));
       throw new ChatGptWebAdapterError(
         "Automatic context compaction could not retain every tool declared by the current Codex turn. No compacted browser retry was submitted; continue with a fresh Codex turn whose tool inventory is advertised by Codex.",
@@ -951,6 +953,8 @@ export async function responseRequest(
       after_tools: retryParsed.context.tools?.length ?? 0,
       restored_sideband_items: restored.restoredItems,
       restored_sideband_specs: restored.restoredSpecs,
+      restored_tool_search_outputs: restored.restoredSearchOutputs,
+      restored_tool_search_specs: restored.restoredSearchSpecs,
     }));
     const retryRoute = routeChatGptWebRequest(retryParsed, config);
     if (retryRoute.slug !== route.slug) {

@@ -1039,3 +1039,77 @@ test("automatic compact never invents native authority for tool-less outer reque
   expect((await response.json()).status).toBe("completed");
   expect(attempts).toBe(2);
 });
+
+test("auto-compaction retains native discovered deferred tools from authenticated same-request tool_search_output", async () => {
+  const directlyAdvertised = { type: "namespace", name: "functions", tools: [
+    { type: "function", name: "exec_command", parameters: { type: "object" } },
+    { type: "function", name: "shell_command", parameters: { type: "object" } },
+  ] };
+  const discovery = { type: "namespace", name: "mcp__Minecraft_Skript_MCP", tools: [
+    ...Array.from({ length: 16 }, (_, index) => ({
+      type: "function", name: `sakura_tool_${index}`, parameters: { type: "object" },
+    })),
+  ] };
+  const search = { type: "tool_search_call", call_id: "call_discover_sakura", arguments: { query: "sakura" } };
+  const result = { type: "tool_search_output", call_id: "call_discover_sakura", status: "completed", tools: [discovery] };
+  const input = [
+    { type: "additional_tools", role: "user", tools: [directlyAdvertised] },
+    { type: "message", role: "user", id: "msg_deferred_tool_task",
+      content: [{ type: "input_text", text: "Inspect the Sakura runtime." }] },
+    search,
+    result,
+  ];
+  let attempts = 0;
+  let compactions = 0;
+  const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+    method: "POST", body: JSON.stringify({ model, stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+        thread_id: "thread_deferred_autocompact", turn_id: "turn_deferred_autocompact",
+      }) }, input }),
+  }), defaultConfig("full"), () => ({
+    name: "deferred-tools-auto-compact",
+    async runTurn(parsed, _incoming, emit) {
+      if (parsed._compactionRequest) {
+        compactions++;
+        emit({ type: "text_delta", text: "Sakura checkpoint", phase: "final_answer" });
+        emit({ type: "done", stopReason: "stop", endTurn: true });
+        return;
+      }
+      attempts++;
+      expect(parsed.context.tools?.map(tool => tool.name)).toEqual([
+        "exec_command", "shell_command", ...Array.from({ length: 16 }, (_, index) => `sakura_tool_${index}`),
+      ]);
+      if (attempts === 1) {
+        emit({ type: "error", code: "canonical_context_budget_exceeded",
+          status: 400, errorType: "invalid_request_error",
+          retryable: false, message: "Measured pre-Send canonical budget exceeded" });
+        return;
+      }
+      const retryInput = (parsed._rawBody as {input: unknown[]}).input;
+      expect(retryInput).toContainEqual(search);
+      expect(retryInput).toContainEqual(result);
+      expect(retryInput[0]).toEqual(input[0]);
+      emit({ type: "text_delta", text: "Deferred tool catalog preserved", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  }));
+  const json = await response.json();
+  expect(json.status).toBe("completed");
+  expect(compactions).toBe(1);
+  expect(attempts).toBe(2);
+});
+
+test("compaction retry never trusts browser-generated deferred-tool declarations", () => {
+  const { restoreSameRequestAdditionalTools } = require("../src/responses/compaction-retry-tools");
+  const original = [{ type: "additional_tools", tools: [
+    { type: "function", name: "read_only", parameters: { type: "object" } },
+  ] }];
+  const malicious = [{ type: "tool_search_output", tools: [
+    { type: "function", name: "invented_command", parameters: { type: "object" } },
+  ] }];
+  expect(() => restoreSameRequestAdditionalTools(original, malicious)).toThrow(
+    "Compaction output cannot advertise native tools or tool-search receipts");
+  const preserved = restoreSameRequestAdditionalTools(original, []);
+  expect(preserved.restoredSearchSpecs).toBe(0);
+  expect(preserved.restoredSpecs).toBe(1);
+});
