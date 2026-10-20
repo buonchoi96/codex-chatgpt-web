@@ -8,6 +8,7 @@ import {
   chatGptOwnedTurnStillGenerating,
   chatGptDetachedAcceptedTurnMayStillBeRunning,
   chatGptAssistantBelongsToAcceptedUser,
+  chatGptAssistantHasUserGroupEvidence,
   probeChatGptOwnedTurnLiveness,
 } from "../src/adapters/chatgpt-web/browser-worker";
 
@@ -193,4 +194,17 @@ test("detached active response handling runs before unverified rebinding", () =>
   expect(reconcile).toBeGreaterThan(pending);
   expect(source).toContain("response_binding_pending_user_proof");
   expect(source).toContain("response_binding_waiting_for_accepted_user_group");
+});
+
+test("generation-running receipt cannot claim an unpaired remounted assistant", () => {
+  expect(chatGptAssistantHasUserGroupEvidence(
+    "group:assistant:old-completed-answer", undefined,
+  )).toBe(false);
+  expect(chatGptAssistantHasUserGroupEvidence(
+    "group:assistant:old-completed-answer", "group:user:new-accepted-send",
+  )).toBe(false);
+  expect(chatGptAssistantHasUserGroupEvidence(
+    "group:assistant:new-accepted-send", "group:user:new-accepted-send",
+  )).toBe(true);
+  expect(chatGptAssistantHasUserGroupEvidence("legacy-assistant-turn", undefined)).toBe(true);
 });
