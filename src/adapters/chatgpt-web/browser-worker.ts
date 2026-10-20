@@ -1451,6 +1451,38 @@ export interface ChatGptOwnedTurnLiveness {
   stopVisible: boolean;
   completionActionVisible: boolean;
   assistantTextChars: number;
+  /** Independent page activity is NOT proof that its content belongs to this Send. */
+  visibleStopCount: number;
+  activeAssistantGroupCount: number;
+  userBubbleCount: number;
+}
+
+/** Do not kill the accepted Send just because its Activity renderer replaced its group. */
+export function chatGptDetachedAcceptedTurnMayStillBeRunning(probe: ChatGptOwnedTurnLiveness): boolean {
+  return (!probe.ownerPresent || !probe.assistantPresent)
+    && probe.visibleStopCount === 1 && probe.activeAssistantGroupCount === 1
+    && probe.userBubbleCount === 0;
+}
+
+/** An unacknowledged grouped assistant needs a newly visible paired user group. */
+export function chatGptAssistantHasUserGroupEvidence(
+  assistantIdentity: string,
+  candidateUserIdentity?: string,
+): boolean {
+  return !assistantIdentity.startsWith("group:assistant:")
+    || (candidateUserIdentity?.startsWith("group:user:") === true
+      && chatGptAssistantBelongsToAcceptedUser(assistantIdentity, candidateUserIdentity));
+}
+
+/** Compare stable grouped roles only; legacy turn IDs have their own validation path. */
+export function chatGptAssistantBelongsToAcceptedUser(
+  assistantIdentity: string,
+  acceptedUserIdentity?: string,
+): boolean {
+  if (!acceptedUserIdentity || !acceptedUserIdentity.startsWith("group:user:")
+    || !assistantIdentity.startsWith("group:assistant:")) return true;
+  return assistantIdentity.slice("group:assistant:".length)
+    === acceptedUserIdentity.slice("group:user:".length);
 }
 
 export function chatGptOwnedTurnStillGenerating(probe: ChatGptOwnedTurnLiveness): boolean {
@@ -1465,9 +1497,21 @@ export async function probeChatGptOwnedTurnLiveness(
   return withChatGptBrowserObservationTimeout(
     page.evaluate(({ ownerSelector, grouped, stopSelector, completedSelector }) => {
       const owner = document.querySelector<HTMLElement>(ownerSelector);
+      const visible = (node: HTMLElement): boolean => {
+        if (!node.isConnected || node.hidden) return false;
+        const style = getComputedStyle(node);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      };
+      const visibleStopCount = [...document.querySelectorAll<HTMLElement>(stopSelector)].filter(visible).length;
+      const activeAssistantGroupCount = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')]
+        .filter(group => group.querySelector(
+          '[data-conversation-role="assistant"], [data-chatgpt-agent-turn-start]',
+        )).length;
+      const userBubbleCount = document.querySelectorAll('[data-user-message-bubble]').length;
       if (!owner) return {
-        ownerPresent: false, assistantPresent: false, stopVisible: false,
+        ownerPresent: false, assistantPresent: false, stopVisible: visibleStopCount > 0,
         completionActionVisible: false, assistantTextChars: 0,
+        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
       };
       const assistant = grouped
         ? owner.querySelector<HTMLElement>(
@@ -1477,12 +1521,7 @@ export async function probeChatGptOwnedTurnLiveness(
           ? owner : owner.querySelector<HTMLElement>(
             '[data-message-author-role="assistant"], [data-conversation-role="assistant"], .markdown',
           ));
-      const visible = (node: HTMLElement): boolean => {
-        if (!node.isConnected || node.hidden) return false;
-        const style = getComputedStyle(node);
-        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-      };
-      const stopVisible = [...document.querySelectorAll<HTMLElement>(stopSelector)].some(visible);
+      const stopVisible = visibleStopCount > 0;
       const completionActionVisible = [...owner.querySelectorAll<HTMLElement>(completedSelector)].some(visible);
       return {
         ownerPresent: true,
@@ -1490,6 +1529,7 @@ export async function probeChatGptOwnedTurnLiveness(
         stopVisible,
         completionActionVisible,
         assistantTextChars: assistant?.textContent?.length ?? 0,
+        visibleStopCount, activeAssistantGroupCount, userBubbleCount,
       };
     }, {
       ownerSelector,
@@ -3619,11 +3659,20 @@ export class ChatGptBrowserWorker {
         completionTracker.observeToolBatch(progress.lastToolBatchRevision, boundaryText);
         await externalProgress.acknowledgeToolBatch(progress.lastToolBatchRevision);
       }
-      if (identity) return {
+      // A generation-running receipt can precede the accepted user bubble.
+      // A remounted older answer must not be selected as this new response.
+      // Require its paired user key from the accepted evidence or a fresh
+      // post-baseline user identity; never infer owner from Stop alone.
+      const candidateUser = observationBaseline.acceptedUserIdentity
+        ?? chatGptNewTurnIdentity(observationBaseline.initialTurnIdentities, state.userIdentities);
+      if (identity && chatGptAssistantHasUserGroupEvidence(identity, candidateUser)) return {
         identity,
         locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
         acceptedTurnIdentities: state.turnIdentities,
       };
+      if (identity) {
+        console.info("[chatgpt-web] response_binding_waiting_for_accepted_user_group");
+      }
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
       // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
       if (state.visibleStopButtonCount > 0 || generation?.active()) {
@@ -3797,6 +3846,13 @@ export class ChatGptBrowserWorker {
     // validate every post-baseline user, even if its key appeared in that shell.
     const newUsers = state.userIdentities.filter(identity => baseline.acceptedUserIdentity
       ? !acceptedTurns.has(identity) : !baseline.initialTurnIdentities.includes(identity));
+    if (identity && identity !== binding.identity && newUsers.length === 0) {
+      // The accepted user is temporarily virtualized out of the Activity
+      // renderer. A different assistant group without its user proof is not
+      // a valid rebinding, regardless of the current global Stop button.
+      console.info("[chatgpt-web] response_binding_pending_user_proof");
+      return binding;
+    }
     if (newUsers.length > 0) {
       // Activity can unmount the accepted user group while it renders a temporary
       // assistant group. Its return must match the ID that acknowledged Send. If no
@@ -4920,8 +4976,23 @@ export class ChatGptBrowserWorker {
     // The strict assistant-turn binding has already admitted this immutable
     // identity. Avoid re-running a descendant :has(...) locator against a
     // huge saved conversation on every Markdown projection.
-    const projectionLocator = assistantIdentity?.startsWith("group:assistant:")
-      ? responseTurn.page().locator(chatGptTurnContainerSelector(assistantIdentity))
+    const grouped = assistantIdentity?.startsWith("group:assistant:") === true;
+    if (grouped) {
+      // A missing data-turn-key makes locator.evaluate wait for its full 20s
+      // timeout. Activity can unmount that key while ChatGPT still has a
+      // live assistant group. A cheap DOM query distinguishes this from a
+      // slow Markdown serializer; do not return a cached, stale answer.
+      const ownership = await probeChatGptOwnedTurnLiveness(responseTurn.page(), assistantIdentity!);
+      if (!ownership.ownerPresent || !ownership.assistantPresent) {
+        if (cache) {
+          cache.key = undefined;
+          cache.snapshot = undefined;
+        }
+        return absentResponseDomSnapshot();
+      }
+    }
+    const projectionLocator = grouped
+      ? responseTurn.page().locator(chatGptTurnContainerSelector(assistantIdentity!))
       : responseTurn;
     const observed = await projectionLocator.evaluate((element, options) => {
       // A retained group wrapper alone cannot establish an assistant response.
@@ -6846,9 +6917,11 @@ export class ChatGptBrowserWorker {
             // current Stop control, without performing another Send, Stop or replay.
             const owned = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
               .catch(() => undefined);
-            if (owned && chatGptOwnedTurnStillGenerating(owned)) {
+            if (owned && (chatGptOwnedTurnStillGenerating(owned)
+              || chatGptDetachedAcceptedTurnMayStillBeRunning(owned))) {
               console.info(`[chatgpt-web] response_projection_deferred trace=${turn.traceId}`
-                + ` owned=true stop=true textChars=${owned.assistantTextChars}`
+                + ` owned=${chatGptOwnedTurnStillGenerating(owned)} stop=true`
+                + ` groups=${owned.activeAssistantGroupCount} users=${owned.userBubbleCount}`
                 + ` projectionTimeoutMs=${CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS}`);
               // Keep the observer attached to the original accepted Send; its
               // termination still needs a full, journaled response projection.
@@ -6881,6 +6954,21 @@ export class ChatGptBrowserWorker {
           continue;
         }
         if (!snapshot.responsePresent) {
+          // The Activity renderer can remove the accepted user/assistant
+          // wrapper while showing one active assistant-only group. We may
+          // wait for the original relationship to remount, but MUST NOT
+          // claim that group as the native response or dispatch its tools.
+          const uncertain = await probeChatGptOwnedTurnLiveness(page, responseTurn.identity)
+            .catch(() => undefined);
+          if (uncertain && chatGptDetachedAcceptedTurnMayStillBeRunning(uncertain)) {
+            console.info(`[chatgpt-web] response_binding_detached_pending trace=${turn.traceId}`
+              + ` stop=${uncertain.visibleStopCount} groups=${uncertain.activeAssistantGroupCount}`);
+            await withBrowserTurnAbort(
+              new Promise<void>(resolveSleep => setTimeout(resolveSleep, 1_000)),
+              turn.abortSignal,
+            );
+            continue;
+          }
           try {
             const rebound = await withChatGptBrowserObservationTimeout(
               this.reconcileAssistantTurnBinding(
