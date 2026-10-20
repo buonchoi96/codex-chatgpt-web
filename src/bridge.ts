@@ -182,9 +182,20 @@ export function bridgeToResponsesSSE(
           const terminal = name === "response.completed"
             || name === "response.incomplete" || name === "response.failed";
           const frame = sseEvent(name, { type: name, sequence_number: seq++, ...data });
-          // The last protocol event and [DONE] share a single physical enqueue.
-          // Existing clients still parse two distinct SSE records in order.
-          controller.enqueue(encoder.encode(terminal ? frame + "data: [DONE]\n\n" : frame));
+          // A terminal response includes the *entire* finished output. On Windows,
+          // its encoded frame can exceed 250 KB (observed 2.3 MB), where Bun's
+          // HTTP tee can finish after response.completed but before [DONE].
+          // Bound each physical enqueue without changing any protocol bytes.
+          // The final chunk still contains the completed frame's tail and
+          // the complete [DONE] marker together.
+          const encoded = encoder.encode(terminal ? frame + "data: [DONE]\n\n" : frame);
+          if (terminal && encoded.byteLength > 32 * 1024) {
+            for (let offset = 0; offset < encoded.byteLength; offset += 32 * 1024) {
+              controller.enqueue(encoded.subarray(offset, Math.min(encoded.byteLength, offset + 32 * 1024)));
+            }
+          } else {
+            controller.enqueue(encoded);
+          }
           emittedFrames++;
           if (terminal) {
             terminalFrameEnqueued = true;
