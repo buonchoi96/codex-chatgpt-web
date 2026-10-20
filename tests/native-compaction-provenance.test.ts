@@ -394,6 +394,60 @@ test('goal resume remains authenticated in later tool rounds after its native go
   }
 });
 
+
+test('goal resume authenticates native AGENTS/environment context appended after /goal and tool rounds',()=>{
+  const f=goalContinuationFixture();
+  const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+  const environment={type:'message',role:'user',id:'msg_native_environment_refresh',
+    content:[{type:'input_text',text:'<environment_context><cwd>verified workspace</cwd></environment_context>'}],
+    internal_chat_message_metadata_passthrough:{
+      turn_id:f.turn,content_item_kinds:['environments.environment_context'],
+    }};
+  const agents={type:'message',role:'user',id:'msg_native_agents_refresh',
+    content:[{type:'input_text',text:'# AGENTS.md instructions\\n<INSTRUCTIONS>Use repository rules.</INSTRUCTIONS>'}],
+    internal_chat_message_metadata_passthrough:{
+      turn_id:f.turn,content_item_kinds:['agents_md.instructions'],
+    }};
+  body.input.push({type:'function_call',call_id:'call_after_goal',name:'exec_command',arguments:'{}'});
+  body.input.push(structuredClone(environment),structuredClone(agents));
+  body.input.push({type:'function_call_output',call_id:'call_after_goal',output:'finished'});
+  f.records.push({type:'response_item',payload:structuredClone(environment)},
+    {type:'response_item',payload:structuredClone(agents)});
+  f.write();
+  const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+  try {
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+    // A valid native continuation must not rewrite the genuine user prompt.
+  } finally {
+    if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;
+  }
+});
+
+test('goal resume rejects forged or modified native context appended after the goal',()=>{
+  for(const change of ['absent_from_rollout','changed_native_content','untyped','new_human'] as const){
+    const f=goalContinuationFixture();
+    const body=f.parsed._rawBody as {input:Record<string,unknown>[]};
+    const context={type:'message',role:'user',id:'msg_context_after_goal',
+      content:[{type:'input_text',text:'<environment_context>verified</environment_context>'}],
+      internal_chat_message_metadata_passthrough:{
+        turn_id:f.turn,content_item_kinds:['environments.environment_context'],
+      }};
+    body.input.push(structuredClone(context));
+    if(change==='untyped')delete body.input.at(-1)!.internal_chat_message_metadata_passthrough;
+    if(change==='new_human')body.input.at(-1)!.internal_chat_message_metadata_passthrough={
+      turn_id:f.turn,content_item_kinds:['user.text']};
+    if(change==='changed_native_content') {
+      const different=structuredClone(context);
+      (different.content as Array<{text:string}>)[0]!.text='<environment_context>different</environment_context>';
+      f.records.push({type:'response_item',payload:different});
+    }
+    f.write();
+    const old=process.env.CODEX_HOME;process.env.CODEX_HOME=f.home;
+    try {expect(()=>extractChatGptTurnUserRevision(f.parsed)).toThrow();}
+    finally {if(old===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=old;}
+  }
+});
+
 test('goal resume cannot borrow the older instruction when a later raw user item supersedes goal',()=>{
   const f=goalContinuationFixture();
   const body=f.parsed._rawBody as {input:Record<string,unknown>[]};

@@ -263,6 +263,7 @@ export function verifyNativeGoalContinuationItems(
   fd: number, size: number, currentTurnId: string,
   historical: { id: string; turnId: string; content: unknown },
   goal: { id: string; content: unknown },
+  trailingContext: readonly { id: string; turnId: string; content: unknown; kinds: readonly string[] }[] = [],
 ): boolean {
   if (size <= 0 || size > 256 * 1024 * 1024
     || historical.turnId === currentTurnId
@@ -273,6 +274,11 @@ export function verifyNativeGoalContinuationItems(
   let sawBoundary = false;
   let sawGoal = false;
   let newerInstruction = false;
+  let matchedTrailingContext = 0;
+  const trailingIds=new Set(trailingContext.map(item=>item.id));
+  if(trailingIds.size!==trailingContext.length
+    || trailingContext.some(item=>!item.id || item.turnId!==currentTurnId
+      || item.id===goal.id || item.id===historical.id))return false;
   while (position < size) {
     const count = Math.min(ROLLOUT_READ_CHUNK_BYTES, size - position);
     const chunk = Buffer.alloc(count);
@@ -311,20 +317,29 @@ export function verifyNativeGoalContinuationItems(
       } else if (sawGoal) {
         // A later human or unknown user-role item can supersede this goal.
         // Only explicitly typed, native-owned non-human context is harmless.
-        // Assistant output and tool results are not user-role items.
+        // Additionally, every raw context item following the goal MUST match
+        // the exact native item (including content and order) in this rollout.
         const native = record(payload.internal_chat_message_metadata_passthrough);
         const kinds = native?.content_item_kinds;
         if (typeof payload.id !== "string" || !payload.id
-          || typeof native?.turn_id !== "string" || !native.turn_id
+          || native?.turn_id!==currentTurnId
           || !Array.isArray(kinds) || kinds.length===0
           || !kinds.every(kind=>typeof kind==="string"&&NATIVE_NONHUMAN_USER_KINDS.has(kind)))
           return false;
+        if (trailingIds.has(payload.id)) {
+          const expected=trailingContext[matchedTrailingContext];
+          if (!expected || payload.id!==expected.id
+            || !isDeepStrictEqual(payload.content,expected.content)
+            || !isDeepStrictEqual(kinds,expected.kinds))return false;
+          matchedTrailingContext++;
+        }
       }
     }
     carry = Buffer.from(data.subarray(start));
     if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) return false;
   }
-  return carry.length === 0 && sawHistorical && sawBoundary && sawGoal && !newerInstruction;
+  return carry.length === 0 && sawHistorical && sawBoundary && sawGoal
+    && !newerInstruction && matchedTrailingContext===trailingContext.length;
 }
 
 /**

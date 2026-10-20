@@ -108,17 +108,31 @@ export function isAuthenticatedNativeGoalContinuation(
   });
   if(goalItems.length!==1)return false;
   const {item:goal,index:goalIndex}=goalItems[0]!;
-  // Any later native user message in the request is a competing instruction,
-  // unless its exact non-human nature is established independently. Do not
-  // silently promote an old human instruction past newer user input.
-  if(input.slice(goalIndex+1).some(value=>{
+  // New Codex rounds may append native AGENTS/environment/open-page context
+  // *after* a /goal anchor. Such items are not human instructions, but their
+  // raw metadata alone does not establish provenance. Bind each one to the
+  // matching exact native response_item below; unknown user items still veto.
+  const nativeContextKinds=new Set([
+    'agents_md.instructions',
+    'environments.environment_context',
+    'additional_content.codex_apps_open_page',
+  ]);
+  const trailingContext: Array<{id:string;turnId:string;content:unknown;kinds:string[]}>=[];
+  for(const value of input.slice(goalIndex+1)){
     const item=record(value);
-    return item?.type==='message'&&item.role==='user';
-  }))return false;
+    if(item?.type!=='message'||item.role!=='user')continue;
+    const metadata=record(item.internal_chat_message_metadata_passthrough);
+    const kinds=metadata?.content_item_kinds;
+    if(!boundedString(item.id)||metadata?.turn_id!==identity.turnId
+      || !Array.isArray(kinds)||kinds.length===0
+      || !kinds.every(kind=>typeof kind==='string'&&nativeContextKinds.has(kind)))return false;
+    trailingContext.push({id:item.id,turnId:identity.turnId,content:item.content,kinds});
+  }
   console.info('[chatgpt-web] native_goal_continuation_candidate '+JSON.stringify({
-    implementation:'goal-anchor-with-trailing-tool-rounds-v1',
+    implementation:'goal-anchor-with-trailing-context-proof-v2',
     goalNotLast:goalIndex<input.length-1,
     trailingItems:Math.min(input.length-goalIndex-1,100000),
+    trailingNativeContext:trailingContext.length,
   }));
   const lineage=extractChatGptThreadSpawnLineage(parsed)??extractChatGptRootThreadMetadata(parsed);
   if(!lineage || lineage.threadId!==identity.threadId)return false;
@@ -133,7 +147,7 @@ export function isAuthenticatedNativeGoalContinuation(
         || (parsed.options.reasoning!==undefined && turn.effort!==parsed.options.reasoning))return false;
       return verifyNativeGoalContinuationItems(fd,size,identity.turnId!,{
         id:historical.itemId!,turnId:historical.turnId!,content:historical.content,
-      },{id:goal.id as string,content:goal.content});
+      },{id:goal.id as string,content:goal.content},trailingContext);
     }) === true;
   } catch {
     return false;
