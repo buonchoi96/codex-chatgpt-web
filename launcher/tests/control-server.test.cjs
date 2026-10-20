@@ -548,6 +548,79 @@ test("manual control rejects session inspection before any browser helper can ru
   }
 });
 
+test("session inspection records client disconnection while the host inspection remains pending", async () => {
+  const events = [];
+  let notifyStarted;
+  let finishInspection;
+  let notifyDisconnected;
+  let notifyFinished;
+  const started = new Promise(resolve => { notifyStarted = resolve; });
+  const inspection = new Promise(resolve => { finishInspection = resolve; });
+  const disconnected = new Promise(resolve => { notifyDisconnected = resolve; });
+  const finished = new Promise(resolve => { notifyFinished = resolve; });
+  const logger = {
+    info(event, detail) {
+      events.push({ event, detail });
+      if (event === "browser.session_inspection_finished") notifyFinished();
+    },
+    warn(event, detail) {
+      events.push({ event, detail });
+      if (event === "browser.session_inspection_client_disconnected") notifyDisconnected();
+      if (event === "browser.session_inspection_finished") notifyFinished();
+    },
+    error() {},
+  };
+  const server = await new BrowserControlServer({
+    logger,
+    getPreferences: () => ({}),
+    getBrowserHost: () => ({
+      browserInteractionMode: () => "automatic",
+      inspectSession() { notifyStarted(); return inspection; },
+    }),
+  }).start();
+  const { endpoint, token } = server.descriptor();
+  const controller = new AbortController();
+  const resolveHost = () => finishInspection({ authenticated: true, temporary: true, url: "https://chatgpt.com/" });
+  try {
+    const request = fetch(`${endpoint}/v1/session/inspect`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ detectCapabilities: false }),
+      signal: controller.signal,
+    });
+    const aborted = assert.rejects(request, { name: "AbortError" });
+    await started;
+    controller.abort();
+    await aborted;
+    let deadline;
+    try {
+      await Promise.race([
+        disconnected,
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(new Error("disconnect telemetry was not emitted")), 1500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+    }
+    resolveHost();
+    await finished;
+    const begin = events.find(item => item.event === "browser.session_inspection_started");
+    const clientGone = events.find(item => item.event === "browser.session_inspection_client_disconnected");
+    const end = events.find(item => item.event === "browser.session_inspection_finished");
+    assert.equal(begin?.detail?.detectCapabilities, false);
+    assert.equal(clientGone?.detail?.clientDisconnected, true);
+    assert.equal(end?.detail?.status, "success");
+    assert.equal(end?.detail?.clientDisconnected, true);
+    assert.ok(Number.isFinite(end?.detail?.elapsedMs));
+    assert.ok(end.detail.elapsedMs >= 0);
+    assert.equal(JSON.stringify(events).includes("https://chatgpt.com/"), false);
+  } finally {
+    resolveHost();
+    await server.close();
+  }
+});
+
 test("manual-to-automatic transaction exposes capability inspection and preserves tabs on rollback", async () => {
   const retained = { id: "manual-ready", status: "ready", interactionMode: "manual" };
   const removed = [];

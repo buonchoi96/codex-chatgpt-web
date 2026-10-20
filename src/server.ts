@@ -929,7 +929,8 @@ export async function responseRequest(
             if (!activeParsed._compactionRequest
               && event.type === "error"
               && (event.code === "browser_prompt_too_long"
-                || event.code === "message_length_exceeds_limit")) {
+                || event.code === "message_length_exceeds_limit"
+                || event.code === "canonical_context_budget_exceeded")) {
               promptTooLong = event;
               return;
             }

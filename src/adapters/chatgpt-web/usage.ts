@@ -99,7 +99,8 @@ export function resolveBiggerContextMultipartParts(
     try {
       return compile(parts);
     } catch (error) {
-      if (error instanceof ChatGptWebAdapterError && error.code === "context_transport_unsupported") return undefined;
+      if (error instanceof ChatGptWebAdapterError
+        && (error.code === "context_transport_unsupported" || error.code === "canonical_context_budget_exceeded")) return undefined;
       throw error;
     }
   };

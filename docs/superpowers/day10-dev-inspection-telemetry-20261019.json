@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-19",
+  "goal_status": "ACTIVE",
+  "goal_original_path": "C:/Users/Long-PC/Documents/GOAL.md",
+  "goal_current_read": "MISSING_ON_FRESH_READ",
+  "web_branch": "main",
+  "web_head_at_start": "7dcce114784fba4f3b1d7a3b7b635cdac6061e27",
+  "swift_head_at_start": "30d3fe4570761943464947894a4e1e0b863b3574",
+  "previous_dev_receipt": "docs/superpowers/day10-zip-dev-followup-20261019.json",
+  "incident": {
+    "first_turn": "Genuine DEV Web response accepted, INLINE, exactly one Send",
+    "followup": "Failed before Send: session inspection timed out after 30000ms",
+    "last_historical_launcher_event": "2026-10-18T17:49:34Z browser.turn_ended with retained tab",
+    "client_inspection_timeout_ms": 30000,
+    "launcher_helper_timeout_ms": 90000,
+    "root_cause": "UNCONFIRMED",
+    "missing_evidence": "No prior Launcher session-inspection start/end/disconnect telemetry"
+  },
+  "implementation": {
+    "source": "launcher/electron/control-server.cjs",
+    "regression": "launcher/tests/control-server.test.cjs",
+    "scope": "Authenticated session-inspection boundary only, with response-close observation, terminal outcome timing, and destroyed-response guard",
+    "events": [
+      "browser.session_inspection_started",
+      "browser.session_inspection_client_disconnected",
+      "browser.session_inspection_finished"
+    ],
+    "privacy": "Session URLs, authorization tokens and browser page contents are omitted from new telemetry"
+  },
+  "verification": {
+    "red": "Focused regression 0 PASS / 1 FAIL: disconnect telemetry was not emitted",
+    "green": "Focused regression 1 PASS / 0 FAIL",
+    "targeted_suites": "153 PASS / 0 FAIL / 0 SKIP across control-server, browser-host and browser-helper-verifier tests",
+    "launcher_typecheck": "PASS, exit 0",
+    "git_diff_check": "PASS, exit 0",
+    "native_or_web_live_acceptance": "NOT_RUN; modified source was not loaded into the running DEV Launcher"
+  },
+  "constraints": {
+    "subagents_spawned": 0,
+    "production_or_dev_process_mutations": 0,
+    "config_mutations": 0,
+    "git_reference_mutations": 0,
+    "pending_scoped_safety_operations": 23,
+    "visible_scoped_safety_operations": 20,
+    "unread_scoped_safety_operations": 3,
+    "native_safety_review_available": false,
+    "safety_refused_retries": 0
+  },
+  "requirement_counts": {
+    "PASS": 5,
+    "PARTIAL": 140,
+    "BLOCKED": 12,
+    "NOT RUN": 18,
+    "total": 175,
+    "status_upgrades": 0
+  },
+  "next_step": "After authorized isolated DEV lifecycle verification, use new telemetry to distinguish control-route absence, client disconnect, helper timeout and actual terminal inspection; only then attempt a fresh retained follow-up with independent Send and ZIP evidence"
+}

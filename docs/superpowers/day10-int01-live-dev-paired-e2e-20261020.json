@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "requirement": "INT-01",
+  "status": "PARTIAL",
+  "scope": "Single newly-created, isolated DEV Full-mode browser turn, paired read-only production state snapshots",
+  "base_head": "2d91881021f877f896343e13c7ce981631cd683a",
+  "dev_execution": {
+    "chat_name": "int01-prod-isolation-e2e-20261020-c",
+    "preflight": "fresh disposable name absent from prior DEV chat list; separate DEV config purpose dev-harness and connector Codex Native2 DEV verified",
+    "model": "chatgpt-web/gpt-6-sol",
+    "trace_id": "2b61141963d8",
+    "transport_choice": "INLINE",
+    "composer_chars": 7127,
+    "composer_char_limit": 500000,
+    "measured_message_tokens": 1440,
+    "accepted_send_count": 1,
+    "prepared_zip": false,
+    "native_connector_required": true,
+    "final_answer": "DEV ISOLATED OK",
+    "exit_code": 0,
+    "browser_outcome": "final",
+    "submission": "accepted",
+    "broker_completion_committed": true,
+    "pending_tools_on_retirement": 0,
+    "tools_mode": "DEV simulation; no real external tool mutations",
+    "codex_route": "untouched by DEV",
+    "responses_listener": "not opened by DEV",
+    "verified_new_chat_turn": true
+  },
+  "production_before": {
+    "utc": "2026-10-19T19:04:48.2587228Z",
+    "config_sha256": "2E111F8DFA8C7AC9E6B52379B0EE022AA83F2E2A1D29903D7D7E0479F3D1BC79",
+    "browser_descriptor_sha256": "D6A6CFC0020FFF4E6D93BE6D8F1F3FB9A096A679928C3EDD4F6BFBD155287DA6",
+    "supervisor_sha256": "02BA4ADDA256D4383899A6CA35BE7DA493CA5C2DC36D3C5B1B6BFBCA5974FBBD",
+    "retained_proofs_sha256": "211746E8102EA667E1E1F07804A9CA9020978E79FE4CCCFEEC6FCA5B8240DEB6",
+    "launcher_pid": 19368,
+    "launcher_started_utc": "2026-10-19T15:47:38.5622894Z",
+    "responses_listener_pid": 12296,
+    "health": "ok",
+    "accepting_turns": true
+  },
+  "production_after": {
+    "utc": "2026-10-19T19:06:33.9434425Z",
+    "config_sha256": "2E111F8DFA8C7AC9E6B52379B0EE022AA83F2E2A1D29903D7D7E0479F3D1BC79",
+    "browser_descriptor_sha256": "3EFD307715623E502C94A5409D4E3F449461895F370D8EA6859A816F3D86807F",
+    "supervisor_sha256": "02BA4ADDA256D4383899A6CA35BE7DA493CA5C2DC36D3C5B1B6BFBCA5974FBBD",
+    "retained_proofs_sha256": "211746E8102EA667E1E1F07804A9CA9020978E79FE4CCCFEEC6FCA5B8240DEB6",
+    "launcher_pid": 19368,
+    "launcher_started_utc": "2026-10-19T15:47:38.5622894Z",
+    "responses_listener_pid": 12296,
+    "health": "ok",
+    "accepting_turns": true
+  },
+  "independent_later_observation": {
+    "browser_descriptor_sha256": "D1DE5DDFD16F69DDB79DA261CEA1CF4051FDA763BC343B8BF00D5A75D5012817",
+    "browser_descriptor_modified_utc": "2026-10-19T19:07:51.7091111Z",
+    "descriptor_profile": "production",
+    "descriptor_launcher_pid": 19368,
+    "note": "Another change observed after DEV ended; this is not evidence of which process wrote either change"
+  },
+  "read_only_source_reconciliation": {
+    "production_path_source": "launcher/electron/main.cjs: LAUNCHER_PROFILE.coreHome/runtime/launcher-browser.json",
+    "dev_path_source": "src/dev-chat/profile.ts: isolated DEV home/runtime/launcher-browser.json; rejects production-home reuse",
+    "descriptor_write_source": "launcher/electron/browser-host.cjs: BrowserHost.writeDescriptor calls writePrivateFileAtomic(this.descriptorPath,...)",
+    "source_descriptor_timestamp": "writeDescriptor sets createdAt from new Date on each write; a changed descriptor hash alone is not proof of cross-profile access",
+    "source_write_occurrences": "Multiple own-browser lifecycle paths invoke writeDescriptor; actual writer PID for the two observed changes has not been independently captured",
+    "limits": "Static code ownership is not an audited Windows file-write trace of the active process"
+  },
+  "conclusions": {
+    "real_dev_browser_message_accepted_once": true,
+    "dev_connector_and_inline_first_turn": "VERIFIED for this single small DEV turn; broader transport matrix remains open",
+    "production_config_supervisor_proofs_stable": true,
+    "production_launcher_and_responses_processes_stable": true,
+    "production_browser_descriptor_stable": false,
+    "production_browser_unchanged": "NOT PROVEN: production descriptor changed during the test window",
+    "writer_of_production_descriptor_changes": "UNVERIFIED; concurrent production activity may exist",
+    "int01_full_pass": "NOT PROVEN; retain PARTIAL",
+    "production_restored_or_restarted_by_this_test": false,
+    "safety_blocked_observe_calls_retried": 0,
+    "subagents_spawned": 0
+  },
+  "requirement_counts": {
+    "PASS": 8,
+    "PARTIAL": 138,
+    "BLOCKED": 12,
+    "NOT RUN": 17,
+    "total": 175
+  }
+}

@@ -57,7 +57,7 @@ import { retainedConversationProofs } from './retained-followup-proof';
 import { EnhancedRecoveryCheckpointStore, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS } from './enhanced-recovery-checkpoint';
 import { passiveRecoveryCheckpointInstruction } from './native-compaction-control';
 import { createSameTabRecoveryDelta } from './same-tab-recovery-policy';
-import { awaitFinalBrokerRetirement } from './finalization-gate';
+import { awaitFinalBrokerRetirement, pendingJournaledFinalAnswerSuffix } from './finalization-gate';
 import {LiveSteering} from './live-steering';
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
@@ -844,7 +844,10 @@ export function createChatGptWebAdapter(
         ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
         capabilities: turnCapabilities,
         prepare: () => prepareWith(checkpointInput.parsed),
-        ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput) } : {}),
+        ...(resumeInput ? {
+          prepareResume: () => prepareWith(resumeInput),
+          requireRetainedConversation: true,
+        } : {}),
         ...(steering?{
           steering,
           prepareRecovery:async(request?:{steering?:boolean})=>{
@@ -966,7 +969,10 @@ export function createChatGptWebAdapter(
       ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
       capabilities: turnCapabilities,
       prepare: () => prepareWith(checkpointInput.parsed),
-      ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput) } : {}),
+      ...(resumeInput ? {
+        prepareResume: () => prepareWith(resumeInput),
+        requireRetainedConversation: true,
+      } : {}),
       ...(prepareRecovery ? { prepareRecovery } : {}),
       ...(steering&&broker.pauseForSteering?{steering,onSteeringSubmitted:(id:string)=>steering.acknowledge(id)}:{}),
       ...(retainConversation ? { retainConversation: true, conversationKey } : {}),
@@ -1531,6 +1537,13 @@ export function createChatGptWebAdapter(
               if (bufferStructuredOutput) {
                 emitRoundBatch(buffer => emitTextDeltas([settled.answer], buffer));
               }
+              const missingTail = pendingJournaledFinalAnswerSuffix(session.roundEvents(roundKey), settled.answer);
+              if (missingTail) {
+                // A drained feed is not a durable Responses delta. Journal this exact
+                // suffix before the terminal event; no second browser Send is permitted.
+                console.warn(`[chatgpt-web] final_answer_journal_tail trace=${traceId} chars=${missingTail.length}`);
+                emitRoundBatch(buffer => emitTextDeltas([missingTail], buffer));
+              }
               const reasoning = session.roundReasoning(roundKey);
               session.setFinalReasoning(reasoning);
               session.setFinalEvents(session.roundEvents(roundKey));
@@ -1723,6 +1736,16 @@ export function createChatGptWebAdapter(
                 if (bufferStructuredOutput) {
                   emitRoundBatch(buffer => emitTextDeltas([completedOutcome.answer], buffer));
                 }
+                const missingTail = pendingJournaledFinalAnswerSuffix(
+                  session.roundEvents(roundKey), completedOutcome.answer,
+                );
+                if (missingTail) {
+                  // Preserve an accepted final line that was drained by the helper
+                  // but not yet journaled as final_answer on this HTTP round.
+                  console.warn(`[chatgpt-web] final_answer_journal_tail trace=${traceId} chars=${missingTail.length}`);
+                  emitRoundBatch(buffer => emitTextDeltas([missingTail], buffer));
+                }
+                console.info(`[chatgpt-web] finalization trace=${traceId} stage=final_answer_journal_verified chars=${completedOutcome.answer.length}`);
                 emitRoundBatch(buffer => emitBrowserCompletion(
                   completedOutcome,
                   estimateChatGptWebUsage(currentUsageInput(parsed), { answer: completedOutcome.answer, reasoning: roundReasoning }, turnCapabilities, experimentalBiggerContext, experimentalSkillAttachments),

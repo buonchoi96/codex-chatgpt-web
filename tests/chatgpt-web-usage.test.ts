@@ -7,6 +7,7 @@ import { assertChatGptWebMultipartInputWithinLimits, resolveChatGptWebMultipartS
 import { estimateTokens } from "../src/lib/token-estimate";
 import type { CodexParsedRequest } from "../src/types";
 import { resolveChatGptWebMessageTokenBudget, resolveChatGptWebStagingTokenBudget } from "../src/chatgpt-web-models";
+import { ChatGptWebAdapterError } from "../src/adapters/chatgpt-web/adapter-error";
 
 const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true };
 
@@ -60,6 +61,13 @@ test("measurement reports oversized canonical history while ordinary prompt comp
   }));
 
   expect(() => compileChatGptWebPrompt(parsed, capabilities)).toThrow(/canonical context requires \d+ tokens, exceeding the measured account budget/);
+  try {
+    compileChatGptWebPrompt(parsed, capabilities);
+    throw new Error("Expected oversized canonical history to be blocked");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ChatGptWebAdapterError);
+    expect((error as ChatGptWebAdapterError).code).toBe("canonical_context_budget_exceeded");
+  }
   expect(estimateChatGptWebInputTokens(parsed, capabilities)).toBeGreaterThanOrEqual(258_400);
 });
 

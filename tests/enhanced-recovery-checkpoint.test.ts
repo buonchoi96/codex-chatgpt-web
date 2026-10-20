@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { CodexMessage, CodexParsedRequest } from "../src/types";
 import {
   EnhancedRecoveryCheckpointStore,
+  ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS,
+  ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS,
 } from "../src/adapters/chatgpt-web/enhanced-recovery-checkpoint";
 import { CompactionTransactionStore } from "../src/adapters/chatgpt-web/compaction-transaction";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
@@ -282,4 +284,18 @@ test("a wrong-model recovery checkpoint remains unavailable after adding multipl
   expect(new EnhancedRecoveryCheckpointStore(path).apply(
     parsed(completeHistory(), {modelId:"gpt-6-sol",_chatgptModelFamily:"6"}),
   ).reason).toContain("model identity mismatch");
+});
+
+test("passive transport checkpoint thresholds retain early headroom independently of native compact", () => {
+  expect(ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS).toBe(8_000);
+  expect(ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS).toBe(32_000);
+  expect(ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS)
+    .toBeLessThan(ENHANCED_RECOVERY_CHECKPOINT_CANONICAL_WARNING_TOKENS);
+  const root = mkdtempSync(join(tmpdir(), "early-transport-recovery-"));
+  roots.push(root);
+  const store = new EnhancedRecoveryCheckpointStore(join(root, "checkpoints.json"));
+  const admission = store.checkpointAdmission(parsed(completeHistory()), 1);
+  expect(admission.due).toBe(true);
+  expect(admission.reason).toBe("ready");
+  expect(admission.prefixLength).toBe(0);
 });

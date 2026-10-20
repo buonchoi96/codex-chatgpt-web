@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "main_head_observed": "6147eaffa74f90f6260864f4e9c50ba38749de4f",
+  "scope": "Independent headless Chromium with owned local DOM fixture; no authenticated ChatGPT outage or production browser operation",
+  "browser_executable": "Installed Playwright Chromium headless shell 1234 in local user cache",
+  "fixture": "tests/fixtures/same-tab-recovery.html",
+  "test_file": "tests/same-tab-recovery-dom.test.ts",
+  "command": "CHATGPT_DOM_TEST_BROWSER=<installed headless-shell executable> bun test tests/same-tab-recovery-dom.test.ts",
+  "test_result": {
+    "pass": 4,
+    "fail": 0,
+    "skip": 0,
+    "assertions": 35,
+    "browser_launch": "real isolated headless Chromium",
+    "owner": "fixture-only"
+  },
+  "new_test": {
+    "name": "visible semantic progress and an active native command suppress Stop and Send on the owned DOM",
+    "red_watchdog_started_ms": 0,
+    "answer_text_changed_ms": 59999,
+    "native_work_began_ms": 119998,
+    "native_work_still_running_ms": 240000,
+    "native_work_settled_ms": 240001,
+    "recovery_result": "waiting",
+    "stop_count": 0,
+    "send_count": 0
+  },
+  "existing_tests_activated": {
+    "REC-00A": "Red Retry boundary 59999/60000ms, no premature Stop; same-tab one continuation, no ZIP",
+    "REC-00B": "Interrupted network boundary 179999/180000ms, no premature Stop; same-tab one continuation, no ZIP",
+    "REC-00C": "New real DOM semantic content update resets watchdog and simulated native-in-flight interval suspends Stop"
+  },
+  "other_fixture_gate": "Committed answer reconciled without Stop or Send",
+  "separate_targeted_tests": "240 PASS / 3 SKIP / 0 FAIL before enabling Chromium fixture; the three previously skipped DOM tests passed when explicitly enabled",
+  "typecheck": "bun run typecheck PASS",
+  "acceptance_scope_remaining": "Actual integrated authorized DEV/native Web error banner, real in-flight MCP/approval, Stop settlement and retained same-tab continuation still NOT RUN. No synthetic test is a claim about the live browser endpoint.",
+  "matrix_changes": {
+    "REC-00A": "NOT RUN -> PARTIAL",
+    "REC-00B": "NOT RUN -> PARTIAL",
+    "REC-00C": "NOT RUN -> PARTIAL",
+    "all_REC_live_acceptance": "NOT PROVEN"
+  },
+  "counts_after": {
+    "PASS": 8,
+    "PARTIAL": 141,
+    "BLOCKED": 12,
+    "NOT RUN": 14,
+    "total": 175
+  },
+  "production_effects": 0,
+  "subagents_spawned": 0,
+  "historical_safety_unresolved": 23,
+  "historical_safety_unread": 3
+}

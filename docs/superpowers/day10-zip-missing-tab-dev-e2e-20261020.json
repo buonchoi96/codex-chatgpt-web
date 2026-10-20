@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-20",
+  "goal_status": "ACTIVE",
+  "acceptance_id": "ZIP-03",
+  "acceptance_status": "PASS",
+  "scope": "Isolated DEV lost-tab refusal with verified retained canonical ancestry; companion invalid-proof canonical ZIP rebuild",
+  "goal_source": {
+    "path": "C:/Users/Long-PC/Documents/GOAL.md",
+    "exists": true,
+    "bytes": 69296,
+    "sha256": "C58F7B41A0DF7BDF7FC15DBD1F1C56FE876B3782A9A0E182BF307199BC0B7087"
+  },
+  "web_head": "2d91881021f877f896343e13c7ce981631cd683a",
+  "dev_conversation": "day10-zip-missing-tab-proof-20261020-b",
+  "preflight": {
+    "state_turns": 1,
+    "state_items": 3,
+    "canonical_messages": 5,
+    "retained_proof": "verified",
+    "conversation_key_prefix_only": "ad15a3da1087e756",
+    "delta_messages": 2,
+    "dev_profile": "full (dev-harness)"
+  },
+  "controlled_lost_tab": {
+    "operation": "Authenticated exact-key DEV launcher retained conversation release",
+    "released_ready_tabs": 0,
+    "ready_tab_found": false
+  },
+  "single_distinct_followup": {
+    "trace_id": "99dd849a844f",
+    "cli_exit_code": 1,
+    "browser_outcome": "error",
+    "submission": "prepared",
+    "error_type": "invalid_request_error",
+    "error_code": "compaction_source_unavailable",
+    "error_message": "The retained ChatGPT conversation is no longer available.",
+    "retryable": false,
+    "accepted_browser_sends": 0,
+    "new_chat_send": false,
+    "prompt_replayed": false
+  },
+  "postcondition": {
+    "state_turns": 1,
+    "state_items": 3,
+    "state_last_write_utc": "2026-10-19T17:54:06.8778766Z",
+    "latest_browser_diagnostic_write_utc": "2026-10-19T17:54:06.8072706Z",
+    "new_browser_diagnostic_files": 0,
+    "state_history_unchanged": true
+  },
+  "companion_invalid_proof": {
+    "evidence": "docs/superpowers/day10-zip-invalid-proof-dev-e2e-20261020.json",
+    "result": "ancestry_changed triggered canonical ZIP rebuild with 12 PNG, verified archive ACK and one accepted Send"
+  },
+  "limits": {
+    "production_recovery": "NOT_RUN",
+    "272k_model_recall": "UNVERIFIED",
+    "backend_effort_attestation": "UNVERIFIED",
+    "pending_safety_review": 23,
+    "safety_review_records_displayed": 20,
+    "native_safety_review_advertised": false
+  },
+  "requirement_counts_after": {
+    "PASS": 8,
+    "PARTIAL": 137,
+    "BLOCKED": 12,
+    "NOT RUN": 18,
+    "total": 175
+  },
+  "subagents_spawned": 0,
+  "production_mutations": 0,
+  "process_restarts": 0,
+  "git_reference_mutations": 0
+}
