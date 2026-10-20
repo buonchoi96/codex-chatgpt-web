@@ -15,7 +15,7 @@ type BannerKind = "status" | "alert" | "plain" | "transcript";
 function bannerPage(text: string, kind: BannerKind, retry = false): Page {
   return {
     getByText(pattern: RegExp) {
-      return this.locator(`text="${text}"`).filter({ hasText: pattern });
+      return bannerPage(text, kind, retry).locator(`text="${text}"`).filter({ hasText: pattern });
     },
     locator(selector: string) {
       const isPlainExact = selector.startsWith('text="')
