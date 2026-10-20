@@ -6,6 +6,8 @@ import {
   CHATGPT_RESPONSE_DOM_PROBE_TIMEOUT_MS,
   MAX_CHATGPT_BROWSER_PAGE_REBINDS,
   chatGptOwnedTurnStillGenerating,
+  chatGptDetachedAcceptedTurnMayStillBeRunning,
+  chatGptAssistantBelongsToAcceptedUser,
   probeChatGptOwnedTurnLiveness,
 } from "../src/adapters/chatgpt-web/browser-worker";
 
@@ -15,6 +17,7 @@ function probeFixture(options: {
   stop?: boolean;
   hiddenStop?: boolean;
   completed?: boolean;
+  detachedAssistant?: boolean;
 }): Page {
   const { createWindow } = require("@mixmark-io/domino");
   const owner = options.owner === false ? "" : `<section data-turn-key="accepted-01">
@@ -23,7 +26,10 @@ function probeFixture(options: {
     </section>`;
   const stop = options.stop === false ? ""
     : `<button data-testid="stop-button"${options.hiddenStop ? ' style="display:none"' : ""}>Stop</button>`;
-  const window = createWindow(`<html><body>${owner}${stop}</body></html>`);
+  const detached = options.detachedAssistant
+    ? '<section data-turn-key="temporary-02"><div data-conversation-role="assistant">Active temporary response</div></section>'
+    : "";
+  const window = createWindow(`<html><body>${owner}${detached}${stop}</body></html>`);
   const nodeListProto = Object.getPrototypeOf(window.document.querySelectorAll("button"));
   const existingIterator = Object.getOwnPropertyDescriptor(nodeListProto, Symbol.iterator);
   Object.defineProperty(nodeListProto, Symbol.iterator, {
@@ -111,6 +117,11 @@ test("grouped assistant projection uses its stable turn key instead of a nested 
   let invokedOriginalLocator = false;
   const fakePage = {
     isClosed: () => false,
+    evaluate: async () => ({
+      ownerPresent: true, assistantPresent: true, stopVisible: true,
+      completionActionVisible: false, assistantTextChars: 22,
+      visibleStopCount: 1, activeAssistantGroupCount: 1, userBubbleCount: 1,
+    }),
     locator: (selector: string) => {
       observedSelector = selector;
       return {
@@ -135,4 +146,51 @@ test("grouped assistant projection uses its stable turn key instead of a nested 
   expect(invokedOriginalLocator).toBe(false);
   expect(observedSelector).toBe('[data-turn-key="accepted-01"]');
   expect(observedSelector).not.toContain(":has");
+});
+
+test("two production-style transient Activity groups keep a proven Send pending without claiming their text", async () => {
+  const detached = await probeChatGptOwnedTurnLiveness(
+    probeFixture({ owner: false, detachedAssistant: true }),
+    "group:assistant:accepted-01",
+  );
+  expect(detached).toMatchObject({
+    ownerPresent: false,
+    assistantPresent: false,
+    visibleStopCount: 1,
+    activeAssistantGroupCount: 1,
+    userBubbleCount: 0,
+  });
+  expect(chatGptOwnedTurnStillGenerating(detached)).toBe(false);
+  expect(chatGptDetachedAcceptedTurnMayStillBeRunning(detached)).toBe(true);
+  // Same visible Stop with no assistant group, multiple assistant groups, or
+  // hidden Stop never proves a unique potentially continuing generation.
+  expect(chatGptDetachedAcceptedTurnMayStillBeRunning(
+    await probeChatGptOwnedTurnLiveness(probeFixture({ owner: false }), "group:assistant:accepted-01"),
+  )).toBe(false);
+  expect(chatGptDetachedAcceptedTurnMayStillBeRunning(
+    await probeChatGptOwnedTurnLiveness(
+      probeFixture({ owner: false, detachedAssistant: true, stop: false }),
+      "group:assistant:accepted-01",
+    ),
+  )).toBe(false);
+});
+
+test("accepted user key prevents binding a remounted unrelated assistant", () => {
+  expect(chatGptAssistantBelongsToAcceptedUser(
+    "group:assistant:accepted-01", "group:user:accepted-01",
+  )).toBe(true);
+  expect(chatGptAssistantBelongsToAcceptedUser(
+    "group:assistant:temporary-02", "group:user:accepted-01",
+  )).toBe(false);
+});
+
+test("detached active response handling runs before unverified rebinding", () => {
+  const source = require("node:fs").readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8") as string;
+  const gate = source.indexOf("if (!snapshot.responsePresent) {", source.indexOf("for (;;) {", source.indexOf("stage=response")));
+  const pending = source.indexOf("response_binding_detached_pending", gate);
+  const reconcile = source.indexOf("this.reconcileAssistantTurnBinding(", gate);
+  expect(pending).toBeGreaterThan(gate);
+  expect(reconcile).toBeGreaterThan(pending);
+  expect(source).toContain("response_binding_pending_user_proof");
+  expect(source).toContain("response_binding_waiting_for_accepted_user_group");
 });
