@@ -293,6 +293,14 @@ export function extractChatGptTurnUserRevision(parsed: CodexParsedRequest): unkn
     && (priorChatGptAbortedTurnIds(parsed).includes(revision.turnId)
       || !(isAuthenticatedNativeGoalContinuation(parsed, identity, revision)
         || isAcceptedCompactionContinuation(parsed, identity, revision)))) {
+    // Log only provenance shape; user text and native ids are intentionally omitted.
+    console.warn("[chatgpt-web] user_revision_conflict " + JSON.stringify({
+      source_turn_is_aborted: priorChatGptAbortedTurnIds(parsed).includes(revision.turnId),
+      source_has_item_id: Boolean(revision.itemId),
+      compaction_request: parsed._compactionRequest === true,
+      input_item_count: Array.isArray((parsed._rawBody as { input?: unknown[] } | undefined)?.input)
+        ? (parsed._rawBody as { input: unknown[] }).input.length : 0,
+    }));
     throw new ChatGptWebAdapterError(CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
       {status:400,errorType:'invalid_request_error',code:'REPLAY_PROVENANCE_UNVERIFIED',retryable:false});
   }

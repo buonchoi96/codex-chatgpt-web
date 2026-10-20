@@ -52,6 +52,7 @@ import { namespacedToolName, type AdapterEvent, type CodexParsedRequest } from "
 import type { CodexProviderConfig } from "./types";
 import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
+import { estimateTokens } from "./lib/token-estimate";
 
 type HttpTrackedEndpoint = "models" | "responses" | "compact" | "search" | "unspecified" | NativeImageEndpoint;
 
@@ -912,6 +913,17 @@ export async function responseRequest(
       input: compacted.output,
     };
     const retryParsed = parseRequest(retryBody);
+    // Only size/shape metrics are logged. The auto-compact result must not be
+    // mistaken for a guarantee that the browser account can hold the new prompt.
+    const originalInput = Array.isArray(compactBody.input) ? compactBody.input : [];
+    console.info("[chatgpt-web] auto_compaction_retry_shape " + JSON.stringify({
+      before_input_items: originalInput.length,
+      after_input_items: compacted.output.length,
+      before_input_tokens: estimateTokens(JSON.stringify(originalInput)),
+      after_input_tokens: estimateTokens(JSON.stringify(compacted.output)),
+      before_messages: activeParsed.context.messages.length,
+      after_messages: retryParsed.context.messages.length,
+    }));
     const retryRoute = routeChatGptWebRequest(retryParsed, config);
     if (retryRoute.slug !== route.slug) {
       throw new Error("Automatic prompt-too-long compaction changed the routed Web model");
@@ -943,12 +955,11 @@ export async function responseRequest(
         );
         if (!promptTooLong) break;
         if (promptTooLongAutoCompactUsed) {
+          // Preserve the concrete second pre-Send rejection. A generic "still too
+          // long" masks canonical vs composer limits and makes recovery guesswork.
           forwardAdapterEvent({
-            type: "error",
-            message: "ChatGPT still reports that the prompt is too long after one automatic compaction retry.",
-            status: 413,
-            errorType: "browser_transport_error",
-            code: "message_length_exceeds_limit",
+            ...promptTooLong,
+            message: `ChatGPT Web context still exceeds the verified transport budget after one automatic compaction retry: ${promptTooLong.message}`,
             retryable: false,
           });
           break;

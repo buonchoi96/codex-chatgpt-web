@@ -1,4 +1,5 @@
 import { isNativeAgentsMdContext } from "./native-context";
+import { estimateTokens } from "../lib/token-estimate";
 
 /**
  * Remote compaction v2 support for ROUTED providers.
@@ -88,8 +89,28 @@ export function compactionItemToText(encryptedContent: string | undefined): stri
  * contextual wrappers are filtered there, and v2-style `compaction` items are NOT expected here.
  */
 
-/** codex-rs compact.rs COMPACT_USER_MESSAGE_MAX_TOKENS = 20k tokens (~4 chars/token). */
-const COMPACT_V1_RETAINED_CHAR_BUDGET = 20_000 * 4;
+/** Codex v1 retains up to 20k user-message tokens, not 80k characters.
+ * A character proxy silently exceeds that budget for dense JSON, CJK and code. */
+export const COMPACT_V1_RETAINED_TOKEN_BUDGET = 20_000;
+
+/** Keep the newest text suffix under the same conservative tokenizer used by
+ * browser canonical-context preflight. Do not split a Unicode surrogate pair. */
+function compactTextSuffix(text: string, budget: number): { text: string; tokens: number } {
+  if (budget <= 0 || text.length === 0) return { text: "", tokens: 0 };
+  const fullTokens = estimateTokens(text);
+  if (fullTokens <= budget) return { text, tokens: fullTokens };
+  let low = 0, high = text.length;
+  while (low < high) {
+    const chars = Math.floor((low + high + 1) / 2);
+    const candidate = text.slice(text.length - chars);
+    if (estimateTokens(candidate) <= budget) low = chars;
+    else high = chars - 1;
+  }
+  let suffix = text.slice(text.length - low);
+  const first = suffix.charCodeAt(0);
+  if (first >= 0xDC00 && first <= 0xDFFF) suffix = suffix.slice(1);
+  return { text: suffix, tokens: estimateTokens(suffix) };
+}
 
 type CompactMessageItem = Record<string, unknown>;
 
@@ -190,7 +211,7 @@ export function buildCompactV1Output(
   maxImages = 10,
 ): CompactMessageItem[] {
   const selected: CompactMessageItem[] = [];
-  let remaining = COMPACT_V1_RETAINED_CHAR_BUDGET;
+  let remaining = COMPACT_V1_RETAINED_TOKEN_BUDGET;
   let retainedImages = 0;
   for (let i = userMessages.length - 1; i >= 0 && (remaining > 0 || retainedImages < maxImages); i--) {
     const message = structuredClone(userMessages[i]!);
@@ -206,14 +227,9 @@ export function buildCompactV1Output(
         continue;
       }
       if (!textBlock(block) || remaining === 0) continue;
-      const text = block.text!;
-      if (text.length <= remaining) {
-        remaining -= text.length;
-        retainedReversed.push({ ...block, type: "input_text", text });
-      } else {
-        retainedReversed.push({ ...block, type: "input_text", text: text.slice(text.length - remaining) });
-        remaining = 0;
-      }
+      const clipped = compactTextSuffix(block.text!, remaining);
+      if (clipped.text) retainedReversed.push({ ...block, type: "input_text", text: clipped.text });
+      remaining -= clipped.tokens;
     }
     const content = retainedReversed.reverse();
     if (content.length > 0) {

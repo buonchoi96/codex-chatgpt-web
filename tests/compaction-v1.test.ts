@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import { estimateTokens } from "../src/lib/token-estimate";
 import {
   buildCompactV1Output,
+  COMPACT_V1_RETAINED_TOKEN_BUDGET,
   extractCompactUserMessages,
   isReadableCompactionSummaryText,
   SUMMARY_PREFIX,
@@ -72,4 +74,34 @@ test("v1 compaction drops persisted one-pixel image sentinels", () => {
 
   expect(JSON.stringify(output)).not.toContain(placeholder);
   expect(JSON.stringify(output)).toContain("data:image/png;base64,real-image");
+});
+
+
+test("v1 compaction bounds dense Unicode retained history by tokenizer tokens, not characters", () => {
+  const dense = "漢🧩範例{\\\"a\\\":1}。".repeat(18_000);
+  expect(estimateTokens(dense)).toBeGreaterThan(COMPACT_V1_RETAINED_TOKEN_BUDGET);
+  const source = [{ type: "message", role: "user", id: "dense-content",
+    content: [{ type: "input_text", text: dense }] }];
+  const output = buildCompactV1Output(source, "Evidence-preserving summary");
+  const retained = (output[0]!.content as Array<{ text?: string }>)[0]!.text!;
+  expect(retained.length).toBeLessThan(dense.length);
+  expect(dense.endsWith(retained)).toBe(true);
+  expect(estimateTokens(retained)).toBeLessThanOrEqual(COMPACT_V1_RETAINED_TOKEN_BUDGET);
+  expect(output.at(-1)!.content).toEqual([{
+    type: "input_text",
+    text: `${SUMMARY_PREFIX}\\nEvidence-preserving summary`,
+  }]);
+});
+
+test("v1 compaction counts multiple human messages against one shared token budget", () => {
+  const input = Array.from({ length: 5 }, (_, index) => ({
+    type: "message", role: "user", id: `dense-${index}`,
+    content: [{ type: "input_text", text: "測試🧪{\\\"k\\\":3}".repeat(4_000) }],
+  }));
+  const output = buildCompactV1Output(input, "Checkpoint");
+  const retainedTokens = output.slice(0, -1).reduce((sum, item) =>
+    sum + (item.content as Array<{text?: string}>).reduce((subtotal, block) =>
+      subtotal + estimateTokens(block.text ?? ""), 0), 0);
+  expect(retainedTokens).toBeLessThanOrEqual(COMPACT_V1_RETAINED_TOKEN_BUDGET);
+  expect(output.at(-1)!.content).toEqual([{ type: "input_text", text: `${SUMMARY_PREFIX}\\nCheckpoint` }]);
 });
