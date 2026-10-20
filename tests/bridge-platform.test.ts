@@ -201,7 +201,7 @@ test("large Windows SSE terminal passes through Bun.serve without losing DONE", 
     expect(response.status).toBe(200);
     expect(body).toContain("Final sentence survived.");
     expect(body).toContain("event: response.completed");
-    expect(body.match(/data: \\[DONE\\]/g)).toHaveLength(1);
+    expect(body.match(/data: \[DONE\]/g)).toHaveLength(1);
     expect(body).toEndWith("data: [DONE]\\n\\n".replaceAll("\\n", "\n"));
   } finally {
     await server.stop(true);
