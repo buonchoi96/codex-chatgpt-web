@@ -99,7 +99,7 @@ test("exhausted projection path preserves the accepted Send and defers completio
   const source = fs.readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8") as string;
   const boundary = source.indexOf("if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS)");
   const probe = source.indexOf("probeChatGptOwnedTurnLiveness(page, responseTurn.identity)", boundary);
-  const preserved = source.indexOf("if (owned && chatGptOwnedTurnStillGenerating(owned))", probe);
+  const preserved = source.indexOf("if (owned && (chatGptOwnedTurnStillGenerating(owned)", probe);
   const deferred = source.indexOf("response_projection_deferred", preserved);
   const nextIteration = source.indexOf("continue;", deferred);
   const failure = source.indexOf("no owned active-generation evidence", nextIteration);
