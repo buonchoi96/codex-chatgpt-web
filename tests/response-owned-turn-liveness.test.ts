@@ -207,4 +207,7 @@ test("generation-running receipt cannot claim an unpaired remounted assistant", 
     "group:assistant:new-accepted-send", "group:user:new-accepted-send",
   )).toBe(true);
   expect(chatGptAssistantHasUserGroupEvidence("legacy-assistant-turn", undefined)).toBe(true);
+  expect(chatGptAssistantHasUserGroupEvidence(
+    "group:assistant:new-accepted-send", "legacy-user-turn",
+  )).toBe(false);
 });
