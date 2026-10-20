@@ -1470,7 +1470,7 @@ export function chatGptAssistantHasUserGroupEvidence(
   candidateUserIdentity?: string,
 ): boolean {
   return !assistantIdentity.startsWith("group:assistant:")
-    || (Boolean(candidateUserIdentity)
+    || (candidateUserIdentity?.startsWith("group:user:") === true
       && chatGptAssistantBelongsToAcceptedUser(assistantIdentity, candidateUserIdentity));
 }
 
