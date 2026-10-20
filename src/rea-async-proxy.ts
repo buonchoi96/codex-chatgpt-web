@@ -58,8 +58,9 @@ export async function runReaAsyncProxy():Promise<void>{
   const name=request.params.name,input=record(request.params.arguments)??{};
   try{
    if(name==="rea_async_start"){
-    if(typeof input.tool!=="string"||!record(input.arguments))return err("rea_async_start needs a tool name and original argument object");
-    return ok(jobs.start(input.tool,input.arguments));
+    const validatedArgs=record(input.arguments);
+    if(typeof input.tool!=="string"||!validatedArgs)return err("rea_async_start needs a tool name and original argument object");
+    return ok(jobs.start(input.tool,validatedArgs));
    }
    if(name==="rea_async_poll"){
     if(typeof input.job_id!=="string")return err("rea_async_poll needs job_id");

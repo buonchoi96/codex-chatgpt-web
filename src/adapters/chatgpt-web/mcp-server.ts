@@ -5,6 +5,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
+import {NativeAsyncToolJobs,NATIVE_ASYNC_AUTO_WAIT_MS,NATIVE_ASYNC_POLL_MAX_CHARS,nativeAsyncToolScope} from "./native-async-tools";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME, CODEX_RECOVERY_CHECKPOINT_WIRE_NAME } from "./native-compaction-control";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerRetirementDiagnostics, type BrokerToolResult } from "./turn-broker";
@@ -40,6 +41,8 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_safety_review",
   "codex_tool_inventory",
   "codex_tool_call",
+  "codex_tool_start",
+  "codex_tool_poll",
   "codex_turn_complete",
 ]);
 
@@ -520,6 +523,7 @@ export async function createChatGptMcpServer(options: {
   const contract = options.contract ?? "native";
   const blockedOperationLedger = options.blockedOperationLedger ?? new BlockedOperationLedger();
   const commandCapacity = new NativeCommandCapacity();
+  const asyncTools = new NativeAsyncToolJobs<ReturnType<typeof asMcpResult>>();
   const screenObservers=options.screenObserver?new ScreenObservationRegistry(options.screenObserver.provider):undefined;
   const legacyObserverNotices=new Set<string>();
   const server = new McpServer(
@@ -642,6 +646,7 @@ export async function createChatGptMcpServer(options: {
     metadataMarker?:string,
     commandCapacityReserved=false,
     trustedNestedWireName?:string,
+    timeoutOverride?:number|null,
   ) => {
     // Admission failure precedes dispatch and must not retire siblings already in flight.
     const commandOwner=bound.commandOwnerId??bindingId;
@@ -652,7 +657,7 @@ export async function createChatGptMcpServer(options: {
     const read=nativeCommand&&typeof cmd==='string'&&isIndependentLiteralRead({cmd,tty:payload.arguments?.tty===true});
     const releaseCommand=!commandCapacityReserved&&(nativeCommand||opaqueGateway)
       ?commandCapacity.acquire(commandOwner,1,read?'read':'exclusive'):undefined;
-    const timeoutMs = chatGptMcpInvocationTimeout(bound);
+    const timeoutMs = timeoutOverride === undefined ? chatGptMcpInvocationTimeout(bound) : timeoutOverride;
     const observationId = randomBytes(16).toString("hex");
     let safetyObservationRecorded = false;
     let safetyLedgerFailure = false;
@@ -752,7 +757,7 @@ export async function createChatGptMcpServer(options: {
           method: "release",
           bindingId,
           ...(error instanceof TurnBrokerTimeoutError ? {
-            failure: { code: "codex_tool_timeout" as const, tool: wireName(tool), timeoutMs },
+            failure: { code: "codex_tool_timeout" as const, tool: wireName(tool), timeoutMs: timeoutMs ?? CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS },
           } : thrownSafetyRefusal ? {
             failure: { code: "safety_status_unknown_or_blocked" as const, tool: wireName(tool) },
           } : {}),
@@ -1196,12 +1201,111 @@ export async function createChatGptMcpServer(options: {
     ),
   );
 
+
+  // Original native authorization/argument checks, shared by direct and async.
+  const dispatchBoundTool=async(
+    claimed:ClaimedTurn,wire_name:string,
+    args:Record<string,unknown>|undefined,input:string|undefined,
+    signal?:AbortSignal,unbounded=false,
+  ):Promise<ReturnType<typeof asMcpResult>>=>{
+
+        const bound = claimed.environment;
+        const tool = safeVisibleTools(bound, contract)
+          .find(candidate => wireName(candidate) === wire_name);
+        if (!tool) {
+          const gateway = execGateway(bound);
+          const hiddenOuterTool = bound.tools.some(candidate => wireName(candidate) === wire_name);
+          if (!gateway || hiddenOuterTool || !gatewayToolNameIsValid(wire_name)) {
+            throw new Error(`Codex tool is not available in this turn: ${wire_name}`);
+          }
+          if (input !== undefined && args && Object.keys(args).length > 0) {
+            throw new Error(`Codex nested tool ${wire_name} accepts either arguments or freeform input, not both`);
+          }
+          if (isGatewayAgentWaitTool(wire_name) && input !== undefined) {
+            throw new Error(`ChatGPT Web wait_agent requires structured arguments and timeout_ms=${CHATGPT_WEB_AGENT_WAIT_POLL_MS}`);
+          }
+          const invocationArguments = args ?? {};
+          assertGatewayToolArguments(wire_name, invocationArguments);
+          const marker=`codex-tool-result:${randomBytes(24).toString('hex')}:`;
+          return invoke(claimed.bindingId, bound, gateway, {
+            input: execGatewayProgram(wire_name, input !== undefined, {
+              ...(input !== undefined ? { input } : { arguments: invocationArguments }),
+            }, bound.tools.map(wireName),marker),
+          }, signal,marker,false,wire_name,unbounded?null:undefined);
+        }
+        if (tool.freeform) {
+          if (input === undefined) throw new Error(`Freeform Codex tool ${wire_name} requires input`);
+          if (args && Object.keys(args).length > 0) throw new Error(`Freeform Codex tool ${wire_name} does not accept arguments`);
+          return invoke(claimed.bindingId, bound, tool, {
+            input: tool === execGateway(bound) ? transportBoundRawExecProgram(input, wireName(tool)) : input,
+          }, signal,undefined,false,undefined,unbounded?null:undefined);
+        }
+        if (input !== undefined) throw new Error(`Function Codex tool ${wire_name} does not accept freeform input`);
+        const invocationArguments = args ?? {};
+        assertBrowserToolArguments(tool, invocationArguments);
+        return invoke(claimed.bindingId, bound, tool, { arguments: invocationArguments }, signal,undefined,false,undefined,unbounded?null:undefined);
+
+  };
+
+  const runBoundTool=async(
+    turnToken:string,wire:string,args:Record<string,unknown>|undefined,
+    input:string|undefined,extra:McpRequestExtra,mode:"auto"|"start",
+  )=>{
+    const claimed=await claimTurn(mode==="start"?"codex_tool_start":"codex_tool_call",turnToken,extra);
+    let background=false;
+    try{
+      const found=safeVisibleTools(claimed.environment,contract).find(tool=>wireName(tool)===wire);
+      const mcpTool=(found?.namespace!==undefined||wire.startsWith("mcp__"))
+        && !isGatewayAgentWaitTool(wire);
+      if(mode==="start"&&!mcpTool)
+        throw Error("Async start only accepts MCP tools from this native Codex turn");
+      const scope=nativeAsyncToolScope(wire,found?.namespace);
+      if(!mcpTool){
+        return await dispatchBoundTool(claimed,wire,args,input,extra.signal);
+      }
+      const ticket=asyncTools.start(turnToken,scope,wire,async()=>{
+        try{
+          return await dispatchBoundTool(claimed,wire,args,input,undefined,true);
+        }finally{
+          await settleTurnActivity(turnToken,claimed.activityId);
+        }
+      });
+      background=true;
+      if(mode==="start")return result(ticket);
+      const quick=await asyncTools.quick(turnToken,ticket.job_id,NATIVE_ASYNC_AUTO_WAIT_MS);
+      return "status" in quick&&quick.status==="pending"?result(quick):quick;
+    }finally{
+      if(!background)await settleTurnActivity(turnToken,claimed.activityId);
+    }
+  };
+
+  if(contract==="native"){
+    server.registerTool("codex_tool_poll",{
+      title:"Poll one in-flight Codex MCP tool",
+      description:"Read the same-turn job returned by codex_tool_call or codex_tool_start without redispatching it. Reassemble JSON from chunks using next_offset. Unknown does not prove native execution stopped. No auto-retry.",
+      inputSchema:{...turnReferenceInput(contract),
+        job_id:z.string().regex(/^native_job_[a-f0-9]{48}$/),
+        offset:z.number().int().nonnegative().default(0),
+        max_chars:z.number().int().min(1).max(NATIVE_ASYNC_POLL_MAX_CHARS).default(8000)},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async(input,extra)=>withClaimedTurn("codex_tool_poll",turnReference(contract,input),extra,
+      ()=>result(asyncTools.poll(input.turn_token,input.job_id,input.offset,input.max_chars))));
+    server.registerTool("codex_tool_start",{
+      title:"Start a potentially long-running Codex MCP tool",
+      description:"Dispatch an exact MCP wire_name in the current Codex turn and immediately return job_id. Poll with codex_tool_poll. Applies to every configured MCP server without a separate proxy. Never retries or bypasses permission.",
+      inputSchema:{...turnReferenceInput(contract),
+        wire_name:z.string().min(1).max(1000),
+        arguments:jsonArgumentsSchema.optional(),input:z.string().max(5000000).optional()},
+      annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    },async(input,extra)=>runBoundTool(input.turn_token,input.wire_name,input.arguments,input.input,extra,"start"));
+  }
+
   server.registerTool(
     "codex_tool_call",
     {
       title: "Call any tool from the current Codex harness",
       description: afterSafeStart(contract, [
-        "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
+        "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle. MCP calls automatically yield a same-turn job receipt after 8 seconds; when status=pending and job_id is returned, call codex_tool_poll with the identical turn_token until completion. Never rerun the original call to poll. No per-server setup is required.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
@@ -1256,43 +1360,7 @@ export async function createChatGptMcpServer(options: {
         }, 5_000, extra.signal);
         return result({ submitted: true });
       }
-      return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
-        const bound = claimed.environment;
-        const tool = safeVisibleTools(bound, contract)
-          .find(candidate => wireName(candidate) === wire_name);
-        if (!tool) {
-          const gateway = execGateway(bound);
-          const hiddenOuterTool = bound.tools.some(candidate => wireName(candidate) === wire_name);
-          if (!gateway || hiddenOuterTool || !gatewayToolNameIsValid(wire_name)) {
-            throw new Error(`Codex tool is not available in this turn: ${wire_name}`);
-          }
-          if (input !== undefined && args && Object.keys(args).length > 0) {
-            throw new Error(`Codex nested tool ${wire_name} accepts either arguments or freeform input, not both`);
-          }
-          if (isGatewayAgentWaitTool(wire_name) && input !== undefined) {
-            throw new Error(`ChatGPT Web wait_agent requires structured arguments and timeout_ms=${CHATGPT_WEB_AGENT_WAIT_POLL_MS}`);
-          }
-          const invocationArguments = args ?? {};
-          assertGatewayToolArguments(wire_name, invocationArguments);
-          const marker=`codex-tool-result:${randomBytes(24).toString('hex')}:`;
-          return invoke(claimed.bindingId, bound, gateway, {
-            input: execGatewayProgram(wire_name, input !== undefined, {
-              ...(input !== undefined ? { input } : { arguments: invocationArguments }),
-            }, bound.tools.map(wireName),marker),
-          }, extra.signal,marker,false,wire_name);
-        }
-        if (tool.freeform) {
-          if (input === undefined) throw new Error(`Freeform Codex tool ${wire_name} requires input`);
-          if (args && Object.keys(args).length > 0) throw new Error(`Freeform Codex tool ${wire_name} does not accept arguments`);
-          return invoke(claimed.bindingId, bound, tool, {
-            input: tool === execGateway(bound) ? transportBoundRawExecProgram(input, wireName(tool)) : input,
-          }, extra.signal);
-        }
-        if (input !== undefined) throw new Error(`Function Codex tool ${wire_name} does not accept freeform input`);
-        const invocationArguments = args ?? {};
-        assertBrowserToolArguments(tool, invocationArguments);
-        return invoke(claimed.bindingId, bound, tool, { arguments: invocationArguments }, extra.signal);
-      });
+      return runBoundTool(requestId,wire_name,args,input,extra,"auto");
     },
   );
 
