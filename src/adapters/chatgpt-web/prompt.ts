@@ -223,6 +223,43 @@ export function chatGptPromptJsonBytes(text: string): number {
 /** A compact must satisfy both byte and token ceilings before any browser Send.
  * Multipart is allowed to exceed the legacy single-message byte/composer budget,
  * but never the account's canonical token budget. */
+/**
+ * Route only a proven canonical Web-context overflow to native Codex's own
+ * context-limit handler. This is a *signal*, not a locally forged /compact,
+ * model turn, or /goal state transition. Native owns the compaction decision
+ * and must persist its checkpoint before a continuing /goal can run.
+ *
+ * A single oversized instruction without any historical assistant/tool
+ * transcript cannot be compacted safely; likewise never recursively compact
+ * a native compaction request or reinterpret composer/attachment failures.
+ */
+export function chatGptTransportBudgetFailure(
+  decision: ChatGptWebTransportDecision,
+  parsed: CodexParsedRequest,
+): ChatGptWebAdapterError {
+  const budget = decision.measurements;
+  const canonicalOverflow = Number.isFinite(budget.canonicalTokens)
+    && Number.isFinite(budget.accountCanonicalTokenLimit)
+    && budget.accountCanonicalTokenLimit > 0
+    && budget.canonicalTokens > budget.accountCanonicalTokenLimit;
+  const hasCompactableHistory = parsed.context.messages.some(
+    message => message.role === "assistant" || message.role === "toolResult",
+  );
+  const handOffToNative = decision.choice === "BLOCK" && canonicalOverflow
+    && !parsed._compactionRequest && hasCompactableHistory;
+  return new ChatGptWebAdapterError(
+    `ChatGPT Web transport blocked: ${decision.reason}`,
+    {
+      status: 400,
+      errorType: "invalid_request_error",
+      // Codex recognizes this *streamed* code as a context-window error.
+      // Its own goal lifecycle and /compact gate retain authority.
+      code: handOffToNative ? "context_length_exceeded" : "context_transport_unsupported",
+      retryable: false,
+    },
+  );
+}
+
 export function exceedsChatGptCompactionPreflightBudget(
   text: string,
   measurements: Pick<ChatGptWebTransportDecision["measurements"],
@@ -830,10 +867,7 @@ export function compileChatGptWebPrompt(
       if (options?.measurementOnly || parsed._compactionRequest) {
         return { text: inlineText, images, ...attachments, transportDecision };
       }
-      throw new ChatGptWebAdapterError(
-        `ChatGPT Web transport blocked: ${transportDecision.reason}`,
-        { status: 400, errorType: "invalid_request_error", code: "context_transport_unsupported", retryable: false },
-      );
+      throw chatGptTransportBudgetFailure(transportDecision, parsed);
     }
     if (transportDecision.choice === "ZIP_SINGLE_MESSAGE") {
       if (!archive || !archiveText) throw new Error("Selected context archive was not prepared");
@@ -962,10 +996,7 @@ export function compileChatGptWebPrompt(
   }
   const trimmedCompactionMessages = initialMessageCount - sourceMessages.length;
   if (compiled.transportDecision?.choice === "BLOCK" && !options?.measurementOnly) {
-    throw new ChatGptWebAdapterError(
-      `ChatGPT Web transport blocked: ${compiled.transportDecision.reason}`,
-      { status: 400, errorType: "invalid_request_error", code: "context_transport_unsupported", retryable: false },
-    );
+    throw chatGptTransportBudgetFailure(compiled.transportDecision, parsed);
   }
   return trimmedCompactionMessages > 0 ? { ...compiled, trimmedCompactionMessages } : compiled;
 }
