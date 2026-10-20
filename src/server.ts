@@ -858,6 +858,10 @@ export async function responseRequest(
     delete compactBody.previous_response_id;
     const headers = new Headers(req.headers);
     headers.set("content-type", "application/json");
+    // This internal compaction body is freshly serialized JSON, not the original
+    // zstd wire bytes. Never propagate the original compression or byte count.
+    headers.delete("content-encoding");
+    headers.delete("content-length");
     const keepAlive = setInterval(
       () => forwardAdapterEvent({ type: "heartbeat" }),
       CHATGPT_WEB_ADAPTER_HEARTBEAT_MS,
@@ -1088,6 +1092,10 @@ export async function compactRequest(
   const input = Array.isArray(raw.input) ? raw.input : [];
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
+  // The internal response uses identity JSON even when the incoming compact
+  // request was zstd-compressed; stale encoding would raise InvalidZstdData.
+  headers.delete("content-encoding");
+  headers.delete("content-length");
   const internal = new Request("http://127.0.0.1/v1/responses", {
     method: "POST",
     headers,

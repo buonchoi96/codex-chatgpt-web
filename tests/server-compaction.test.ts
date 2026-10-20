@@ -85,7 +85,7 @@ const responseRequest: typeof respond = (request, config, factory, options) =>
   respond(request, config, factory, { ...options, rememberState: false });
 
 
-for (const stream of [false, true]) test(`browser prompt-too-long auto compacts and retries once (stream=${stream})`, async () => {
+for (const stream of [false, true]) for (const zstd of [false, true]) test(`browser prompt-too-long auto compacts and retries once (stream=${stream}, zstd=${zstd})`, async () => {
   const config = defaultConfig("full");
   let normalAttempts = 0;
   let compactionAttempts = 0;
@@ -132,10 +132,14 @@ for (const stream of [false, true]) test(`browser prompt-too-long auto compacts 
     },
   });
 
+  const wireJson = JSON.stringify(body);
+  const compressed = Bun.zstdCompressSync(Buffer.from(wireJson));
+  const compressedBytes = new ArrayBuffer(compressed.byteLength);
+  new Uint8Array(compressedBytes).set(compressed);
   const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", ...(zstd ? { "content-encoding": "zstd" } : {}) },
+    body: zstd ? compressedBytes : wireJson,
   }), config, factory);
   expect(response.status).toBe(200);
   const text = await response.text();
@@ -331,6 +335,34 @@ function compactionAdapterFactory(
     };
   };
 }
+
+test("zstd-compressed manual compaction reserializes internal JSON without stale encoding", async () => {
+  const source = {
+    model,
+    input: [{ type: "message", role: "user", id: "msg_zstd_compact",
+      content: [{ type: "input_text", text: "Preserve the full compaction source." }] }],
+  };
+  const compressed = Bun.zstdCompressSync(Buffer.from(JSON.stringify(source)));
+  const encoded = new ArrayBuffer(compressed.byteLength);
+  new Uint8Array(encoded).set(compressed);
+  let adapterCalls = 0;
+  const response = await compactRequest(new Request("http://127.0.0.1/v1/responses/compact", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-encoding": "zstd",
+      "content-length": String(encoded.byteLength) },
+    body: encoded,
+  }), defaultConfig("full"), provider => {
+    const actual = compactionAdapterFactory()(provider);
+    return { ...actual, async runTurn(parsed, incoming, emit) {
+      adapterCalls += 1;
+      return actual.runTurn!(parsed, incoming, emit);
+    } };
+  });
+  expect(response.status).toBe(200);
+  const data = await response.json() as { output: unknown[] };
+  expect(JSON.stringify(data.output)).toContain(summary);
+  expect(adapterCalls).toBe(1);
+});
 
 test("compacts ChatGPT Web v1 through a dedicated read-only browser summarization turn", async () => {
   const providers: CodexProviderConfig[] = [];
