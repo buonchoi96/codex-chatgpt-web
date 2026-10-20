@@ -150,6 +150,9 @@ export const CHATGPT_RESPONSE_DOM_GRACE_MS = 60_000;
  * the bounded staged-send budget.
  */
 export const CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS = 180_000;
+/** An unmatched assistant identity must never hot-loop on React DOM mutations. */
+export const CHATGPT_UNPROVEN_ASSISTANT_POLL_MS = 500;
+export const CHATGPT_UNPROVEN_ASSISTANT_LOG_MS = 10_000;
 export const CHATGPT_EMPTY_RESPONSE_GRACE_MS = 10_000;
 export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 60_000;
 export const CHATGPT_COMPLETION_SETTLE_MS = 2_000;
@@ -3612,6 +3615,8 @@ export class ChatGptBrowserWorker {
     let observationPage = page;
     let observationBaseline = baseline;
     let recoveryAttempts = 0;
+    let lastUnprovenBindingLogAt = 0;
+    let lastUnprovenBindingKey: string | undefined;
     let responseDeadline = Math.min(
       deadline ?? Number.POSITIVE_INFINITY,
       Date.now() + graceMs,
@@ -3701,7 +3706,14 @@ export class ChatGptBrowserWorker {
         acceptedTurnIdentities: state.turnIdentities,
       };
       if (identity) {
-        console.info("[chatgpt-web] response_binding_waiting_for_accepted_user_group");
+        const bindingKey = `${identity}:${candidateUser ?? "missing-user"}`;
+        const now = Date.now();
+        if (bindingKey !== lastUnprovenBindingKey
+          || now - lastUnprovenBindingLogAt >= CHATGPT_UNPROVEN_ASSISTANT_LOG_MS) {
+          console.info("[chatgpt-web] response_binding_waiting_for_accepted_user_group");
+          lastUnprovenBindingKey = bindingKey;
+          lastUnprovenBindingLogAt = now;
+        }
       }
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
       // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
@@ -3715,12 +3727,23 @@ export class ChatGptBrowserWorker {
         && !chatGptExternalProgressSuppressesDomHealth(progress, Date.now())) {
         throw new Error("ChatGPT accepted the message but did not expose its assistant turn in the DOM");
       }
-      await this.waitForTurnDomOrExternalProgress(
-        observationPage,
-        progress?.revision ?? 0,
-        externalProgress,
-        signal,
-      );
+      if (identity) {
+        // A constantly mutating live Activity DOM can immediately wake the
+        // DOM-or-MCP race thousands of times with the same *unproven* group.
+        // Bound this single path without changing expiry, native tool dispatch,
+        // tool-batch receipts or the already accepted physical Send.
+        await withBrowserTurnAbort(
+          new Promise<void>(resolveSleep => setTimeout(resolveSleep, CHATGPT_UNPROVEN_ASSISTANT_POLL_MS)),
+          signal,
+        );
+      } else {
+        await this.waitForTurnDomOrExternalProgress(
+          observationPage,
+          progress?.revision ?? 0,
+          externalProgress,
+          signal,
+        );
+      }
     }
   }
 
