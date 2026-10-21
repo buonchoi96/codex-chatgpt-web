@@ -571,7 +571,13 @@ export class TurnBroker implements TurnBrokerOwner {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
     channel.invocations.delete(callId);
-    console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} isError=${result.isError === true}`);
+    // Transport diagnostics: record ONLY content shape/size, never base64 or UI text.
+    // This is the first owned boundary for a returned native MCP screenshot.
+    const imageParts=result.content.filter((part):part is {type:"image";data?:string;mimeType?:string}=>
+      Boolean(part && typeof part==="object" && (part as {type?:unknown}).type==="image"));
+    const imageEncodedChars=imageParts.reduce((sum,part)=>
+      sum+(typeof part.data==="string"?part.data.length:0),0);
+    console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} isError=${result.isError === true} image_items=${imageParts.length} image_encoded_chars=${imageEncodedChars} mime_types=${JSON.stringify(imageParts.map(p=>p.mimeType??"unknown"))}`);
     invocation.resolve(result);
   }
 
