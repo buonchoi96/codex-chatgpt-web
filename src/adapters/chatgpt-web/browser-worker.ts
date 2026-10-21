@@ -4437,35 +4437,74 @@ export class ChatGptBrowserWorker {
           + ` after ${attemptBudget.triggerAttempts} complete mention trigger attempt(s)`,
         );
       }
-      // Hidden launcher maintenance keeps a 1x1 Chromium viewport, so pointer activation cannot
-      // reach this menu. Require the exact row to own ChatGPT's keyboard highlight first;
-      // otherwise move the menu highlight until it does. Keep
-      // focus on the composer, activate through the menu's real keyboard owner, then prove the exact
-      // selected connector pill below.
+      // The exact connector may already be visible, while ChatGPT's keyboard
+      // highlight starts on a *different* result (notably the adjacent DEV
+      // connector). ArrowDown-only traversal can then scroll past the desired
+      // first row without ever selecting it. On a real visible viewport, click
+      // the singleton exact row directly, then verify the selected connector ID.
+      // Headless maintenance uses a 1x1 viewport: keep its keyboard-only path.
       const rowHighlighted = async () => {
         const options = { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS };
-        return await appResult.getAttribute("data-highlighted", options) !== null
+        const highlighted = await appResult.getAttribute("data-highlighted", options);
+        return (highlighted !== null && highlighted !== "false")
           || await appResult.getAttribute("aria-current", options) === "true";
       };
-      if (!await rowHighlighted()) {
-        const visibleRowCount = await withBrowserTurnAbort(
-          withChatGptBrowserObservationTimeout(menuRows.filter({ visible: true }).count()),
+      let activatedByPointer = false;
+      const viewport = typeof page.viewportSize === "function" ? page.viewportSize() : null;
+      if (viewport && viewport.width > 16 && viewport.height > 16) {
+        const row = await withBrowserTurnAbort(
+          withChatGptBrowserObservationTimeout(appResult.boundingBox({
+            timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+          })),
           abortSignal,
         );
-        for (let step = 0; step < visibleRowCount && !await rowHighlighted(); step += 1) {
-          await composer.press("ArrowDown", {
-            signal: abortSignal,
-            timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-          });
+        if (row && row.width > 0 && row.height > 0
+          && row.x >= 0 && row.y >= 0
+          && row.x + row.width <= viewport.width
+          && row.y + row.height <= viewport.height) {
+          try {
+            await appResult.click({
+              signal: abortSignal,
+              timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+            });
+            activatedByPointer = true;
+          } catch (pointerError) {
+            if (abortSignal?.aborted) throw pointerError;
+            // If the pointer event was accepted but its acknowledgement was
+            // interrupted, never click a second time. Check the exact pill.
+            const currentComposer = await this.activeComposer(page, 30_000, abortSignal);
+            if (await this.connectorIsSelected(currentComposer, abortSignal, expectedConnectorId)) {
+              activatedByPointer = true;
+            }
+          }
         }
       }
-      if (!await rowHighlighted()) {
-        throw new Error(`ChatGPT connector menu could not highlight ${JSON.stringify(this.config.appName)}`);
+      if (!activatedByPointer) {
+        // Search both directions: ArrowDown-only navigation cannot reach the
+        // first row if the menu opened with another row highlighted.
+        if (!await rowHighlighted()) {
+          const visibleRowCount = await withBrowserTurnAbort(
+            withChatGptBrowserObservationTimeout(menuRows.filter({ visible: true }).count()),
+            abortSignal,
+          );
+          for (const direction of ["ArrowDown", "ArrowUp"] as const) {
+            for (let step = 0; step < visibleRowCount && !await rowHighlighted(); step += 1) {
+              await composer.press(direction, {
+                signal: abortSignal,
+                timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+              });
+            }
+            if (await rowHighlighted()) break;
+          }
+        }
+        if (!await rowHighlighted()) {
+          throw new Error(`ChatGPT connector menu could not highlight ${JSON.stringify(this.config.appName)}`);
+        }
+        await composer.press("Enter", {
+          signal: abortSignal,
+          timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+        });
       }
-      await composer.press("Enter", {
-        signal: abortSignal,
-        timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-      });
       await capture("connector-choice-activated");
       // Selecting a connector replaces the Lexical composer subtree. Resolve the active composer
       // again instead of returning the pre-selection locator, otherwise the real turn can focus a

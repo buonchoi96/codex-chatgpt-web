@@ -1650,6 +1650,91 @@ test("connector selection moves highlight to the exact hidden-viewport row befor
   expect(keys).toEqual(["ArrowDown", "ArrowDown", "Enter"]);
 });
 
+test("visible exact production connector is clicked instead of endlessly scrolling past the highlighted DEV row", async () => {
+  const keys: string[] = [];
+  let pointerClicks = 0;
+  let selected = false;
+  const target = {
+    waitFor: async () => {},
+    count: async () => 1,
+    getAttribute: async (attribute: string) => attribute === "data-highlighted" ? null : null,
+    boundingBox: async () => ({ x: 369, y: 590, width: 480, height: 36 }),
+    click: async () => { pointerClicks++; selected = true; },
+  };
+  const menuRows = { filter: ({ visible, has }: { visible?: boolean; has?: unknown }) =>
+    visible ? { count: async () => 2 } : target };
+  const composer = {
+    fill: async () => {},
+    focus: async () => {},
+    pressSequentially: async () => {},
+    press: async (key: string) => { keys.push(key); },
+  };
+  const selectedComposer = { newEditor: true };
+  const page = {
+    url: () => "https://chatgpt.com/?temporary-chat=true",
+    getByRole: personalizedTemporaryChatRole,
+    getByText: () => ({ exactConnectorLabel: true }),
+    viewportSize: () => ({ width: 878, height: 787 }),
+    locator: () => menuRows,
+  };
+  const selectConnector = (ChatGptBrowserWorker.prototype as unknown as {
+    selectConnector(page: unknown): Promise<unknown>;
+  }).selectConnector;
+  await expect(selectConnector.call({
+    config: { appName: "Codex Native2" },
+    connectorIsSelected: async () => selected,
+    selectedConnectorControl: () => ({ waitFor: async () => {} }),
+    activeComposer: async () => selected ? selectedComposer : composer,
+  }, page)).resolves.toBe(selectedComposer);
+  expect(pointerClicks).toBe(1);
+  expect(keys).toEqual([]);
+});
+
+test("hidden-viewport connector keyboard navigation can move upward from highlighted DEV to production", async () => {
+  const keys: string[] = [];
+  let highlight = 1;
+  let selected = false;
+  const result = {
+    waitFor: async () => {},
+    count: async () => 1,
+    getAttribute: async (name: string) => name === "data-highlighted" && highlight === 0 ? "" : null,
+  };
+  const menuRows = {
+    filter: ({ visible }: { visible?: boolean }) => visible
+      ? { count: async () => 2 }
+      : result,
+  };
+  const initialComposer = {
+    fill: async () => {},
+    focus: async () => {},
+    pressSequentially: async () => {},
+    press: async (key: string) => {
+      keys.push(key);
+      if (key === "ArrowDown") highlight = Math.min(1, highlight + 1);
+      if (key === "ArrowUp") highlight = Math.max(0, highlight - 1);
+      if (key === "Enter") selected = highlight === 0;
+    },
+  };
+  const doneComposer = { done: true };
+  const page = {
+    url: () => "https://chatgpt.com/?temporary-chat=true",
+    getByRole: personalizedTemporaryChatRole,
+    getByText: () => ({ exactConnectorLabel: true }),
+    viewportSize: () => ({ width: 1, height: 1 }),
+    locator: () => menuRows,
+  };
+  const selectConnector = (ChatGptBrowserWorker.prototype as unknown as {
+    selectConnector(page: unknown): Promise<unknown>;
+  }).selectConnector;
+  await expect(selectConnector.call({
+    config: { appName: "Codex Native2" },
+    connectorIsSelected: async () => selected,
+    selectedConnectorControl: () => ({ waitFor: async () => {} }),
+    activeComposer: async () => selected ? doneComposer : initialComposer,
+  }, page)).resolves.toBe(doneComposer);
+  expect(keys).toEqual(["ArrowDown", "ArrowDown", "ArrowUp", "Enter"]);
+});
+
 test("repeated connector verification reuses its selected pill before clearing the composer", async () => {
   let fillCalls = 0;
   const selectedComposer = {
