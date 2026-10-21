@@ -134,7 +134,8 @@ test("slow multimodal MCP result survives async poll as an image block, not JSON
   let completed:Awaited<ReturnType<typeof call>>|undefined;
   for(let attempt=0;attempt<40;attempt++){
    const observed=await call(client,token,"codex.control.async_poll",{job_id:ticket.job_id});
-   if(observed.content?.some(part=>part.type==="image")){completed=observed;break;}
+   if(Array.isArray(observed.content)&&observed.content.some((part:unknown)=>
+     !!part&&typeof part==="object"&&(part as {type?:unknown}).type==="image")){completed=observed;break;}
    await Bun.sleep(10);
   }
   expect(completed).toBeDefined();
@@ -168,7 +169,9 @@ test("completed async tool error with image retains isError and metadata",async(
   let final:Awaited<ReturnType<typeof call>>|undefined;
   for(let attempt=0;attempt<40;attempt++){
    const response=await call(client,token,"codex.control.async_poll",{job_id:ticket.job_id});
-   if(response.isError===true&&response.content?.some(p=>p.type==="image")){final=response;break;}
+   if(response.isError===true&&Array.isArray(response.content)&&
+     response.content.some((part:unknown)=>!!part&&typeof part==="object"&&
+       (part as {type?:unknown}).type==="image")){final=response;break;}
    await Bun.sleep(10);
   }
   expect(final?.isError).toBe(true);
