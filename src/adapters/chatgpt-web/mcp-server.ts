@@ -271,6 +271,25 @@ export function chatGptMcpInvocationTimeout(
 }
 
 function asMcpResult(value: BrokerToolResult) {
+  // A completed broker call may still lose images in the downstream MCP
+  // transport. Emit only dimensions of the envelope, not pixels or base64.
+  const mediaParts=Array.isArray(value.content)
+    ? value.content.filter((part):part is {type:"image";data?:string;mimeType?:string}=>
+        Boolean(part&&typeof part==="object"&&(part as {type?:unknown}).type==="image"))
+    : [];
+  const metadata=value.structuredContent;
+  const traceId=metadata&&typeof metadata==="object"&&!Array.isArray(metadata)
+    ? (metadata as {trace_id?:unknown}).trace_id : undefined;
+  if(mediaParts.length>0 || (metadata&&typeof metadata==="object"&&
+      JSON.stringify(Object.keys(metadata)).includes("screenshot"))) {
+    console.info(`[chatgpt-web-mcp] native_result_media ${JSON.stringify({
+      trace_id:typeof traceId==="string"&&/^[0-9a-f-]{36}$/.test(traceId)?traceId:null,
+      image_items:mediaParts.length,
+      image_encoded_chars:mediaParts.reduce((total,part)=>
+        total+(typeof part.data==="string"?part.data.length:0),0),
+      mime_types:mediaParts.map(part=>part.mimeType??"unknown"),
+    })}`);
+  }
   const assessment=classifyChatGptToolFailure(value);
   if(assessment.classification!=='NO_FAILURE')console.error(`[chatgpt-web-mcp] tool_failure ${JSON.stringify({
     classification:assessment.classification,allowTechnicalFallback:assessment.allowTechnicalFallback,
