@@ -50,11 +50,19 @@ export function observeMcpToolCalls(
       await send(message, options);
       if (call) {
         const result = "result" in message ? message.result : undefined;
+        const mediaParts=Array.isArray(result?.content)
+          ? result.content.filter((item):item is {type:"image";data?:string;mimeType?:string}=>
+              Boolean(item&&typeof item==="object"&&(item as {type?:unknown}).type==="image"))
+          : [];
         emit({
           event: "reply_sent", call: call.call, tool: call.tool,
           elapsed_ms: Math.round(performance.now() - call.started),
           outcome: "error" in message ? "protocol_error" : "result",
           ...("result" in message ? { is_error: result?.isError === true } : {}),
+          image_items: mediaParts.length,
+          image_encoded_chars: mediaParts.reduce((total,item)=>
+            total+(typeof item.data==="string"?item.data.length:0),0),
+          mime_types: mediaParts.map(item=>item.mimeType??"unknown"),
         });
       }
     } catch (error) {
