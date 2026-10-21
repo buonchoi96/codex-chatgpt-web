@@ -4,10 +4,12 @@ on:
     branches: [main]
     paths:
       - "src/adapters/chatgpt-web/mcp-server.ts"
+      - "src/adapters/chatgpt-web/turn-broker.ts"
       - "src/adapters/chatgpt-web/native-async-tools.ts"
       - "src/rea-async-proxy.ts"
       - "tests/native-async-tools.test.ts"
       - "tests/native-async-e2e.test.ts"
+      - "tests/turn-broker-native-queue.test.ts"
       - ".github/workflows/native-async-mcp.yml"
   workflow_dispatch:
 jobs:
@@ -28,4 +30,4 @@ jobs:
       - name: Typecheck runtime and tests
         run: bun run typecheck
       - name: Run integration and lifecycle tests
-        run: bun test --timeout 15000 ./tests/native-async-tools.test.ts ./tests/native-async-e2e.test.ts ./tests/mcp-native-exec-yield.test.ts ./tests/turn-broker-diagnostics.test.ts
+        run: bun test --timeout 15000 ./tests/native-async-tools.test.ts ./tests/native-async-e2e.test.ts ./tests/mcp-native-exec-yield.test.ts ./tests/turn-broker-diagnostics.test.ts ./tests/turn-broker-native-queue.test.ts

@@ -1393,6 +1393,34 @@ export class TurnBroker implements TurnBrokerOwner {
 
     const wireName = request.wireName?.trim();
     if (!wireName) throw new Error("wire tool name is required");
+    // An HTTP Responses round stops listening for the NEXT native tool batch
+    // while Codex is executing a previously delivered MCP call. A second
+    // invocation at this point can never be delivered until the first one
+    // settles; waiting 90 seconds would retire BOTH calls and abort the tab.
+    // Return an explicit not-dispatched receipt instead. Do not synthesize a
+    // tool result, replay the first call, or revoke its still-live binding.
+    const channel = binding.channel;
+    const blockedByMcp = !channel.safe && channel.waiters.size === 0
+      && [...channel.deliveredCallIds].some(id =>
+        channel.invocations.get(id)?.request.wireName.startsWith("mcp__"));
+    if (blockedByMcp) {
+      console.warn(`[chatgpt-web] broker_delivery_deferred ${JSON.stringify({
+        traceId: channel.traceId, tool: wireName, reason: "mcp_boundary_without_owner_waiter",
+        pendingMcpCalls: [...channel.deliveredCallIds].filter(id =>
+          channel.invocations.get(id)?.request.wireName.startsWith("mcp__")).length,
+      })}`);
+      const deferred = {
+        code: "native_tool_not_dispatched",
+        execution_state: "not_started",
+        retryable: false,
+        tool: wireName,
+        message: "Another MCP invocation is still running and this browser turn has no owner waiter for a new tool batch. This tool was NOT dispatched. Wait for the original MCP result (or poll its existing async job); do not treat this as an execution failure or replay an uncertain invocation.",
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(deferred) }],
+        structuredContent: deferred, isError: true,
+      };
+    }
     const callId = opaqueId("call");
     const toolRequest: BrokerToolRequest = {
       callId,
