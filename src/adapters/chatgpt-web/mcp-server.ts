@@ -525,6 +525,12 @@ export async function createChatGptMcpServer(options: {
   const commandCapacity = new NativeCommandCapacity();
   type NativeToolResponse=ReturnType<typeof asMcpResult>|ReturnType<typeof result>;
   const asyncTools = new NativeAsyncToolJobs<NativeToolResponse>();
+  const pollAsyncResult=(owner:string,jobId:string,offset:number,maxChars:number):NativeToolResponse=>{
+    // Image and audio parts must remain true MCP media, not JSON fragments.
+    // The poll is read-only and scoped to the original authenticated turn.
+    return asyncTools.multimodalCompletion(owner,jobId,offset)
+      ?? result(asyncTools.poll(owner,jobId,offset,maxChars));
+  };
   const screenObservers=options.screenObserver?new ScreenObservationRegistry(options.screenObserver.provider):undefined;
   const legacyObserverNotices=new Set<string>();
   const server = new McpServer(
@@ -1307,14 +1313,14 @@ export async function createChatGptMcpServer(options: {
   if(contract==="native"){
     server.registerTool("codex_tool_poll",{
       title:"Poll one in-flight Codex MCP tool",
-      description:"Read the same-turn job returned by codex_tool_call or codex_tool_start without redispatching it. Reassemble JSON from chunks using next_offset. Unknown does not prove native execution stopped. No auto-retry.",
+      description:"Read the same-turn job returned by codex_tool_call or codex_tool_start without redispatching it. Text/JSON results use chunks with next_offset; completed image/audio results are returned as real MCP media content at offset=0, not JSON text. Unknown does not prove native execution stopped. No auto-retry.",
       inputSchema:{...turnReferenceInput(contract),
         job_id:z.string().regex(/^native_job_[a-f0-9]{48}$/),
         offset:z.number().int().nonnegative().default(0),
         max_chars:z.number().int().min(1).max(NATIVE_ASYNC_POLL_MAX_CHARS).default(8000)},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async(input,extra)=>withClaimedTurn("codex_tool_poll",turnReference(contract,input),extra,
-      ()=>result(asyncTools.poll(turnReference(contract,input),input.job_id,input.offset,input.max_chars))));
+      ()=>pollAsyncResult(turnReference(contract,input),input.job_id,input.offset,input.max_chars)));
     server.registerTool("codex_tool_start",{
       title:"Start a potentially long-running Codex MCP tool",
       description:"Dispatch an exact MCP wire_name in the current Codex turn and immediately return job_id. Poll with codex_tool_poll. Applies to every configured MCP server without a separate proxy. Never retries or bypasses permission.",
@@ -1358,7 +1364,7 @@ export async function createChatGptMcpServer(options: {
           max_chars:z.number().int().min(1).max(NATIVE_ASYNC_POLL_MAX_CHARS).default(8000),
         }).parse(args??{});
         return withClaimedTurn("codex_tool_poll",requestId,extra,
-          ()=>result(asyncTools.poll(requestId,parsed.job_id,parsed.offset,parsed.max_chars)));
+          ()=>pollAsyncResult(requestId,parsed.job_id,parsed.offset,parsed.max_chars));
       }
       if(contract==="native"&&wire_name==="codex.control.async_start"){
         if(input!==undefined)throw Error("Async start accepts structured arguments only");
