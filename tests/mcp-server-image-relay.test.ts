@@ -84,6 +84,38 @@ test("direct codex_tool_call returns broker image blocks and MCP result metadata
   }
 });
 
+test("direct codex_tool_call retains 3.56MB image block without flattening media into text", async () => {
+  const relay = await connectedRelay();
+  try {
+    // Structural relay test: deterministic bytes, not a pixel recognition oracle.
+    const encoded = Buffer.alloc(3_563_717, 0x5a).toString("base64");
+    const pending = relay.client.callTool({
+      name: "codex_tool_call",
+      arguments: { turn_token: relay.requestToken, wire_name: "mcp__computer_use_swift__desktop_observe", arguments: {} },
+    });
+    const [request] = await relay.broker.nextToolBatch(relay.requestToken);
+    const receipt = { ok: true, data: { screenshot_image_bytes: 3_563_717, screenshot_content_index: 1 } };
+    relay.broker.completeTool(relay.requestToken, request!.callId, {
+      content: [{type:"text",text:"capture receipt"},
+        {type:"image",data:encoded,mimeType:"image/png"}],
+      structuredContent:receipt,
+    });
+    const received = await pending;
+    expect(received.isError).not.toBe(true);
+    expect(received.structuredContent).toEqual(receipt);
+    const imageParts = (received.content as Array<Record<string,unknown>>).filter(item=>item.type==="image");
+    expect(imageParts).toHaveLength(1);
+    expect(imageParts[0]!.mimeType).toBe("image/png");
+    expect(imageParts[0]!.data).toBe(encoded);
+    expect((received.content as Array<{type:string;text?:string}>)
+      .filter(item=>item.type==="text").map(item=>item.text??"").join("\n")).not.toContain(encoded);
+  } finally {
+    await relay.client.close();
+    await relay.server.close();
+    await relay.broker.close();
+  }
+});
+
 test("direct codex_tool_call preserves actual error status, refusal content and structured error code", async () => {
   const relay = await connectedRelay();
   try {
