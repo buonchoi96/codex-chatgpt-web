@@ -70,17 +70,45 @@ export function chatGptModelFamilyMatches(
   descriptions: readonly string[],
   family: ChatGptWebModelFamily,
   effort: ChatGptWebAdapterEffort,
+  /** Exact checked Android model radio ("GPT-6" or "6"), not "Latest" or an inferred label. */
+  exactAndroidVersionRadioChecked = false,
 ): boolean {
   // GPT-6 uses Sol below Pro and Astra at Pro. An old Latest picker can still use
   // 5.6 at lower efforts; that is not proof of an explicitly requested GPT-6 turn.
   const expectedName = family === "6" && effort === "max" ? "astra" : "sol";
+  const expectedEffort: Record<ChatGptWebAdapterEffort, string> = {
+    low: "Instant", medium: "Medium", high: "High",
+    xhigh: "Extra High", max: "Pro",
+  };
   const states = descriptions.flatMap(text => {
     const state = parseChatGptModelAnnouncement(text);
     return state ? [state] : [];
   });
-  return states.length > 0 && states.every(state => state.version === family
+  if (states.length > 0) return states.every(state => state.version === family
     && (!state.name || state.name === expectedName)
-    && (effort === "max" ? /^Pro$/i.test(state.mode) : !/^Pro$/i.test(state.mode)));
+    && (effort === "max" ? /^Pro$/i.test(state.mode) : !/^Pro$/i.test(state.mode))
+    // A versioned "6 Medium" announcement must never authorize a High turn.
+    // Preserve localized labels until the slider supplies the exact effort index.
+    && (!/^(?:Instant|Medium|High|Extra High|Pro)$/i.test(state.mode)
+      || state.mode.toLowerCase() === expectedEffort[effort].toLowerCase()));
+
+  // Issue #864's Android frontend separates model "6" (the selected, exact
+  // checked radio) from effort "High" (the active slider/radio). Only this
+  // structural evidence path may combine those two pieces. A generic "Latest"
+  // or a bare "High" announcement is never sufficient to authorize GPT-6.
+  if (!exactAndroidVersionRadioChecked || family !== "6") return false;
+  const normalized = descriptions.map(text => text.normalize("NFKC")
+    .replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim());
+  // A contradictory explicit model announcement must fail closed, including
+  // future models and an unexpected 5.6 selection.
+  if (normalized.some(text => /^(?:GPT[-\s]?)?\d+(?:\.\d+)?(?:\s|$)/i.test(text)
+    && !/^(?:GPT[-\s]?)?6$/i.test(text))) return false;
+  const declaredEfforts = normalized.flatMap(text => {
+    const match = /^(Extra High|Instant|Medium|High|Pro)(?=$|[\s,;:.、，：])/i.exec(text);
+    return match ? [match[1]!.toLowerCase()] : [];
+  });
+  return declaredEfforts.length > 0
+    && declaredEfforts.every(label => label === expectedEffort[effort].toLowerCase());
 }
 
 export async function assertChatGptModelFamily(
@@ -99,7 +127,22 @@ export async function assertChatGptModelFamily(
       await menu.slider.getAttribute("aria-valuenow"),
     );
     const descriptions = await readChatGptModelAnnouncements(menu.slider);
-    if (checked && state && state.value === state.min + effortIndex && chatGptModelFamilyMatches(descriptions, family, effort)) return;
+    if (checked && state && state.value === state.min + effortIndex) {
+      if (chatGptModelFamilyMatches(descriptions, family, effort)) return;
+      if (family === "6") {
+        // Android may render the *same* GPT-6 model as "GPT-6" or the
+        // shortened "6". Require one uniquely checked, composer-owned radio;
+        // "Latest", "GPT-5.6 Sol", future versions and prose do not qualify.
+        const compactVersion = menu.menu.getByRole("menuitemradio", {
+          name: /^(?:GPT[-\s]?)?6$/i, exact: true, includeHidden: true,
+        });
+        const exactVersionChecked = await compactVersion.count() === 1
+          && await compactVersion.getAttribute("aria-checked") === "true";
+        if (exactVersionChecked && chatGptModelFamilyMatches(
+          descriptions, family, effort, true,
+        )) return;
+      }
+    }
     if (Date.now() >= deadline) break;
     await new Promise(resolve => setTimeout(resolve, 50));
   } while (true);

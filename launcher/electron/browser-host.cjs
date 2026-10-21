@@ -28,6 +28,24 @@ const {
 } = require("./browser-state.cjs");
 
 const TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
+// Issue #864: this changes only a fresh, owned Temporary Chat WebContents,
+// never the Electron session, global Chromium user agent or Codex API headers.
+function androidTemporaryChatUserAgent(desktopUserAgent) {
+  const chrome = /\bChrome\/(\d+\.\d+\.\d+\.\d+)\b/.exec(desktopUserAgent);
+  if (!chrome) throw new Error("Cannot derive Android Temporary Chat User-Agent from this Chromium build");
+  return `Mozilla/5.0 (Linux; Android 13; SM-A235F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome[1]} Mobile Safari/537.36`;
+}
+function shouldUseAndroidTemporaryChatUserAgent(temporaryChat, optIn, platform = process.platform) {
+  return temporaryChat === true && optIn === true && platform === "win32";
+}
+
+// Log only coarse classifications, never a complete UA string or private thread URL.
+function temporaryChatUserAgentClass(userAgent) {
+  if (typeof userAgent !== "string" || !userAgent) return "unobserved";
+  if (/\bAndroid\b/i.test(userAgent) && /\bMobile\b/i.test(userAgent)) return "android-mobile";
+  if (/\bWindows NT\b/i.test(userAgent)) return "windows-desktop";
+  return "other";
+}
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const IDLE_BROWSER_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
 const PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS = 10_000;
@@ -332,6 +350,7 @@ class BrowserHost {
     clipboardApi = clipboard,
     getBrowserInteractionMode = () => "automatic",
     getUseSavedChats = () => true,
+    getTemporaryChatAndroidUserAgent = () => false,
   }) {
     if (typeof getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
@@ -362,6 +381,8 @@ class BrowserHost {
     this.clipboard = clipboardApi;
     this.getBrowserInteractionMode = getBrowserInteractionMode;
     this.getUseSavedChats = getUseSavedChats;
+    this.getTemporaryChatAndroidUserAgent = getTemporaryChatAndroidUserAgent;
+    this.homeDesktopUserAgent = null;
     this.runBrowserHelperOperation = runBrowserHelperOperation;
     this.verifyConnectorWithBrowserHelper = verifyConnectorWithBrowserHelper;
     this.surfaceId = randomBytes(24).toString("base64url");
@@ -621,6 +642,14 @@ class BrowserHost {
     this.presentTurnView(tab, false);
     view.webContents.setZoomFactor(this.state.zoomFactor);
     this.bindShellZoomShortcuts(view.webContents);
+    if (shouldUseAndroidTemporaryChatUserAgent(
+      this.getUseSavedChats?.() === false, this.getTemporaryChatAndroidUserAgent?.() === true,
+    )) {
+      // Each turn already owns a fresh WebContentsView. Override before its
+      // first ChatGPT navigation; destroying the view restores desktop defaults.
+      view.webContents.setUserAgent(androidTemporaryChatUserAgent(view.webContents.getUserAgent()));
+      this.logger.info("browser.temporary_chat_user_agent", { uaClass: "android-mobile", scope: "new-turn-view" });
+    }
     this.bindTurnContents(tab);
     await this.initializeTurnTab(tab, signal);
     return tab;
@@ -1332,7 +1361,38 @@ class BrowserHost {
     });
   }
 
+  /** Apply UA on the exact owned home view *before* ChatGPT navigation.
+   * Saved Chats and login/navigation elsewhere retain desktop UA. Reversible
+   * without mutating the partition's UA or Codex API request headers. */
+  configureHomeTemporaryChatUserAgent(useSavedChats = false) {
+    const contents = this.view.webContents;
+    const enableAndroid = shouldUseAndroidTemporaryChatUserAgent(
+      !useSavedChats, this.getTemporaryChatAndroidUserAgent?.() === true,
+    );
+    if (enableAndroid) {
+      if (this.homeDesktopUserAgent) return false;
+      const desktop = contents.getUserAgent();
+      const mobile = androidTemporaryChatUserAgent(desktop);
+      this.homeDesktopUserAgent = desktop;
+      contents.setUserAgent(mobile);
+      this.logger?.info?.("browser.temporary_chat_user_agent", {
+        uaClass: "android-mobile", scope: "home-view",
+      });
+      return true;
+    }
+    if (this.homeDesktopUserAgent) {
+      contents.setUserAgent(this.homeDesktopUserAgent);
+      this.homeDesktopUserAgent = null;
+      this.logger?.info?.("browser.temporary_chat_user_agent", {
+        uaClass: "desktop", scope: "home-view",
+      });
+      return true;
+    }
+    return false;
+  }
+
   async refreshChatGptHomeDocument(useSavedChats = false) {
+    this.configureHomeTemporaryChatUserAgent(useSavedChats);
     // A navigation from the idle host already creates a fresh ChatGPT document. Reload only an
     // existing new-chat document in the selected mode so the helper sees one fresh catalog.
     const targetUrl = useSavedChats ? `${CHATGPT_ORIGIN}/` : TEMPORARY_CHAT_URL;
@@ -2100,9 +2160,21 @@ class BrowserHost {
   async reveal(inspectSession = true) {
     if (inspectSession) requireAutomaticBrowserInspection(this, "ChatGPT session inspection");
     this.show();
-    if (!this.selectedTurnTab() && this.view.webContents.getURL() === IDLE_BROWSER_URL) {
-      await this.view.webContents.loadURL(TEMPORARY_CHAT_URL);
-      if (inspectSession) await this.probeAuthentication();
+    if (!this.selectedTurnTab()) {
+      const homeUrl = this.view.webContents.getURL();
+      if (homeUrl === IDLE_BROWSER_URL || homeUrl === TEMPORARY_CHAT_URL) {
+        // The visible launcher tab can be opened independently of a Codex turn.
+        // It must receive the same UA mitigation as a fresh harness tab.
+        const changed = this.configureHomeTemporaryChatUserAgent(false);
+        if (homeUrl === IDLE_BROWSER_URL) {
+          await this.view.webContents.loadURL(TEMPORARY_CHAT_URL);
+          if (inspectSession) await this.probeAuthentication();
+        } else if (changed) {
+          // The old desktop build is already hydrated: reload under new UA.
+          await this.view.webContents.reload();
+          if (inspectSession) await this.probeAuthentication();
+        }
+      }
     }
     return this.snapshot();
   }
@@ -2577,6 +2649,42 @@ class BrowserHost {
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
     if (existing) {
       const reused = existing.status === "ready";
+      if (reused) {
+        const contents = existing.view?.webContents;
+        const expectedAndroid = shouldUseAndroidTemporaryChatUserAgent(
+          this.getUseSavedChats?.() === false,
+          this.getTemporaryChatAndroidUserAgent?.() === true,
+        );
+        const hostUaClass = temporaryChatUserAgentClass(
+          typeof contents?.getUserAgent === "function" ? contents.getUserAgent() : undefined,
+        );
+        // The Electron UA and the hydrated document's navigator.userAgent can diverge.
+        // A bounded read provides evidence without waiting indefinitely for a stalled renderer.
+        let navigatorUaClass = "unobserved";
+        if (expectedAndroid && typeof contents?.executeJavaScript === "function") {
+          navigatorUaClass = await Promise.race([
+            Promise.resolve().then(() => contents.executeJavaScript("navigator.userAgent", true))
+              .then(temporaryChatUserAgentClass, () => "probe-error"),
+            new Promise(resolve => { const timer = setTimeout(() => resolve("probe-timeout"), 750); timer.unref?.(); }),
+          ]);
+        }
+        const currentUrl = typeof contents?.getURL === "function" ? contents.getURL() : "";
+        const urlKind = /^https:\/\/chatgpt\.com\/c\//.test(currentUrl)
+          ? "retained-thread" : currentUrl.startsWith(TEMPORARY_CHAT_URL)
+            ? "temporary-home" : /^https:\/\/chatgpt\.com\//.test(currentUrl)
+              ? "chatgpt-other" : "unexpected";
+        this.logger.info("browser.retained_user_agent", {
+          tabId: existing.id, traceId, expectedAndroid,
+          hostUaClass, navigatorUaClass, urlKind,
+        });
+        // Never reload an accepted retained conversation or silently swap its UA.
+        if (expectedAndroid && (hostUaClass === "windows-desktop"
+          || navigatorUaClass === "windows-desktop")) {
+          const error = new Error("Retained Temporary Chat no longer has its Android User-Agent");
+          error.code = "retained_conversation_ua_mismatch";
+          throw error;
+        }
+      }
       if (existing.status === "running" && existing.helperPid !== helperPid) {
         if (processRunning(existing.helperPid)) {
           throw new Error(`ChatGPT browser turn ${traceId} is owned by another helper process`);
@@ -3348,6 +3456,8 @@ module.exports = {
   allowedAuthUrl,
   BrowserHost,
   BrowserTurnCancelledError,
+  androidTemporaryChatUserAgent,
+  shouldUseAndroidTemporaryChatUserAgent,
   CHATGPT_VIEWPORT_CSS,
   IDLE_BROWSER_URL,
   isChatGptCloudflareChallengeResponse,

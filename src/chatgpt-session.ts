@@ -71,6 +71,16 @@ export async function readChatGptModelAnnouncements(slider: Locator): Promise<st
       }
       descriptions.push(words.join(" "));
     }
+    // Android-UA's compact picker renders the selected effort as a separate
+    // checked radio (e.g. "High") while its model submenu uses a bare "6".
+    // Read only the visible, checked effort radio from the slider's OWN menu.
+    // Never adopt labels from foreign menus or hidden alternatives.
+    const selected = [...(menu?.querySelectorAll('[role="menuitemradio"][aria-checked="true"]') ?? [])]
+      .filter(option => option.closest('[role="menu"]') === menu && rendered(option));
+    if (selected.length === 1) {
+      const label = selected[0]!.textContent?.normalize("NFKC").replace(/\s+/g, " ").trim();
+      if (label && /^(?:Instant|Medium|High|Extra High|Pro)$/i.test(label)) descriptions.push(label);
+    }
     return descriptions;
   });
 }
