@@ -55,7 +55,7 @@ test('legacy Swift observation preserves source images and appends one truthful 
     expect(response.isError).toBe(false);
     const notice=(response.structuredContent as Record<string,any>).observation_routing;
     expect(notice).toMatchObject({status:'LEGACY_COMPATIBILITY_ACTIVE',called_tool:'desktop.observe',
-      replacement_available:false,action_execution:'none',image_delivery_status:'UNAVAILABLE'});
+      replacement_available:false,action_execution:'none',image_delivery_status:'UNVERIFIED',mcp_image_items:1});
     expect(JSON.parse((blocks[2] as {text:string}).text)).toEqual({observation_routing:notice});
   });
 });
@@ -90,5 +90,22 @@ test('safety and native error receipts pass through untouched without observer r
     expect(response.content).toEqual(error.content);
     expect(response.structuredContent).toEqual(error.structuredContent);
     expect(response._meta).toEqual(error._meta as Record<string,unknown>);
+  });
+});
+
+
+test('legacy Swift observation with no image remains explicitly unavailable',async()=>{
+  await fixture(async({call})=>{
+    const source:BrokerToolResult={
+      content:[{type:'text',text:'metadata only'}],
+      structuredContent:{ok:true,data:{frame_id:'frame-metadata-only'},trace_id:'metadata-only'},
+    };
+    const {response}=await call('game_observe',source);
+    const routing=(response.structuredContent as Record<string,any>).observation_routing;
+    expect(routing).toMatchObject({
+      called_tool:'game.observe',image_delivery_status:'UNAVAILABLE',mcp_image_items:0,
+      replacement_available:false,
+    });
+    expect((response.content as Array<{type:string}>).filter(v=>v.type==='image')).toHaveLength(0);
   });
 });
