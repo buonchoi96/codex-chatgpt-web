@@ -25,9 +25,17 @@ export function appendUnverifiedObserverCompatibility(
   const compound=called_tool.endsWith('.execute_and_observe');
   const data=envelope.data;
   const payload=data&&typeof data==='object'&&!Array.isArray(data)?data as Record<string,unknown>:undefined;
+  // A legacy MCP screenshot can already be in content[] even though the
+  // replacement observer has not passed a live model-vision acceptance test.
+  // UNAVAILABLE incorrectly implies those actual image parts are absent.
+  // MCP image presence is not proof that the downstream model saw pixels.
+  const mcpImageItems=response.content.filter(item=>Boolean(item&&typeof item==='object'&&
+    (item as {type?:unknown}).type==='image')).length;
   const notice={version:1 as const,status:'LEGACY_COMPATIBILITY_ACTIVE' as const,
     severity:'advisory' as const,called_tool,replacement_available:false as const,
-    image_delivery_status:'UNAVAILABLE' as const,reason:'observer_unavailable_or_unverified' as const,
+    image_delivery_status:mcpImageItems>0?'UNVERIFIED' as const:'UNAVAILABLE' as const,
+    mcp_image_items:mcpImageItems,
+    reason:'observer_unavailable_or_unverified' as const,
     action_execution:(!compound?'none':payload?.status==='completed'?'completed':'unknown') as 'none'|'completed'|'unknown',
     ...(compound?{do_not_replay_action:true as const}:{})};
   return {...response,structuredContent:{...envelope,observation_routing:notice},
