@@ -1,0 +1,30 @@
+name: Image relay focused regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/adapters/chatgpt-web/**'
+      - 'tests/native-async-tools.test.ts'
+      - 'tests/native-async-e2e.test.ts'
+      - 'tests/mcp-server-image-relay.test.ts'
+      - 'tests/legacy-observation-routing.test.ts'
+      - '.github/workflows/image-relay-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  image-relay-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript typecheck
+        run: bun run typecheck
+      - name: Focused direct, async and legacy image relay regressions
+        run: bun test tests/native-async-tools.test.ts tests/native-async-e2e.test.ts tests/mcp-server-image-relay.test.ts tests/legacy-observation-routing.test.ts
