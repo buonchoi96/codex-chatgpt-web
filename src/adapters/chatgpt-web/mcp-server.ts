@@ -278,13 +278,17 @@ function asMcpResult(value: BrokerToolResult) {
         Boolean(part&&typeof part==="object"&&(part as {type?:unknown}).type==="image"))
     : [];
   const metadata=value.structuredContent;
-  const traceId=metadata&&typeof metadata==="object"&&!Array.isArray(metadata)
-    ? (metadata as {trace_id?:unknown}).trace_id : undefined;
-  if(mediaParts.length>0 || (metadata&&typeof metadata==="object"&&
-      JSON.stringify(Object.keys(metadata)).includes("screenshot"))) {
+  const safeMeta=metadata&&typeof metadata==="object"&&!Array.isArray(metadata)
+    ? metadata as {trace_id?:unknown;data?:unknown} : undefined;
+  const traceId=safeMeta?.trace_id;
+  const safeData=safeMeta?.data&&typeof safeMeta.data==="object"&&!Array.isArray(safeMeta.data)
+    ? safeMeta.data as {screenshot_content_index?:unknown;screenshot_image_bytes?:unknown} : undefined;
+  const expectsImage=typeof safeData?.screenshot_content_index==="number";
+  if(mediaParts.length>0 || expectsImage) {
     console.info(`[chatgpt-web-mcp] native_result_media ${JSON.stringify({
       trace_id:typeof traceId==="string"&&/^[0-9a-f-]{36}$/.test(traceId)?traceId:null,
       image_items:mediaParts.length,
+      screenshot_expected:expectsImage,
       image_encoded_chars:mediaParts.reduce((total,part)=>
         total+(typeof part.data==="string"?part.data.length:0),0),
       mime_types:mediaParts.map(part=>part.mimeType??"unknown"),
