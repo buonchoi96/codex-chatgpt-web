@@ -102,7 +102,18 @@ test("direct codex_tool_call retains 3.56MB image block without flattening media
     });
     const received = await pending;
     expect(received.isError).not.toBe(true);
-    expect(received.structuredContent).toEqual(receipt);
+    // The legacy observation compatibility adapter deliberately adds a
+    // separate advisory to structuredContent. Preserve the capture receipt
+    // and verify that the advisory cannot strip the actual MCP image block.
+    expect(received.structuredContent).toMatchObject({
+      ...receipt,
+      observation_routing: {
+        status: "LEGACY_COMPATIBILITY_ACTIVE",
+        called_tool: "desktop.observe",
+        replacement_available: false,
+        severity: "advisory",
+      },
+    });
     const imageParts = (received.content as Array<Record<string,unknown>>).filter(item=>item.type==="image");
     expect(imageParts).toHaveLength(1);
     expect(imageParts[0]!.mimeType).toBe("image/png");
