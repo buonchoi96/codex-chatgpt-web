@@ -105,3 +105,74 @@ test("E2E normal codex_tool_call preserves fast native MCP result directly",asyn
   expect(response.isError).not.toBe(true);
  });
 });
+
+
+test("slow multimodal MCP result survives async poll as an image block, not JSON chunks",async()=>{
+ await fixture(async({client,token,otherToken,broker})=>{
+  // Deterministic large payload exercises the exact-size class of real game
+  // screenshots. This test proves relay bytes and type, NOT image semantics.
+  const pixels=Buffer.alloc(3_656_150,0x5a);
+  const image=pixels.toString("base64");
+  let dispatches=0;
+  const started=await call(client,token,"codex.control.async_start",{
+   wire_name:"mcp__rea__binary_overview",arguments:{},
+  });
+  const ticket=body(started);
+  expect(ticket.status).toBe("pending");
+  const [request]=await bounded(broker.nextToolBatch(token));
+  expect(request).toMatchObject({wireName:"mcp__rea__binary_overview"});
+  dispatches++;
+
+  const unauthorized=await call(client,otherToken,"codex.control.async_poll",{job_id:ticket.job_id});
+  expect(unauthorized.isError).toBe(true);
+  broker.completeTool(token,request!.callId,{
+   content:[{type:"text",text:"capture receipt"},
+     {type:"image",data:image,mimeType:"image/png"}],
+   structuredContent:{ok:true,frame_id:1,screenshot_image_bytes:pixels.length},
+   isError:false,_meta:{trace_id:"async-image-fixture"},
+  });
+  let completed:Awaited<ReturnType<typeof call>>|undefined;
+  for(let attempt=0;attempt<40;attempt++){
+   const observed=await call(client,token,"codex.control.async_poll",{job_id:ticket.job_id});
+   if(observed.content?.some(part=>part.type==="image")){completed=observed;break;}
+   await Bun.sleep(10);
+  }
+  expect(completed).toBeDefined();
+  expect(completed!.isError).toBe(false);
+  expect((completed!.content as any[]).filter(p=>p.type==="image"))
+   .toEqual([{type:"image",data:image,mimeType:"image/png"}]);
+  expect(completed!.structuredContent).toEqual({ok:true,frame_id:1,screenshot_image_bytes:pixels.length});
+  expect(completed!._meta).toEqual({trace_id:"async-image-fixture"});
+  expect((completed!.content as any[]).filter(p=>p.type==="text").map(p=>p.text).join("\n"))
+   .not.toContain(image);
+  const direct=await bounded(client.callTool({name:"codex_tool_poll",arguments:{
+   turn_token:token,job_id:ticket.job_id,offset:0,
+  }},undefined,{timeout:5000,maxTotalTimeout:5000}));
+  expect((direct.content as any[]).filter(p=>p.type==="image")).toHaveLength(1);
+  expect((direct.content as any[])[1].data).toBe(image);
+  expect(dispatches).toBe(1);
+ });
+});
+
+test("completed async tool error with image retains isError and metadata",async()=>{
+ await fixture(async({client,token,broker})=>{
+  const started=await call(client,token,"codex.control.async_start",{
+   wire_name:"mcp__rea__binary_overview",arguments:{},
+  });
+  const ticket=body(started);
+  const [request]=await bounded(broker.nextToolBatch(token));
+  broker.completeTool(token,request!.callId,{
+   content:[{type:"image",data:"aGVsbG8=",mimeType:"image/png"}],
+   isError:true,structuredContent:{error:{code:"fixture_error"}},
+  });
+  let final:Awaited<ReturnType<typeof call>>|undefined;
+  for(let attempt=0;attempt<40;attempt++){
+   const response=await call(client,token,"codex.control.async_poll",{job_id:ticket.job_id});
+   if(response.isError===true&&response.content?.some(p=>p.type==="image")){final=response;break;}
+   await Bun.sleep(10);
+  }
+  expect(final?.isError).toBe(true);
+  expect(final?.structuredContent).toEqual({error:{code:"fixture_error"}});
+  expect((final?.content as any[])?.[0].type).toBe("image");
+ });
+});
