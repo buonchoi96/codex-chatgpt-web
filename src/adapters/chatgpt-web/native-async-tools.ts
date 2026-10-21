@@ -3,10 +3,13 @@ import {randomBytes} from "node:crypto";
 export const NATIVE_ASYNC_AUTO_WAIT_MS=8_000;
 export const NATIVE_ASYNC_POLL_MAX_CHARS=12_000;
 export const NATIVE_ASYNC_MAX_RESULT_CHARS=8_000_000;
+// Image blocks must not be serialized into poll JSON chunks. This limit bounds
+// stored inline encoded image/audio content from one tool result.
+export const NATIVE_ASYNC_MAX_MULTIMODAL_CHARS=24*1024*1024;
 type State="running"|"completed"|"failed"|"unknown";
 interface Entry<T>{
   id:string;owner:string;scope:string;tool:string;state:State;created:number;finished?:number;
-  payload?:string;original?:T;error?:string;finishedPromise:Promise<void>;
+  payload?:string;original?:T;multimodal?:boolean;error?:string;finishedPromise:Promise<void>;
 }
 export type AsyncToolTicket={status:"pending";job_id:string;tool:string;poll_with:"codex.control.async_poll"};
 
@@ -33,6 +36,29 @@ export class NativeAsyncToolJobs<T>{
     };
     this.jobs.set(entry.id,entry);this.activeScopes.add(scopeKey);
     entry.finishedPromise=Promise.resolve().then(run).then(value=>{
+      // Preserve real MCP image/audio blocks as typed content. JSON-chunk polling
+      // turns pixels into plain text, which is not visible to a vision model.
+      const content=value&&typeof value==="object"&&(value as {content?:unknown}).content;
+      const media=Array.isArray(content)
+        ? content.filter(part=>part&&typeof part==="object"&&
+            (part as {type?:unknown}).type!=="text"&&
+            ((part as {type?:unknown}).type==="image"||(part as {type?:unknown}).type==="audio"))
+        : [];
+      if(media.length>0){
+        const encodedSize=media.reduce((total,part)=>total+
+          (typeof (part as {data?:unknown}).data==="string"
+            ? (part as {data:string}).data.length : NATIVE_ASYNC_MAX_MULTIMODAL_CHARS+1),0);
+        if(encodedSize>NATIVE_ASYNC_MAX_MULTIMODAL_CHARS){
+          entry.state="unknown";
+          entry.error="NATIVE_ASYNC_RESULT_UNAVAILABLE: Multimodal content exceeded bounded buffer. Do not automatically retry.";
+          return;
+        }
+        entry.multimodal=true;
+        entry.original=value;
+        entry.state=(value!==null&&typeof value==="object"&&(value as {isError?:unknown}).isError===true)
+          ?"failed":"completed";
+        return;
+      }
       const serialized=JSON.stringify(value);
       if(serialized===undefined||serialized.length>NATIVE_ASYNC_MAX_RESULT_CHARS){
         entry.state="unknown";
@@ -64,12 +90,22 @@ export class NativeAsyncToolJobs<T>{
       return entry.original;
     return{status:"pending",job_id:entry.id,tool:entry.tool,poll_with:"codex.control.async_poll"};
   }
+  /** Same-turn, read-only delivery of completed image/audio MCP result.
+   * Never redispatches the underlying tool and never encodes pixels as text.
+   * Non-multimodal results keep the legacy chunked JSON contract. */
+  multimodalCompletion(owner:string,id:string,offset=0):T|undefined{
+    const entry=this.require(owner,id);
+    if(!entry.multimodal || (entry.state!=="completed"&&entry.state!=="failed"))return undefined;
+    if(offset!==0)throw Error("Multimodal tool results must be polled with offset=0");
+    return entry.original;
+  }
   poll(owner:string,id:string,offset=0,maxChars=8000):Record<string,unknown>{
     const entry=this.require(owner,id);
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(maxChars)
       ||maxChars<1||maxChars>NATIVE_ASYNC_POLL_MAX_CHARS)throw Error("Invalid tool poll range");
     const base={job_id:entry.id,tool:entry.tool,status:entry.state};
     if(entry.state==="running")return base;
+    if(entry.multimodal)return {...base,delivery:"mcp_content",message:"Completed media is delivered as native MCP content at offset=0; do not parse as JSON chunks"};
     if(entry.payload===undefined)return {...base,error:entry.error??"Result was not verified",
       retryable:false};
     if(offset>entry.payload.length)throw Error("Tool result offset beyond payload");
