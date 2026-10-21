@@ -86,3 +86,21 @@ test("namespaces group shared backends but keep independent services isolated",(
  expect(nativeAsyncToolScope("mcp__rea__binary_overview")).toBe("mcp__rea");
  expect(nativeAsyncToolScope("server_tool","mcp__sakura")).toBe("mcp__sakura");
 });
+
+
+test("async multimodal completion never chunks base64 as text and enforces turn ownership",async()=>{
+ const media="Y".repeat(9_000_000);
+ const jobs=new NativeAsyncToolJobs<{content:Array<{type:string;data?:string;mimeType?:string}>;isError?:boolean}>();
+ const ticket=jobs.start("turn_media","mcp__swift","mcp__swift__game_observe",async()=>
+   ({content:[{type:"image",data:media,mimeType:"image/png"}]}));
+ await tick();
+ expect(jobs.poll("turn_media",ticket.job_id)).toMatchObject({
+   status:"completed",delivery:"mcp_content",
+ });
+ expect(jobs.poll("turn_media",ticket.job_id).chunk).toBeUndefined();
+ expect(jobs.multimodalCompletion("turn_media",ticket.job_id,0))
+  .toEqual({content:[{type:"image",data:media,mimeType:"image/png"}]});
+ expect(()=>jobs.multimodalCompletion("another_turn",ticket.job_id)).toThrow("NATIVE_ASYNC_NOT_FOUND");
+ expect(()=>jobs.multimodalCompletion("turn_media",ticket.job_id,1)).toThrow("offset=0");
+ expect(jobs.isBusy("turn_media","mcp__swift")).toBe(false);
+});
