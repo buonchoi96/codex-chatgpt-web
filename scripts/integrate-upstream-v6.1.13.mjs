@@ -30,4 +30,16 @@ edit(root+"prompt.ts",
 );
 // appName's local declaration is already introduced by the upstream merge;
 // the fork only needs the missing type and imports reconciled above.
+// The fork additionally supplies scoped blocked-operation review evidence,
+// while upstream 6.1.13 adds the selected connector name as argument 4.
+// Accept either form without dropping the verified fork review context.
+edit(root+"usage.ts",
+  "  currentReview:Pick<CompileChatGptWebPromptOptions,'blockedOperationReview'>={},",
+  "  currentReview:Pick<CompileChatGptWebPromptOptions,'blockedOperationReview'> | string | undefined = {},");
+edit(root+"usage.ts",
+  "  const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(",
+  "  const mergedReview = typeof currentReview === 'string' ? {appName:currentReview} : currentReview ?? {};\n  const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(");
+edit(root+"usage.ts",
+  "    { ...currentReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },",
+  "    { ...mergedReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },");
 console.log("Reconciled upstream v6.1.13 TypeScript integrations");
