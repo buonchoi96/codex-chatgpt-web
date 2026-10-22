@@ -1275,7 +1275,7 @@ export async function createChatGptMcpServer(options: {
           const gateway=execGateway(claimed.environment);
           if(!gateway || !gatewayToolNameIsValid(wire)
             || claimed.environment.tools.some(item=>wireName(item)===wire))
-            throw Error("MCP tool was not advertised by the current native Codex registry");
+            throw Error("MCP tool is not available in this turn: not advertised by the current native Codex registry");
           if(input!==undefined && args && Object.keys(args).length>0)
             throw Error("Nested MCP tool accepts input or arguments, never both");
         }
