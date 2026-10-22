@@ -7,6 +7,14 @@ function edit(path, from, to) {
   writeFileSync(path, text.replace(from,to));
 }
 
+function optionalEdit(path, from, to) {
+  const text = readFileSync(path,"utf8");
+  if (text.includes(to)) return;
+  const n=text.split(from).length-1;
+  if (n!==1) throw new Error(`Optional merge site missing in ${path}: ${from.slice(0,90)}`);
+  writeFileSync(path,text.replace(from,to));
+}
+
 const root="src/adapters/chatgpt-web/";
 const rollout=root+"codex-rollout-environment.ts";
 {
@@ -43,31 +51,31 @@ edit(root+"usage.ts",
   "    { ...currentReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },",
   "    { ...mergedReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },");
 
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "  extractChatGptCalendarEnvironmentDelta,",
   "  extractChatGptCalendarEnvironmentDelta,\n  extractChatGptNativeCompactionEnvironment,");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "      if (hasCurrentContext && !currentCompaction && !initialClaim && !historicalMessages && !steeringClaim && !calendarDelta) {",
   "      const nativeCompaction = hasCurrentContext && !currentCompaction && !initialClaim && !steeringClaim && !calendarDelta\n        ? extractChatGptNativeCompactionEnvironment(parsed) : undefined;\n      if (hasCurrentContext && !currentCompaction && !initialClaim && !historicalMessages && !steeringClaim && !calendarDelta && !nativeCompaction) {");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "      const currentClaim = initialClaim ?? (currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim);",
   "      const currentClaim = initialClaim ?? (currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim ?? nativeCompaction?.claim);\n      const resolvedCalendarDelta = calendarDelta ?? currentClaim?.calendarDelta;");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "          ...(historicalMessages ? { historicalEnvironmentMessages: historicalMessages } : {}),",
   "          ...(historicalMessages ? { historicalEnvironmentMessages: historicalMessages } : {}),\n          ...(nativeCompaction ? { compactedEnvironmentItems: nativeCompaction.items } : {}),");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "          if (calendarDelta) {",
   "          if (resolvedCalendarDelta) {");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "            const foreignRoots = calendarDelta.workspaceRoots.reduce((count, roots) =>\n              count + roots.filter(root => !nativeRoots.has(root)).length, 0);",
   "            const foreignRoots = resolvedCalendarDelta.workspaceRoots.reduce((count, roots) =>\n              count + roots.filter(root => !nativeRoots.has(root)).length, 0);\n            const profileMismatch = resolvedCalendarDelta.filesystemProfiles.some(profile => profile !== rollout.filesystemProfileXml);");
-edit(root+"thread-environment.ts",
+optionalEdit(root+"thread-environment.ts",
   "            if (rolloutEnvironment.sandboxPolicy.type !== \"dangerFullAccess\" || foreignRoots > 0) {",
   "            if (profileMismatch || foreignRoots > 0) {");
 {
   const path=root+"thread-environment.ts";
   const source=readFileSync(path,"utf8");
-  if(!source.includes("calendarDelta.workspaceRoots") || !source.includes("const nativeRoots"))throw Error("expected calendar diagnostics missing");
+  if(!source.includes("const nativeRoots"))throw Error("native roots validation missing");
   // Remaining diagnostic counters are read-only. Use the verified delta object.
   writeFileSync(path,source.replaceAll("calendarDelta.workspaceRoots","resolvedCalendarDelta.workspaceRoots"));
 }
