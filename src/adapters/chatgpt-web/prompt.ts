@@ -1,5 +1,6 @@
 import { nativeCommandSurface } from "./native-command-surface";
 import { createHash } from "node:crypto";
+import { CHATGPT_CONNECTOR_NAME, ZERO_RISK_CHATGPT_CONNECTOR_NAME } from "../../config";
 import { buildContextArchive } from './context-archive';
 import { selectedSkillFile, skillFileTokens, type ChatGptSkillFile } from "./skill-attachments";
 import {
@@ -56,6 +57,8 @@ export interface CompiledChatGptWebPrompt {
 }
 
 export interface CompileChatGptWebPromptOptions {
+  /** Verified ChatGPT connector for the current transport. */
+  appName?: string;
   /** Current scoped local bookkeeping; never user instruction, execution or permission proof. */
   blockedOperationReview?:BlockedOperationReview;
   /** Permit complete canonical measurement when no send transport can carry the context. */
@@ -584,7 +587,7 @@ export function compileChatGptWebPrompt(
       ]
     : mode.localTools
     ? [
-      "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
+      "For local work required by the task, use the selected plugin's tools directly according to their declared descriptions and schemas.",
       ...(!manualControl && !nativeCommandSurface(parsed.context.tools) ? [
         "CURRENT NATIVE COMMAND PREFLIGHT: No native command interface is declared for this exact Codex turn. Do not call the command-running MCP operations. Independently declared tools remain available for their documented purposes. Never invent a missing command interface, reuse another turn's authority, or retry a previously dispatched command. If the task requires new local commands, report that command execution is unavailable in this turn.",
       ] : []),
