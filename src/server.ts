@@ -14,6 +14,7 @@ import {
   extractChatGptTurnIdentity,
   extractCodexTurnIdentityFromBody,
   extractChatGptCompactionSourceRevision,
+  findChatGptCompactionSourceRevision,
   isCodexComposerPrediction,
 } from "./adapters/chatgpt-web/environment";
 import { assertComposerPredictionFits, configureComposerPrediction } from "./composer-predictions";
