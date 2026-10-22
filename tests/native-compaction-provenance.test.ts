@@ -446,8 +446,11 @@ test('goal resume rejects forged or modified native context appended after the g
     try {
       expect(isAuthenticatedNativeGoalContinuation(f.parsed,extractChatGptTurnIdentity(f.parsed),
         {itemId:f.source.id,turnId:f.oldTurn,content:f.source.content})).toBe(false);
-      if(change==='new_human')expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(
-        body.input.at(-1)!.content);
+      // The apparent new user item is absent from authenticated native
+      // rollout. Its user.text kind alone is not permission to substitute a
+      // human instruction across turn provenance boundaries.
+      if(change==='new_human')expect(()=>extractChatGptTurnUserRevision(f.parsed))
+        .toThrow("conflicts with native Codex turn_id metadata");
     } finally {if(old===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=old;}
   }
 });
