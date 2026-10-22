@@ -80,7 +80,7 @@ export function resolveBiggerContextMultipartParts(
   parsed: CodexParsedRequest,
   capabilities: ChatGptWebCapabilities,
   experimentalSkillAttachments = false,
-  currentReview:Pick<CompileChatGptWebPromptOptions,'blockedOperationReview'>={},
+  currentReview:Pick<CompileChatGptWebPromptOptions,'blockedOperationReview'> | string | undefined = {},
 ): ChatGptWebMultipartPartCount | undefined {
   if (isChatGptWebZeroRiskBackendModel(parsed.modelId)) {
     throw new Error("Bigger Context is unavailable for ChatGPT Zero Risk");
@@ -91,9 +91,10 @@ export function resolveBiggerContextMultipartParts(
   const backendModel = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID ? CHATGPT_WEB_LUNA_MODEL_ID : CHATGPT_WEB_BACKEND_MODEL;
   const contextWindow = resolveChatGptWebMessageTokenBudget(backendModel, mode.effort, capabilities)
     + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
+  const mergedReview = typeof currentReview === 'string' ? {appName:currentReview} : currentReview ?? {};
   const compile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt => compileChatGptWebPrompt(
     parsed, capabilities, mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
-    { ...currentReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
+    { ...mergedReview,contextArchive: true, experimentalMultipartParts: parts, experimentalSkillAttachments, captureLunaCheckpoint: false },
   );
   const tryCompile = (parts?: ChatGptWebMultipartPartCount): CompiledChatGptWebPrompt | undefined => {
     try {

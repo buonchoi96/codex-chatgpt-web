@@ -316,21 +316,22 @@ export class ChatGptThreadEnvironmentStore {
               writableRoots: [...currentClaim.environment.roots],
             };
           }
-          if (calendarDelta) {
+          if (resolvedCalendarDelta) {
             // A same-turn calendar refresh is a *delta*, not an exhaustive grant list.
             // Newer Codex clients can repeat only some workspace_roots while the
             // authoritative native turn_context still lists the complete set.
             // Never add missing roots from the fragment or relax the sandbox profile:
             // every explicitly repeated root must already belong to this rollout.
             const nativeRoots = new Set(rolloutEnvironment.roots.map(pathIdentity));
-            const foreignRoots = calendarDelta.workspaceRoots.reduce((count, roots) =>
+            const foreignRoots = resolvedCalendarDelta.workspaceRoots.reduce((count, roots) =>
               count + roots.filter(root => !nativeRoots.has(root)).length, 0);
-            if (rolloutEnvironment.sandboxPolicy.type !== "dangerFullAccess" || foreignRoots > 0) {
+            const profileMismatch = resolvedCalendarDelta.filesystemProfiles.some(profile => profile !== rollout.filesystemProfileXml);
+            if (profileMismatch || foreignRoots > 0) {
               console.warn(`[chatgpt-web] calendar_environment_conflict ${JSON.stringify({
                 sandboxMatches: rolloutEnvironment.sandboxPolicy.type === "dangerFullAccess",
                 nativeRootCount: nativeRoots.size,
-                deltaCount: calendarDelta.workspaceRoots.length,
-                repeatedRootCount: calendarDelta.workspaceRoots.reduce((count, roots) => count + roots.length, 0),
+                deltaCount: resolvedCalendarDelta.workspaceRoots.length,
+                repeatedRootCount: resolvedCalendarDelta.workspaceRoots.reduce((count, roots) => count + roots.length, 0),
                 foreignRootCount: foreignRoots,
                 nativeWorkspaceRootsDeclared: rollout.workspaceRootsDeclared,
               })}`);

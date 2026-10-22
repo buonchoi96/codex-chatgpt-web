@@ -21,7 +21,7 @@ import { namespacedToolName, type AdapterEvent, type CodexContentPart, type Code
 import type { ProviderAdapter } from "../base";
 import { parseDataUrl } from "../image";
 import { ChatGptWebAdapterError, ChatGptSteeringObserverSuperseded, chatGptSafetyStatusUnknownOrBlockedError, chatGptToolTimeoutError } from "./adapter-error";
-import { ChatGptBrowserWorker,chatGptSuspensionClock } from "./browser-worker";
+import { ChatGptBrowserWorker, chatGptSuspensionClock, remainingStageBudgetMs } from "./browser-worker";
 import {createArchiveReadProof} from './archive-read-proof';
 import {validateContextArchive} from './context-archive';
 import {BlockedOperationLedger} from './blocked-operation-ledger';

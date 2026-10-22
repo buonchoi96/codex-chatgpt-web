@@ -941,7 +941,7 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
       const before=fstatSync(fd),size=before.size;
       if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Codex rollout is empty");
       validateSessionMeta(firstRolloutRecord(fd, size), lineage);
-      const latest = latestRolloutPayload(fd, size, "turn_context");
+      const latest = latestRolloutRecord(fd, size, "turn_context");
       if (!latest) throw new Error("Codex rollout has no complete turn context");
       if (latest.turn_id !== turnId && (compactionSourceTurnId === undefined || latest.turn_id !== compactionSourceTurnId)) {
         // A standalone compact is not always assigned a persisted turn_context before
@@ -1025,5 +1025,5 @@ export function resolveExactNativeRootTurnEnvironment(options:{
 }
 
 export function resolveCurrentCodexRolloutEnvironment(options:CurrentCodexRolloutOptions):CodexRolloutEnvironment|undefined {
-  return inspectCurrentCodexRollout(options,({environment,workspaceRootsDeclared})=>({environment,workspaceRootsDeclared}));
+  return inspectCurrentCodexRollout(options,({turn,environment,workspaceRootsDeclared})=>({environment,workspaceRootsDeclared,filesystemProfileXml:renderFilesystemProfile(turn.permission_profile,environment.roots)}));
 }
