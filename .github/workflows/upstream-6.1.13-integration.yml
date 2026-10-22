@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       merged_sha: ${{ steps.merge.outputs.sha }}
+      code_tests_green: ${{ steps.code_tests.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -58,7 +59,9 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun install --cwd launcher --frozen-lockfile
-      - name: Typecheck and run complete code tests before exposing merge branch
+      - name: Typecheck and run complete code tests before release
+        id: code_tests
+        continue-on-error: true
         run: |
           bun run typecheck
           bun test --timeout 15000 ./tests
@@ -81,10 +84,12 @@ jobs:
       - name: Prepare AVX2-independent Windows runtime
         shell: pwsh
         run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
-      - name: Verify merged runtime and installer
+      - name: Typecheck merged runtime and launcher
         run: |
-          bun run verify
-          bun run app:package
+          bun run typecheck
+          bun run launcher:typecheck
+      - name: Package candidate Windows installer (not yet a release)
+        run: bun run app:package
       - name: Provide disposable E drive
         shell: pwsh
         run: |
@@ -96,7 +101,7 @@ jobs:
           }
       - name: Smoke test packaged Windows installer
         run: bun run app:smoke
-      - name: Upload built installer
+      - name: Upload unverified candidate installer for QA
         uses: actions/upload-artifact@v4
         with:
           name: codex-web-gpt-v6.1.13-windows-${{ github.run_id }}
@@ -105,6 +110,7 @@ jobs:
           retention-days: 30
   promote:
     needs: [integrate, windows-installer]
+    if: needs.integrate.outputs.code_tests_green == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
