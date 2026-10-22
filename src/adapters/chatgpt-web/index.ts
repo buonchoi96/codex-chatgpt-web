@@ -588,12 +588,18 @@ export function createChatGptWebAdapter(
     const reviewOptions=()=>environment?{blockedOperationReview:readBlockedOperationReview(blockedOperationLedger,environment)}:{};
     const compileOptionsFor = (input: CodexParsedRequest) => {
       const review=reviewOptions();
-      if (manualRequest) return {manualControl:true as const,...review};
+      // The selected connector is authenticated against this provider's
+      // configured tunnel. Never silently replace a custom launcher connector
+      // with the production default when compiling Native2/Zero Risk prompts.
+      const connectorName = provider.chatgptWeb?.appName;
+      const connector = connectorName ? { appName: connectorName } : {};
+      if (manualRequest) return {manualControl:true as const,...review,...connector};
       const experimentalMultipartParts = experimentalBiggerContext
         ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments,review)
         : undefined;
       return {
         ...review,
+        ...connector,
         captureLunaCheckpoint,
         experimentalSkillAttachments,
         contextArchive: input === checkpointInput.parsed && !manualRequest && !captureLunaCheckpoint,
