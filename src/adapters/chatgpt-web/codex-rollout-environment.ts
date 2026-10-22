@@ -245,6 +245,23 @@ function latestRolloutRecord(fd: number, size: number, type: string, maxScanByte
   return item.type === type ? record(item.payload) : undefined;
 }
 
+function verifyCompactedEnvironmentItems(fd: number, size: number, items: Record<string, unknown>[]): void {
+  // The native rollout is the authority, never the message text carried in
+  // the resumed Responses request. Read only the newest completed compacted
+  // record. Missing or reordered items are not authenticated.
+  const compacted = latestNativeCompactionRecord(fd, size);
+  const history = Array.isArray(compacted?.replacement_history) ? compacted.replacement_history : [];
+  let previousIndex = -1;
+  for (const item of items) {
+    const matches = history.flatMap((value, index) => record(value)?.id === item.id ? [{value,index}] : []);
+    if (matches.length !== 1 || matches[0]!.index <= previousIndex
+      || !isDeepStrictEqual(matches[0]!.value,item)) {
+      throw new Error("Environment message or checkpoint differs from the latest native compaction");
+    }
+    previousIndex = matches[0]!.index;
+  }
+}
+
 function latestTurnContext(fd:number,size:number):Record<string,unknown>|undefined {
   return latestRolloutRecord(fd,size,'turn_context');
 }
@@ -889,6 +906,7 @@ export interface CurrentCodexRolloutOptions {
   compactionSource?: { id: string; turnId?: string; content: unknown };
   tools?: readonly CodexTool[];
   historicalEnvironmentMessages?: ChatGptUnattributedEnvironmentMessage[];
+  compactedEnvironmentItems?: Record<string, unknown>[];
   /** Internal root-only fallback when current Codex metadata omits optional
    * workspace/sandbox claims. The authority must come exclusively from the
    * exact current native root turn, never from the request or a cache. */
@@ -970,6 +988,9 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
       if (!nativeRootOnly) validateMetadataConsistency(lineage, environment, workspaceRootsDeclared);
       if (options.historicalEnvironmentMessages) {
         verifyHistoricalEnvironmentMessages(fd, size, turnId, options.historicalEnvironmentMessages);
+      }
+      if (options.compactedEnvironmentItems) {
+        verifyCompactedEnvironmentItems(fd, size, options.compactedEnvironmentItems);
       }
       const inspected=inspect({fd,size,turn:latest,environment,workspaceRootsDeclared});
       const after=fstatSync(fd);
