@@ -25,6 +25,25 @@ const rollout=root+"codex-rollout-environment.ts";
   writeFileSync(rollout,text.replaceAll("latestRolloutPayload(","latestRolloutRecord("));
 }
 
+
+{
+  const file=root+"codex-rollout-environment.ts";
+  let content=readFileSync(file,"utf8");
+  if(!content.includes("function renderFilesystemProfile(")){
+    const anchor="export function resolveCurrentCodexRolloutEnvironment(";
+    if(!content.includes(anchor)) throw Error("Native rollout function not found");
+    content=content.replace(anchor,"function renderFilesystemProfile(value: unknown, roots: string[]): string | undefined {\n  const profile = record(value);\n  if (profile?.type === \"disabled\") {\n    return '<permission_profile type=\"disabled\"><file_system type=\"unrestricted\" /></permission_profile>';\n  }\n  const fs = record(profile?.file_system);\n  if (profile?.type !== \"managed\" || fs?.type !== \"restricted\" || !Array.isArray(fs.entries)) return undefined;\n  const entries: Record<string, unknown>[] = [];\n  for (const raw of fs.entries) {\n    const entry = record(raw);\n    const path = record(entry?.path);\n    if (!entry || !path) return undefined;\n    const special = path.type === \"special\" ? record(path.value) : undefined;\n    const expanded = special?.kind === \"project_roots\"\n      ? roots.map(root => ({ ...entry, path: { type: \"path\", path: typeof special.subpath === \"string\" ? join(root, special.subpath) : root } }))\n      : [entry];\n    for (const candidate of expanded) {\n      if (!entries.some(prior => isDeepStrictEqual(prior, candidate))) entries.push(candidate);\n    }\n  }\n  const xml = (text: string): string => text.replace(/[&<>\"']/g, char => ({\n    \"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&apos;\",\n  })[char]!);\n  const rendered: string[] = [];\n  for (const entry of entries) {\n    const path = record(entry.path)!;\n    let tag: string;\n    let text: unknown;\n    if (path.type === \"path\") { tag = \"path\"; text = path.path; }\n    else if (path.type === \"glob_pattern\") { tag = \"glob\"; text = path.pattern; }\n    else if (path.type === \"special\") {\n      tag = \"special\";\n      const special = record(path.value);\n      if (!special || ![\"root\", \"minimal\", \"tmpdir\", \"slash_tmp\"].includes(String(special.kind))) return undefined;\n      text = `:${special.kind}`;\n    } else return undefined;\n    if (typeof text !== \"string\") return undefined;\n    rendered.push(`<entry access=\"${entry.access}\"${entry.access === \"deny\" ? ' escalatable=\"false\"' : \"\"}><${tag}>${xml(text)}</${tag}></entry>`);\n  }\n  const depth = fs.glob_scan_max_depth === undefined ? \"\" : ` glob_scan_max_depth=\"${fs.glob_scan_max_depth}\"`;\n  return `<permission_profile type=\"managed\"><file_system type=\"restricted\"${depth}>${rendered.join(\"\")}</file_system></permission_profile>`;\n}\n\n"+anchor);
+  }
+  content=content.replace("  workspaceRootsDeclared: boolean;\n}","  workspaceRootsDeclared: boolean;\n  filesystemProfileXml?: string;\n}");
+  const oldFn="return inspectCurrentCodexRollout(options,({environment,workspaceRootsDeclared})=>({environment,workspaceRootsDeclared}));";
+  const newFn="return inspectCurrentCodexRollout(options,({turn,environment,workspaceRootsDeclared})=>({environment,workspaceRootsDeclared,filesystemProfileXml:renderFilesystemProfile(turn.permission_profile,environment.roots)}));";
+  if(!content.includes(newFn)){
+    if(!content.includes(oldFn))throw Error("Native rollout return shape unexpectedly changed");
+    content=content.replace(oldFn,newFn);
+  }
+  writeFileSync(file,content);
+}
+
 edit(root+"index.ts",
   'import { ChatGptBrowserWorker,chatGptSuspensionClock } from "./browser-worker";',
   'import { ChatGptBrowserWorker, chatGptSuspensionClock, remainingStageBudgetMs } from "./browser-worker";'
@@ -80,7 +99,8 @@ optionalEdit(root+"thread-environment.ts",
   // Remaining diagnostic counters are read-only. Use the verified delta object.
   writeFileSync(path,source.replaceAll("calendarDelta.workspaceRoots","resolvedCalendarDelta.workspaceRoots"));
 }
-edit(root+"prompt.ts",
-  '    "Do not mention this transport contract, context packaging, or capability routing in the user-facing answer unless the user explicitly asks how the bridge works.",',
-  '    "Do not mention this transport contract, context packaging, or capability routing in the user-facing answer unless the user explicitly asks how the bridge works.",\n    ...(mode.localTools ? [\n      `The selected local Codex plugin for this turn is ${JSON.stringify(appName)}.`,\n      "Do not substitute another plugin for this local connection or send this turn\'s request identifiers to another plugin. If the selected plugin is unavailable, report that limitation.",\n    ] : []),');
+optionalEdit(root+"prompt.ts",
+  '      "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",',
+  '      "For local work required by the task, use the selected plugin\'s tools directly according to their declared descriptions and schemas.",'
+);
 console.log("Reconciled upstream v6.1.13 TypeScript integrations");
