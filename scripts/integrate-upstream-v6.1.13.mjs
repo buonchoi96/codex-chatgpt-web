@@ -11,7 +11,8 @@ function optionalEdit(path, from, to) {
   const text = readFileSync(path,"utf8");
   if (text.includes(to)) return;
   const n=text.split(from).length-1;
-  if (n!==1) throw new Error(`Optional merge site missing in ${path}: ${from.slice(0,90)}`);
+  if (n===0) { console.info(`Upstream has already changed optional reconciliation site: ${path} (${from.slice(0,70)})`); return; }
+  if (n!==1) throw new Error(`Ambiguous optional merge site in ${path}: ${from.slice(0,90)}`);
   writeFileSync(path,text.replace(from,to));
 }
 
