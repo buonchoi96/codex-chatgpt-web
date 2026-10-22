@@ -28,8 +28,6 @@ edit(root+"prompt.ts",
   'export interface CompileChatGptWebPromptOptions {',
   'export interface CompileChatGptWebPromptOptions {\n  /** Verified ChatGPT connector for the current transport. */\n  appName?: string;'
 );
-edit(root+"prompt.ts",
-  '  const manualControl = options?.manualControl === true;\n  const attachSkills = options?.experimentalSkillAttachments === true;',
-  '  const manualControl = options?.manualControl === true;\n  const appName = options?.appName?.trim() || (manualControl ? ZERO_RISK_CHATGPT_CONNECTOR_NAME : CHATGPT_CONNECTOR_NAME);\n  const attachSkills = options?.experimentalSkillAttachments === true;'
-);
+// appName's local declaration is already introduced by the upstream merge;
+// the fork only needs the missing type and imports reconciled above.
 console.log("Reconciled upstream v6.1.13 TypeScript integrations");

@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/upstream-6.1.13-integration.yml"
+      - "scripts/integrate-upstream-v6.1.13.mjs"
   workflow_dispatch:
 permissions:
   contents: write
