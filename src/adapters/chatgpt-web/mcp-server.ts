@@ -1330,7 +1330,7 @@ export async function createChatGptMcpServer(options: {
     {
       title: "Call any tool from the current Codex harness",
       description: afterSafeStart(contract, [
-        "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle. MCP calls automatically yield a same-turn job receipt after 8 seconds; when status=pending and job_id is returned, call codex_tool_poll with the identical turn_token until completion. Never rerun the original call to poll. Use codex_tool_call with wire_name=codex.control.async_poll and arguments {job_id,offset?,max_chars?} if codex_tool_poll is not advertised; codex.control.async_start accepts {wire_name,arguments?,input?} for explicit immediate start. No per-server setup is required.",
+        "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
           "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",

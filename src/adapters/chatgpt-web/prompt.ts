@@ -593,7 +593,7 @@ export function compileChatGptWebPrompt(
       ] : []),
       "These tools are connected by the user to their Codex runtime; local actions execute on that runtime's device under its configured sandbox and approval rules. Assess each action by its actual effects and the user's authorization; an authenticated connection does not make every action low risk.",
       "Call a local Codex tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
-      "Use actual Codex Native results as evidence for local observations and effects.",
+      "Use actual results from the selected plugin as evidence for local observations and effects.",
       ...(!manualControl ? [
       "For any MCP tool advertised in the current native Codex tool inventory (REA, GitHub, Playwright or other services), the integrated async gateway transparently returns its normal result if fast, or a pending receipt {status:pending,job_id,poll_with} if the native operation exceeds 8 seconds. A pending receipt is NOT task completion. Never re-invoke the original tool to poll.",
       "When a tool result reports code=native_tool_not_dispatched and execution_state=not_started, the broker intentionally refused an additional call because a previously dispatched MCP tool is still pending without an active owner waiter. The refused tool DID NOT RUN. Do not retry or switch interfaces while the original invocation remains uncertain; wait for the original result or its existing async job before doing dependent work.",

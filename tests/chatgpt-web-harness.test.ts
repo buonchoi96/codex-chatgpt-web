@@ -469,7 +469,8 @@ describe("ChatGPT outer-native harness v4", () => {
       }
       expect(turn.captureLunaCheckpoint).toBeUndefined();
       const prepared = browserMessages === 0 || freshConversation ? await turn.prepare() : await turn.prepareResume!();
-      expect(prepared.text).toContain('The selected local Codex plugin for this turn is "Codex app".');
+      if (localTools) expect(prepared.text).toContain('The selected local Codex plugin for this turn is "Codex app".');
+      else expect(prepared.text).not.toContain("The selected local Codex plugin for this turn is");
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);
       const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
@@ -2994,7 +2995,7 @@ describe("ChatGPT outer-native harness v4", () => {
       // six-tool ABI and reach the same executor through the reserved stable route.
       // Keep every original cached schema/description byte stable; refreshing an
       // installed connector to expose the extension is a separate owner action.
-      const publicConnectorAbi = listed.tools.filter(tool=>!["codex_parallel_exec", "codex_safety_review"].includes(tool.name)).map(tool => ({
+      const publicConnectorAbi = listed.tools.filter(tool=>!["codex_parallel_exec", "codex_safety_review", "codex_tool_poll", "codex_tool_start"].includes(tool.name)).map(tool => ({
         name: tool.name,
         title: tool.title ?? null,
         // The additive safety review paragraph does not change the legacy tool-call ABI.
