@@ -369,7 +369,7 @@ describe("Zero Risk public MCP ABI", () => {
         },
       });
       expect(recursive.isError).toBe(true);
-      expect(JSON.stringify(recursive.content)).toContain("not available in this turn");
+      expect(JSON.stringify(recursive.content)).toContain("not advertised by the current native Codex registry");
 
       const recursiveGateway = await client.callTool({
         name: "codex_tool_call",

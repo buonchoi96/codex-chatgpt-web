@@ -14,6 +14,7 @@ import {
   type ChatGptRootThreadMetadata,
   hasCurrentChatGptEnvironmentContext,
   extractChatGptCalendarEnvironmentDelta,
+  extractChatGptNativeCompactionEnvironment,
   hasRawChatGptEnvironmentContext,
   unattributedChatGptEnvironmentMessages,
   isChatGptCompactionContinuation,
@@ -267,11 +268,15 @@ export class ChatGptThreadEnvironmentStore {
         ? extractChatGptSteeringEnvironmentClaim(parsed) : undefined;
       const calendarDelta = hasCurrentContext && !currentCompaction
         ? extractChatGptCalendarEnvironmentDelta(parsed) : undefined;
-      if (hasCurrentContext && !currentCompaction && !initialClaim && !historicalMessages && !steeringClaim && !calendarDelta) {
+      const nativeCompaction = hasCurrentContext && !currentCompaction && !initialClaim && !steeringClaim && !calendarDelta
+        ? extractChatGptNativeCompactionEnvironment(parsed) : undefined;
+      if (hasCurrentContext && !currentCompaction && !initialClaim && !historicalMessages && !steeringClaim && !calendarDelta && !nativeCompaction) {
         console.warn("[chatgpt-web] trusted_environment_recovery rejected=unrecognized_current_context");
         throw error;
       }
-      const currentClaim = initialClaim ?? (currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim);
+      const currentClaim = initialClaim ?? (currentCompaction
+        ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim ?? nativeCompaction?.claim);
+      const resolvedCalendarDelta = calendarDelta ?? currentClaim?.calendarDelta;
       const rolloutIdentity = lineage ?? extractChatGptRootThreadMetadata(parsed);
       // Automatic compaction has a current turn_context; standalone compaction has only its
       // source turn_context. Either must be the latest native record, never an arbitrary ancestor.
@@ -294,6 +299,7 @@ export class ChatGptThreadEnvironmentStore {
           ...(compactionSourceTurnId ? { compactionSourceTurnId } : {}),
           ...(compactionSource ? { compactionSource } : {}),
           ...(historicalMessages ? { historicalEnvironmentMessages: historicalMessages } : {}),
+          ...(nativeCompaction ? { compactedEnvironmentItems: nativeCompaction.items } : {}),
           tools: parsed.context.tools,
         });
         if (rollout) {
@@ -310,21 +316,23 @@ export class ChatGptThreadEnvironmentStore {
               writableRoots: [...currentClaim.environment.roots],
             };
           }
-          if (calendarDelta) {
+          if (resolvedCalendarDelta) {
             // A same-turn calendar refresh is a *delta*, not an exhaustive grant list.
             // Newer Codex clients can repeat only some workspace_roots while the
             // authoritative native turn_context still lists the complete set.
             // Never add missing roots from the fragment or relax the sandbox profile:
             // every explicitly repeated root must already belong to this rollout.
             const nativeRoots = new Set(rolloutEnvironment.roots.map(pathIdentity));
-            const foreignRoots = calendarDelta.workspaceRoots.reduce((count, roots) =>
+            const foreignRoots = resolvedCalendarDelta.workspaceRoots.reduce((count, roots) =>
               count + roots.filter(root => !nativeRoots.has(root)).length, 0);
-            if (rolloutEnvironment.sandboxPolicy.type !== "dangerFullAccess" || foreignRoots > 0) {
+            if (resolvedCalendarDelta.filesystemProfiles.some(profile => profile !== rollout.filesystemProfileXml)
+              || foreignRoots > 0
+              || (!calendarDelta && resolvedCalendarDelta.workspaceRoots.some(roots => roots.length !== nativeRoots.size))) {
               console.warn(`[chatgpt-web] calendar_environment_conflict ${JSON.stringify({
                 sandboxMatches: rolloutEnvironment.sandboxPolicy.type === "dangerFullAccess",
                 nativeRootCount: nativeRoots.size,
-                deltaCount: calendarDelta.workspaceRoots.length,
-                repeatedRootCount: calendarDelta.workspaceRoots.reduce((count, roots) => count + roots.length, 0),
+                deltaCount: resolvedCalendarDelta.workspaceRoots.length,
+                repeatedRootCount: resolvedCalendarDelta.workspaceRoots.reduce((count, roots) => count + roots.length, 0),
                 foreignRootCount: foreignRoots,
                 nativeWorkspaceRootsDeclared: rollout.workspaceRootsDeclared,
               })}`);
@@ -333,7 +341,7 @@ export class ChatGptThreadEnvironmentStore {
           }
           const conflicts = currentClaim ? conflictingAuthorityFields(currentClaim, rolloutEnvironment) : [];
           if (conflicts.length > 0) {
-            const source = currentCompaction ? "Compaction continuation" : initialClaim ? "Current" : "Steering";
+            const source = currentCompaction || nativeCompaction ? "Compaction continuation" : initialClaim ? "Current" : "Steering";
             // Field names are safe to export; paths, request text and permission
             // contents are deliberately excluded from both the log and UI error.
             console.warn(`[chatgpt-web] trusted environment conflict (source=${source}, fields=${conflicts.join(",")})`);
