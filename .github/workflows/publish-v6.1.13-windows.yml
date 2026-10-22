@@ -1,0 +1,92 @@
+name: Publish verified v6.1.13 Windows installer
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Verify immutable merged source and release identity
+        id: verify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)"
+          if [[ "$current" != "$VERIFIED_SHA" ]]; then
+            echo "::notice::Main moved; skip publishing an obsolete build."
+            exit 0
+          fi
+          test "$(node -p "require('./package.json').version")" = "6.1.13"
+          test "$(node -p "require('./launcher/package.json').version")" = "6.1.13"
+          test "$(git rev-parse HEAD)" = "$VERIFIED_SHA"
+          git remote add upstream https://github.com/miuuyy/codex-chatgpt-web.git
+          git fetch --no-tags upstream main
+          git merge-base --is-ancestor 0901b9fb1976b4a984c7e9b4082c2868767bbf7c HEAD
+          echo "$VERIFIED_SHA" > "$RUNNER_TEMP/verified-v6.1.13-sha"
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+      - name: Download CI-verified Windows installer
+        if: ${{ steps.verify.outputs.should_publish == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          name: codex-web-gpt-windows-installer-${{ github.event.workflow_run.head_sha }}
+          path: installer-assets
+      - name: Publish immutable tag and installer
+        if: ${{ steps.verify.outputs.should_publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/verified-v6.1.13-sha" || { echo 'No verified main SHA'; exit 0; }
+          test "$(cat "$RUNNER_TEMP/verified-v6.1.13-sha")" = "$VERIFIED_SHA"
+          shopt -s nullglob
+          installers=(installer-assets/*-win-*.exe)
+          test "${#installers[@]}" -eq 1
+          tag=v6.1.13
+          existing="$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)"
+          if [[ -n "$existing" && "$existing" != "$VERIFIED_SHA" ]]; then
+            echo "Tag points to $existing instead of $VERIFIED_SHA" >&2
+            exit 1
+          fi
+          if [[ -z "$existing" ]]; then
+            gh api -X POST "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$tag" -f "sha=$VERIFIED_SHA"
+          fi
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo 'Release already exists: refuse to overwrite published assets automatically'
+          else
+            gh release create "$tag" "${installers[@]}" --repo "$GH_REPO" --target "$VERIFIED_SHA" --title "$tag" --generate-notes
+          fi
+      - name: Remove only integration-owned temporary branches
+        if: ${{ steps.verify.outputs.should_publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # An older PR points to the superseded staging branch; close it before removal.
+          gh pr close 54 --repo "$GH_REPO" --comment 'Superseded by verified v6.1.13 integration PR #55.' || true
+          for branch in automation/upstream-v6.1.13-39798795663 automation/upstream-v6.1.13-39799379550; do
+            if gh api "repos/$GH_REPO/git/ref/heads/$branch" >/dev/null 2>&1; then
+              gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$branch"
+            fi
+          done
