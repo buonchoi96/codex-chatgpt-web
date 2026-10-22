@@ -1,0 +1,141 @@
+name: Upstream v6.1.13 Integration
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/upstream-6.1.13-integration.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    outputs:
+      merged_sha: ${{ steps.merge.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Merge the exact upstream release commit with original fork history
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/miuuyy/codex-chatgpt-web.git
+          git fetch --no-tags upstream main
+          upstream_commit="0901b9fb1976b4a984c7e9b4082c2868767bbf7c"
+          git merge-base --is-ancestor "$upstream_commit" upstream/main
+          temp_branch="automation/upstream-v6.1.13-${GITHUB_RUN_ID}"
+          git switch -c "$temp_branch"
+          git merge --no-ff --no-edit -X ours "$upstream_commit" -m "Merge upstream v6.1.13 into fork main"
+          git merge-base --is-ancestor "$upstream_commit" HEAD
+          test "$(node -p "require('./package.json').version")" = "6.1.13"
+          test "$(node -p "require('./launcher/package.json').version")" = "6.1.13"
+          test "$(sed -n '/VERSION/p' src/version.ts | head -1 | grep -o 6.1.13)" = "6.1.13"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git status --short
+          git log -1 --format="%h %P %s"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Install exact dependencies
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd launcher --frozen-lockfile
+      - name: Typecheck and run complete code tests before exposing merge branch
+        run: |
+          bun run typecheck
+          bun test --timeout 15000 ./tests
+          bun run launcher:typecheck
+          bun run launcher:test
+      - name: Publish isolated verified integration branch
+        run: |
+          git push origin "HEAD:refs/heads/automation/upstream-v6.1.13-${GITHUB_RUN_ID}"
+  windows-installer:
+    needs: integrate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: automation/upstream-v6.1.13-${{ github.run_id }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Install locked dependencies
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd launcher --frozen-lockfile
+      - name: Prepare AVX2-independent Windows runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+      - name: Verify merged runtime and installer
+        run: |
+          bun run verify
+          bun run app:package
+      - name: Provide disposable E drive
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'E:\')) {
+            $scratch = Join-Path $env:RUNNER_TEMP 'codex-web-gpt-e-drive'
+            New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+            subst.exe E: $scratch
+            if ($LASTEXITCODE -ne 0) { throw 'E drive provisioning failed' }
+          }
+      - name: Smoke test packaged Windows installer
+        run: bun run app:smoke
+      - name: Upload built installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-web-gpt-v6.1.13-windows-${{ github.run_id }}
+          path: launcher/artifacts/*-win-*.exe
+          if-no-files-found: error
+          retention-days: 30
+  promote:
+    needs: [integrate, windows-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fast-forward fork main only if the original head is unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "automation/upstream-v6.1.13-${GITHUB_RUN_ID}" main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          merged="${{ needs.integrate.outputs.merged_sha }}"
+          test "$merged" = "$(git rev-parse "origin/automation/upstream-v6.1.13-${GITHUB_RUN_ID}")"
+          git merge-base --is-ancestor "$GITHUB_SHA" "$merged"
+          git merge-base --is-ancestor 0901b9fb1976b4a984c7e9b4082c2868767bbf7c "$merged"
+          git push origin "$merged:refs/heads/main"
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-web-gpt-v6.1.13-windows-${{ github.run_id }}
+          path: release-assets
+      - name: Tag and publish v6.1.13 Windows installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          merged="${{ needs.integrate.outputs.merged_sha }}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v6.1.13" >/dev/null 2>&1; then
+            echo "Tag v6.1.13 already exists: will not overwrite it" >&2
+            exit 1
+          fi
+          gh release create v6.1.13 release-assets/*.exe --repo "$GITHUB_REPOSITORY" \
+            --target "$merged" --title "v6.1.13" --generate-notes
+  cleanup:
+    needs: [integrate, windows-installer, promote]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Delete only the temporary integration branch, never any pre-existing branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/automation/upstream-v6.1.13-${GITHUB_RUN_ID}" || true
