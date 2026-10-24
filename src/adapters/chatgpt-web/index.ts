@@ -53,7 +53,7 @@ import {
 import {
   chatGptConversationKey,
 } from "./conversation-key";
-import { retainedConversationProofs } from './retained-followup-proof';
+import { retainedConversationProofs, retainedResumeForCheckpoint } from './retained-followup-proof';
 import { EnhancedRecoveryCheckpointStore, ENHANCED_RECOVERY_CHECKPOINT_INTERVAL_TOKENS } from './enhanced-recovery-checkpoint';
 import { passiveRecoveryCheckpointInstruction } from './native-compaction-control';
 import { createSameTabRecoveryDelta } from './same-tab-recovery-policy';
@@ -564,7 +564,12 @@ export function createChatGptWebAdapter(
     const retainedProof = conversationKey
       ? retainedConversationProofs.check(conversationKey, parsed)
       : undefined;
-    const resumeInput = retainedProof?.parsed;
+    // A durable, verified checkpoint supports a fresh canonical Web bootstrap;
+    // an older browser tab is no longer required even if its ancestry proof remains.
+    const resumeInput = retainedResumeForCheckpoint(checkpointInput.applied, retainedProof);
+    if (checkpointInput.applied && retainedProof?.reason === "verified") {
+      console.info("[chatgpt-web] retained_checkpoint_bootstrap mode=fresh_verified_checkpoint");
+    }
     if (conversationKey && retainedProof && retainedProof.reason !== "verified") {
       // Bounded provenance telemetry, never request bodies or private task data.
       // Distinguishes goal-turn history churn from expiry, model rebind or a
