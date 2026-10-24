@@ -1551,6 +1551,34 @@ export function chatGptAssistantHasUserGroupEvidence(
       && chatGptAssistantBelongsToAcceptedUser(assistantIdentity, candidateUserIdentity));
 }
 
+/**
+ * An accepted assistant-only Send receipt may arrive after ChatGPT virtualizes
+ * the paired user bubble. Bind only the exact newly accepted assistant identity,
+ * and only if there is one fresh group and one fresh rendered response. This is
+ * not a fallback for Stop alone, a tool call, or an arbitrary last() answer.
+ */
+export function chatGptAssistantHasAcceptedAssistantReceipt(
+  assistantIdentity: string,
+  acceptedAssistantIdentity: string | undefined,
+  candidateUserIdentity: string | undefined,
+  initialTurnIdentities: readonly string[],
+  state: Pick<ChatGptSubmissionDomState, "turnIdentities" | "userIdentities" | "responseIdentities">,
+): boolean {
+  if (candidateUserIdentity || !acceptedAssistantIdentity
+    || !assistantIdentity.startsWith("group:assistant:")
+    || acceptedAssistantIdentity !== assistantIdentity) return false;
+  const initial = new Set(initialTurnIdentities);
+  const newlyCreatedGroups = state.turnIdentities.filter(identity =>
+    identity.startsWith("group:assistant:") && !initial.has(identity));
+  const newlyRenderedAssistants = state.responseIdentities.filter(identity =>
+    identity.startsWith("group:assistant:") && !initial.has(identity));
+  const newlyRenderedUsers = state.userIdentities.filter(identity =>
+    identity.startsWith("group:user:") && !initial.has(identity));
+  return newlyCreatedGroups.length === 1 && newlyCreatedGroups[0] === assistantIdentity
+    && newlyRenderedAssistants.length === 1 && newlyRenderedAssistants[0] === assistantIdentity
+    && newlyRenderedUsers.length === 0;
+}
+
 /** Compare stable grouped roles only; legacy turn IDs have their own validation path. */
 export function chatGptAssistantBelongsToAcceptedUser(
   assistantIdentity: string,
@@ -1749,6 +1777,8 @@ interface ChatGptSubmissionBaseline {
   /** Non-authorizing per-Send proof for browser-only native /compact. */
   compactionBindingProof?: string;
   acceptedUserIdentity?: string;
+  /** Exact assistant group observed as this Send's accepted assistant_turn receipt. */
+  acceptedAssistantIdentity?: string;
   acknowledgedStages?: readonly ChatGptAcknowledgedMultipartStage[];
 }
 
@@ -3552,6 +3582,22 @@ export class ChatGptBrowserWorker {
         throw new Error("ChatGPT changed the user turn that acknowledged the submission");
       }
       baseline.acceptedUserIdentity = identity;
+    } else if (evidence === "assistant_turn") {
+      // ChatGPT can mount the assistant before (or without) its paired user
+      // bubble. Preserve only a unique fresh grouped assistant from this
+      // accepted Send; never infer authority from a later unbound DOM snapshot.
+      const initial = new Set(baseline.initialTurnIdentities);
+      const newGroups = state.turnIdentities.filter(identity =>
+        identity.startsWith("group:assistant:") && !initial.has(identity));
+      const newAssistants = state.responseIdentities.filter(identity =>
+        identity.startsWith("group:assistant:") && !initial.has(identity));
+      if (newGroups.length === 1 && newAssistants.length === 1
+        && newGroups[0] === newAssistants[0]) {
+        if (baseline.acceptedAssistantIdentity && baseline.acceptedAssistantIdentity !== newAssistants[0]) {
+          throw new Error("ChatGPT changed the assistant turn that acknowledged the submission");
+        }
+        baseline.acceptedAssistantIdentity = newAssistants[0];
+      }
     }
     return evidence;
   }
@@ -3763,7 +3809,14 @@ export class ChatGptBrowserWorker {
       // post-baseline user identity; never infer owner from Stop alone.
       const candidateUser = observationBaseline.acceptedUserIdentity
         ?? chatGptNewTurnIdentity(observationBaseline.initialTurnIdentities, state.userIdentities);
-      if (identity && chatGptAssistantHasUserGroupEvidence(identity, candidateUser)) return {
+      if (identity && (chatGptAssistantHasUserGroupEvidence(identity, candidateUser)
+        || chatGptAssistantHasAcceptedAssistantReceipt(
+          identity,
+          observationBaseline.acceptedAssistantIdentity,
+          candidateUser,
+          observationBaseline.initialTurnIdentities,
+          state,
+        ))) return {
         identity,
         locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
         acceptedTurnIdentities: state.turnIdentities,
