@@ -37,6 +37,22 @@ type Proof = { prefixLength: number; prefixHash: string; policyHash: string; ans
 export type RetainedReuseReason = "verified" | "proof_missing" | "ledger_invalid" | "ledger_io_failed" | "proof_expired"
   | "policy_changed" | "ancestry_changed" | "answer_boundary_changed" | "answer_changed";
 type ReuseCheck = { reason: RetainedReuseReason; parsed?: CodexParsedRequest };
+
+/**
+ * A canonical, integrity-verified passive recovery checkpoint is an independent
+ * browser bootstrap. Do not require the older retained tab merely because its
+ * ancestry proof still exists: the launcher may have already retired that tab.
+ *
+ * This decision occurs before browser Send; it never retries tool execution or
+ * relaxes the proof required to reuse an uncheckpointed conversation.
+ */
+export function retainedResumeForCheckpoint(
+  verifiedCheckpointApplied: boolean,
+  retainedProof: ReuseCheck | undefined,
+): CodexParsedRequest | undefined {
+  return verifiedCheckpointApplied || retainedProof?.reason !== "verified"
+    ? undefined : retainedProof.parsed;
+}
 /** A verified retained browser tab can legitimately survive multi-hour Codex goal turns.
  * The launcher still verifies the exact surface on every reuse; expiration is
  * a bounded failsafe, not a substitute for canonical ancestry/owner proof. */
