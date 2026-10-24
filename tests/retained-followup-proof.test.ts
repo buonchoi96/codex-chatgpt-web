@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { RetainedConversationProofStore } from '../src/adapters/chatgpt-web/retained-followup-proof';
+import { RetainedConversationProofStore, retainedResumeForCheckpoint } from '../src/adapters/chatgpt-web/retained-followup-proof';
 import type { CodexParsedRequest } from '../src/types';
 
 function request(): CodexParsedRequest {
@@ -96,4 +96,25 @@ test('retained proof survives routing-only knobs, but fails on changed tools or 
   const effort=followup(source);
   effort.options={...effort.options,reasoning:'low'};
   expect(store.check('owned',effort).reason).toBe('policy_changed');
+});
+
+test('durable recovery checkpoint is a fresh bootstrap even if old tab proof still verifies', () => {
+  const store = new RetainedConversationProofStore();
+  const source = request();
+  store.commit('owned', source, 'A verified');
+  const next = followup(source);
+  const checked = store.check('owned', next);
+  expect(checked.reason).toBe('verified');
+  expect(retainedResumeForCheckpoint(false, checked)?.context.messages)
+    .toEqual(next.context.messages.slice(2));
+  // Once the *independently verified* canonical checkpoint is applied, we
+  // must not require a possibly retired Web tab even though its old proof is valid.
+  expect(retainedResumeForCheckpoint(true, checked)).toBeUndefined();
+  // No proof: never manufacture a retained delta from a cache or checkpoint.
+  expect(retainedResumeForCheckpoint(false, {reason:'proof_missing'})).toBeUndefined();
+  expect(retainedResumeForCheckpoint(true, {reason:'ancestry_changed'})).toBeUndefined();
+  expect(retainedResumeForCheckpoint(false, undefined)).toBeUndefined();
+  // Neither branch dispatches a native tool, rewrites the full canonical request,
+  // or bypasses prompt preflight / current environment validation.
+  expect(next.context.messages).toHaveLength(4);
 });
