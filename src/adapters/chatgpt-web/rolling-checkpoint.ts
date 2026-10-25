@@ -5,7 +5,7 @@ import { estimateTokens } from "../../lib/token-estimate";
 import { parseRequest } from "../../responses/parser";
 import type { CodexParsedRequest } from "../../types";
 import * as z from "zod/v4";
-import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision } from "./environment";
+import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision, isAuthenticatedNativeGoalContinuation, priorChatGptAbortedTurnIds, userRevision, type ChatGptTurnUserRevision } from "./environment";
 
 // Alphanumeric by design: ChatGPT's DOM-to-Markdown serializer escapes `_`, `*`, and brackets.
 export const CHATGPT_LUNA_CHECKPOINT_MARKER = "CODEXLUNAPRIVATECHECKPOINTV1A7F3C9D2";
@@ -231,6 +231,42 @@ function currentTurnInput(parsed: CodexParsedRequest, turnId: string): unknown[]
   return suffix.length > 0 ? suffix : undefined;
 }
 
+function authenticatedGoalContinuationSource(
+  parsed: CodexParsedRequest,
+  threadId: string,
+  turnId: string,
+): ChatGptTurnUserRevision | undefined {
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : undefined;
+  const client = record(body?.client_metadata);
+  const rawMetadata = client?.["x-codex-turn-metadata"];
+  let metadata: Record<string, unknown> | undefined;
+  try {
+    metadata = typeof rawMetadata === "string"
+      ? record(JSON.parse(rawMetadata))
+      : record(rawMetadata);
+  } catch {
+    return undefined;
+  }
+  if (!input || metadata?.thread_id !== threadId || metadata?.turn_id !== turnId
+    || metadata?.request_kind !== "turn") return undefined;
+
+  const candidates = input.flatMap(value => {
+    const revision = userRevision(value, turnId, metadata);
+    return revision?.turnId && revision.turnId !== turnId && revision.itemId
+      ? [revision]
+      : [];
+  }).reverse();
+  const aborted = new Set(priorChatGptAbortedTurnIds(parsed));
+  for (const revision of candidates) {
+    if (aborted.has(revision.turnId!)) continue;
+    if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, revision)) {
+      return revision;
+    }
+  }
+  return undefined;
+}
+
 function checkpointContext(checkpoint: ChatGptLunaCheckpoint): string {
   return [
     "[Compressed Luna task history from the immediately preceding assistant response.]",
@@ -271,21 +307,38 @@ export class ChatGptLunaCheckpointStore {
   apply(parsed: CodexParsedRequest): { parsed: CodexParsedRequest; applied: boolean; reason?: string } {
     const identity = extractChatGptTurnIdentity(parsed);
     if (!identity.threadId || !identity.turnId) return { parsed, applied: false, reason: "missing native thread identity" };
-    const parent = parentAssistantAnswer(parsed, identity.turnId);
-    if (!parent) return { parsed, applied: false, reason: "no proven completed parent assistant answer" };
-
-    const parentHash = hashChatGptLunaAnswer(parent.answer);
-    const stored = this.get(identity.threadId, parentHash);
-    if (!stored) return { parsed, applied: false, reason: "no checkpoint for the exact parent answer" };
-    if (stored.sourceTurnId !== parent.turnId) {
-      return { parsed, applied: false, reason: "checkpoint source turn does not match the exact parent answer" };
-    }
-
-    const currentInput = currentTurnInput(parsed, identity.turnId);
     const body = record(parsed._rawBody);
+    const currentInput = currentTurnInput(parsed, identity.turnId);
     if (!currentInput || !body) {
       return { parsed, applied: false, reason: "current native turn boundary is unavailable" };
     }
+
+    const parent = parentAssistantAnswer(parsed, identity.turnId);
+    let stored: StoredChatGptLunaCheckpoint | undefined;
+    let reason = "no proven completed parent assistant answer";
+    if (parent) {
+      const exact = this.get(identity.threadId, hashChatGptLunaAnswer(parent.answer));
+      if (!exact) {
+        reason = "no checkpoint for the exact parent answer";
+      } else if (exact.sourceTurnId !== parent.turnId) {
+        reason = "checkpoint source turn does not match the exact parent answer";
+      } else {
+        stored = exact;
+      }
+    }
+
+    // A goal resume may omit the preceding assistant answer after native compaction.
+    // Recover the latest checkpoint only after authenticating the historical human task
+    // and current goal anchor against Codex's native rollout.
+    const goalSource = authenticatedGoalContinuationSource(parsed, identity.threadId, identity.turnId);
+    if (!stored && goalSource) {
+      const latest = this.latestForThread(identity.threadId);
+      if (latest && latest.sourceTurnId !== identity.turnId) {
+        stored = latest;
+        reason = "";
+      }
+    }
+    if (!stored) return { parsed, applied: false, reason };
 
     const checkpointItem = {
       type: "message",
@@ -298,17 +351,37 @@ export class ChatGptLunaCheckpointStore {
       ...bodyWithoutPrevious,
       input: [checkpointItem, ...currentInput],
     });
-    // `_rawBody.model` remains the public route slug while the server has already resolved the
-    // authoritative backend model and effort on `parsed`. Re-parsing the compacted input must not
-    // undo that binding.
+    // The raw body retains the public route slug; preserve the server-resolved backend model.
     compacted.modelId = parsed.modelId;
     compacted.options = { ...compacted.options, ...parsed.options };
+    if (goalSource) {
+      // This private witness is created only after exact native-rollout validation. It preserves
+      // task provenance without copying the full historical user message into model context.
+      compacted._trustedLunaCheckpointSource = {
+        threadId: identity.threadId,
+        turnId: identity.turnId,
+        modelId: parsed.modelId,
+        reasoning: parsed.options.reasoning,
+        revision: goalSource,
+      };
+    }
 
     // The transport optimization must never change which native user revision is being executed.
     if (JSON.stringify(extractChatGptTurnUserRevision(compacted)) !== JSON.stringify(extractChatGptTurnUserRevision(parsed))) {
       throw new Error("ChatGPT Luna rolling checkpoint changed the active native user revision");
     }
     return { parsed: compacted, applied: true };
+  }
+
+  private latestForThread(threadId: string): StoredChatGptLunaCheckpoint | undefined {
+    this.load();
+    this.prune();
+    let latest: StoredChatGptLunaCheckpoint | undefined;
+    for (const checkpoint of this.checkpoints.values()) {
+      if (checkpoint.threadId === threadId
+        && (!latest || checkpoint.updatedAt >= latest.updatedAt)) latest = checkpoint;
+    }
+    return latest;
   }
 
   commit(parsed: CodexParsedRequest, captured: CapturedChatGptLunaCheckpoint, answer: string): void {
