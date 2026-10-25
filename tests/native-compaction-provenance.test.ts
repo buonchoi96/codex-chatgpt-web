@@ -1021,6 +1021,8 @@ test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent
     (sourceRecord.payload as Record<string,unknown>).content=structuredClone(f.source.content);
     const existingInput=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input;
     existingInput[0]!.content=structuredClone(f.source.content);
+    // The native /goal control message can be present in Responses input without an item-level owner.
+    delete existingInput[existingInput.length-1]!.internal_chat_message_metadata_passthrough;
     f.write();
 
     const answer='The preceding goal turn completed its work.';
