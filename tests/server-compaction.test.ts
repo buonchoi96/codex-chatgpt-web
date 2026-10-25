@@ -883,7 +883,11 @@ test("Luna accepts dedicated native compaction so Codex can reduce its own histo
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model: "chatgpt-web/luna",
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+        thread_id: "thread_luna_compact_v1", turn_id: "turn_luna_compact_v1", request_kind: "compaction",
+      }) },
       input: [{ type: "message", role: "user", id: "msg_luna_compact_source",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn_luna_compact_v1", content_item_kinds: ["user.text"] },
         content: [{ type: "input_text", text: "Keep the current task and its pending work." }] }],
     }),
   }), config, provider => {
@@ -910,8 +914,12 @@ test("Luna accepts remote-v2 compaction while retaining its per-turn rolling che
     body: JSON.stringify({
       model: "chatgpt-web/luna",
       stream: false,
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({
+        thread_id: "thread_luna_compact_v2", turn_id: "turn_luna_compact_v2", request_kind: "turn",
+      }) },
       input: [
         { type: "message", role: "user", id: "msg_luna_v2_compact_source",
+          internal_chat_message_metadata_passthrough: { turn_id: "turn_luna_compact_v2", content_item_kinds: ["user.text"] },
           content: [{ type: "input_text", text: "Keep the current task and its pending work." }] },
         { type: "compaction_trigger" },
       ],
