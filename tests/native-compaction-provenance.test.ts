@@ -10,6 +10,7 @@ import {parseRequest} from '../src/responses/parser';
 import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord,diagnoseLatestNativeCompactionSource} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {isAuthenticatedNativeCompactionSource,isAuthenticatedNativeGoalContinuation,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
+import {ChatGptLunaCheckpointStore,hashChatGptLunaAnswer} from '../src/adapters/chatgpt-web/rolling-checkpoint';
 
 const owned:string[]=[];
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==';
@@ -1003,4 +1004,39 @@ test('an unknown native kind after the latest typed instruction still fails clos
       {id:f.source.id,turnId:f.oldTurn,content:f.source.content}))
       .toEqual({matches:false,reason:'untyped_native_user_after_instruction'});
   }finally{closeSync(fd);}
+});
+
+
+test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent answer was compacted away',()=>{
+  const f=goalContinuationFixture();
+  const answer='The preceding goal turn completed its work.';
+  const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
+  const client=raw.client_metadata as Record<string,unknown>;
+  const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
+  client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
+  raw.input=[structuredClone(f.source),{
+    type:'message',role:'assistant',id:'msg_previous_goal_answer',
+    content:[{type:'output_text',text:answer}],
+    internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
+  }];
+  const prior=parseRequest(raw);
+  const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
+  store.commit(prior,{
+    checkpoint:{version:2,summary:'Objective: Complete the authorized repository task. Pending: verify the final change.'},
+    answerHash:hashChatGptLunaAnswer(answer),
+  },answer);
+
+  const applied=store.apply(f.parsed);
+  expect(applied.applied).toBe(true);
+  expect(applied.reason).toBeUndefined();
+  expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+    .not.toContain('Finish the authorized repository change.');
+  expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+    .toContain('Compressed Luna task history');
+  // The summary remains assistant-owned context; only the private, native-verified
+  // source witness keeps the original human task attached to this transformed request.
+  expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
+  expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+  expect(JSON.stringify(applied.parsed.context.messages).length)
+    .toBeLessThan(JSON.stringify(f.parsed.context.messages).length);
 });
