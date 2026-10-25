@@ -260,8 +260,13 @@ function authenticatedGoalContinuationSource(
   const aborted = new Set(priorChatGptAbortedTurnIds(parsed));
   for (const revision of candidates) {
     if (aborted.has(revision.turnId!)) continue;
-    if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, revision)) {
-      return revision;
+    const historical = {
+      content: revision.content,
+      turnId: revision.turnId!,
+      itemId: revision.itemId!,
+    };
+    if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, historical)) {
+      return historical;
     }
   }
   return undefined;
