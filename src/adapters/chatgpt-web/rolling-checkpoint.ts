@@ -302,8 +302,10 @@ function authenticatedGoalContinuationSource(
   try {
     const recovered = recoverCompactionInstruction(parsed, { threadId, turnId });
     const source = recovered?.source;
-    if (source?.turnId && source.itemId && !aborted.has(source.turnId)
-      && isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, source)) return source;
+    if (source?.turnId && source.itemId && !aborted.has(source.turnId)) {
+      const historical = { content: source.content, turnId: source.turnId, itemId: source.itemId };
+      if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, historical)) return historical;
+    }
   } catch {
     // Missing or stale compaction provenance is not permission to apply a rolling checkpoint.
   }
