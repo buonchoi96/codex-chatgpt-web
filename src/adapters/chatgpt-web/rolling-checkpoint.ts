@@ -199,7 +199,7 @@ function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnI
       return item?.type === "message" && item.role === "user"
         && typeof item.id === "string" && item.id.length > 0
         && itemTurnId(item) === undefined
-        && /^<codex_internal_context source="goal">[\\s\\S]+<\\/codex_internal_context>$/.test(
+        && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(
           typeof item.content === "string" ? item.content.trim()
             : Array.isArray(item.content) && item.content.length === 1
               && record(item.content[0])?.type === "input_text"
@@ -216,7 +216,7 @@ function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnI
           ? String(record(item.content[0])!.text) : "";
       return item?.type === "message" && item.role === "user"
         && typeof item.id === "string" && itemTurnId(item) === undefined
-        && /^<codex_internal_context source="goal">[\\s\\S]+<\\/codex_internal_context>$/.test(content.trim());
+        && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(content.trim());
     });
   }
   return undefined;
