@@ -10,6 +10,7 @@ import {parseRequest} from '../src/responses/parser';
 import {extractChatGptTurnIdentity,extractChatGptTurnUserRevision,extractChatGptCompactionSourceRevision,isChatGptCompactionContinuation} from '../src/adapters/chatgpt-web/environment';
 import {inspectCurrentCodexRollout,latestNativeCompactionRecord,diagnoseLatestNativeCompactionSource} from '../src/adapters/chatgpt-web/codex-rollout-environment';
 import {isAuthenticatedNativeCompactionSource,isAuthenticatedNativeGoalContinuation,resolveNativeCompactionSource} from '../src/adapters/chatgpt-web/native-compaction-provenance';
+import {ChatGptLunaCheckpointStore,hashChatGptLunaAnswer} from '../src/adapters/chatgpt-web/rolling-checkpoint';
 
 const owned:string[]=[];
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==';
@@ -1003,4 +1004,103 @@ test('an unknown native kind after the latest typed instruction still fails clos
       {id:f.source.id,turnId:f.oldTurn,content:f.source.content}))
       .toEqual({matches:false,reason:'untyped_native_user_after_instruction'});
   }finally{closeSync(fd);}
+});
+
+
+test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent answer was compacted away',()=>{
+  const f=goalContinuationFixture();
+  const previousHome=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try {
+    const longInstruction='Finish the authorized repository change. '+('Preserve all verified task details and pending actions. '.repeat(3000));
+    f.source.content=[{type:'input_text',text:longInstruction}];
+    const sourceRecord=f.records.find(record=>{
+      const payload=record.payload as Record<string,unknown>|undefined;
+      return record.type==='response_item'&&payload?.id===f.source.id;
+    })!;
+    (sourceRecord.payload as Record<string,unknown>).content=structuredClone(f.source.content);
+    const existingInput=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input;
+    existingInput[0]!.content=structuredClone(f.source.content);
+    // The native /goal control message can be present in Responses input without an item-level owner.
+    delete existingInput[existingInput.length-1]!.internal_chat_message_metadata_passthrough;
+    f.write();
+
+    const answer='The preceding goal turn completed its work.';
+    const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
+    const client=raw.client_metadata as Record<string,unknown>;
+    const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
+    client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
+    raw.input=[structuredClone(f.source),{
+      type:'message',role:'assistant',id:'msg_previous_goal_answer',
+      content:[{type:'output_text',text:answer}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
+    }];
+    const prior=parseRequest(raw);
+    const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
+    store.commit(prior,{
+      checkpoint:{version:2,summary:'Objective: Complete the authorized repository task. Pending: verify the final change.'},
+      answerHash:hashChatGptLunaAnswer(answer),
+    },answer);
+
+    const applied=store.apply(f.parsed);
+    expect(applied.applied).toBe(true);
+    expect(applied.reason).toBeUndefined();
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .not.toContain('Finish the authorized repository change.');
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .toContain('Compressed Luna task history');
+    // The summary remains assistant-owned context; only the private, native-verified
+    // source witness keeps the original human task attached to this transformed request.
+    expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+    expect(JSON.stringify(applied.parsed.context.messages).length)
+      .toBeLessThan(JSON.stringify(f.parsed.context.messages).length);
+  } finally {
+    if(previousHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousHome;
+  }
+});
+
+
+test('Luna goal checkpoint recovers its authenticated source when native compaction removed the user item from request input',()=>{
+  const f=fixture();
+  const oldContext=f.records.find(record=>record.type==='turn_context')!;
+  const goal=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input[1]!;
+  f.records.splice(1,f.records.length-1,
+    f.ack,
+    {type:'response_item',payload:structuredClone(f.source)},
+    {type:'event_msg',payload:{type:'task_started',turn_id:f.turn}},
+    {type:'response_item',payload:structuredClone(goal)},
+    oldContext,
+  );
+  f.write();
+  const previousHome=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try {
+    const answer='The preceding goal turn completed its work.';
+    const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
+    const client=raw.client_metadata as Record<string,unknown>;
+    const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
+    client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
+    raw.input=[structuredClone(f.source),{
+      type:'message',role:'assistant',id:'msg_previous_goal_answer',
+      content:[{type:'output_text',text:answer}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
+    }];
+    const prior=parseRequest(raw);
+    const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
+    store.commit(prior,{
+      checkpoint:{version:2,summary:'Objective: Continue the authorized task. Pending: inspect the remaining changes.'},
+      answerHash:hashChatGptLunaAnswer(answer),
+    },answer);
+
+    const input=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input;
+    expect(input.some(item=>item.id===f.source.id)).toBe(false);
+    const applied=store.apply(f.parsed);
+    expect(applied.applied).toBe(true);
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .toContain('Compressed Luna task history');
+    expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
+  } finally {
+    if(previousHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousHome;
+  }
 });

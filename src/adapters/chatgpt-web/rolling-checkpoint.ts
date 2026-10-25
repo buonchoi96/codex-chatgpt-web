@@ -3,9 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { atomicWriteFile } from "../../config";
 import { estimateTokens } from "../../lib/token-estimate";
 import { parseRequest } from "../../responses/parser";
+import { recoverCompactionInstruction } from "./compaction-continuation";
 import type { CodexParsedRequest } from "../../types";
 import * as z from "zod/v4";
-import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision } from "./environment";
+import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds, userRevision, type ChatGptTurnUserRevision } from "./environment";
+import { isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
 
 // Alphanumeric by design: ChatGPT's DOM-to-Markdown serializer escapes `_`, `*`, and brackets.
 export const CHATGPT_LUNA_CHECKPOINT_MARKER = "CODEXLUNAPRIVATECHECKPOINTV1A7F3C9D2";
@@ -182,10 +184,31 @@ export class ChatGptLunaCheckpointStream {
   }
 }
 
+function goalControlItem(value: unknown, turnId: string): boolean {
+  const item = record(value);
+  const owner = itemTurnId(item);
+  if (item?.type !== "message" || item.role !== "user"
+    || typeof item.id !== "string" || item.id.length === 0
+    || (owner !== undefined && owner !== turnId)) return false;
+  const content = typeof item.content === "string" ? item.content
+    : Array.isArray(item.content) && item.content.length === 1
+      && record(item.content[0])?.type === "input_text"
+      && typeof record(item.content[0])?.text === "string"
+      ? String(record(item.content[0])!.text) : "";
+  return /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(content.trim());
+}
+
 function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnId: string): number | undefined {
   const replayPrefix = Math.min(parsed._replayPrefixLen ?? 0, input.length);
   if (replayPrefix > 0) return replayPrefix;
+
   const firstCurrentItem = input.findIndex(item => itemTurnId(item) === turnId);
+  // Include a native /goal control anchor even when item-level ownership is omitted. It can
+  // precede assistant/tool items that do carry the current turn id, so choose the earlier
+  // goal boundary. The caller still authenticates the historical task before applying any
+  // checkpoint; this structural boundary alone never grants replay authority.
+  const goalIndex = input.findIndex(item => goalControlItem(item, turnId));
+  if (goalIndex >= 0 && (firstCurrentItem < 0 || goalIndex < firstCurrentItem)) return goalIndex;
   return firstCurrentItem >= 0 ? firstCurrentItem : undefined;
 }
 
@@ -231,6 +254,83 @@ function currentTurnInput(parsed: CodexParsedRequest, turnId: string): unknown[]
   return suffix.length > 0 ? suffix : undefined;
 }
 
+function authenticatedGoalContinuationSource(
+  parsed: CodexParsedRequest,
+  threadId: string,
+  turnId: string,
+): ChatGptTurnUserRevision | undefined {
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : undefined;
+  const client = record(body?.client_metadata);
+  const rawMetadata = client?.["x-codex-turn-metadata"];
+  let metadata: Record<string, unknown> | undefined;
+  try {
+    metadata = typeof rawMetadata === "string"
+      ? record(JSON.parse(rawMetadata))
+      : record(rawMetadata);
+  } catch {
+    return undefined;
+  }
+  if (!input || metadata?.thread_id !== threadId || metadata?.turn_id !== turnId
+    || metadata?.request_kind !== "turn") return undefined;
+  // Ordinary turns with their own current human instruction do not need the goal-only
+  // recovery path; avoid native-rollout scans on the common case.
+  if (input.some(value => userRevision(value, turnId, metadata)?.turnId === turnId)) return undefined;
+
+  const candidates = input.flatMap(value => {
+    const revision = userRevision(value, turnId, metadata);
+    return revision?.turnId && revision.turnId !== turnId && revision.itemId
+      ? [revision]
+      : [];
+  }).reverse();
+  const aborted = new Set(priorChatGptAbortedTurnIds(parsed));
+  for (const revision of candidates) {
+    if (aborted.has(revision.turnId!)) continue;
+    const historical = {
+      content: revision.content,
+      turnId: revision.turnId!,
+      itemId: revision.itemId!,
+    };
+    if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, historical)) {
+      return historical;
+    }
+  }
+
+  // Native compaction can remove the original human message from the current request while
+  // retaining its authenticated source in the installed replacement history. Use that recovered
+  // source only if the independent /goal continuation verifier also confirms the current rollout.
+  try {
+    const recovered = recoverCompactionInstruction(parsed, { threadId, turnId });
+    const source = recovered?.source;
+    if (source?.turnId && source.itemId && !aborted.has(source.turnId)) {
+      const historical = { content: source.content, turnId: source.turnId, itemId: source.itemId };
+      if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, historical)) return historical;
+    }
+  } catch {
+    // Missing or stale compaction provenance is not permission to apply a rolling checkpoint.
+  }
+  return undefined;
+}
+
+function hasCurrentTurnHumanInstruction(
+  parsed: CodexParsedRequest,
+  input: unknown[],
+  turnId: string,
+): boolean {
+  const body = record(parsed._rawBody);
+  const client = record(body?.client_metadata);
+  const rawMetadata = client?.["x-codex-turn-metadata"];
+  let metadata: Record<string, unknown> | undefined;
+  try {
+    metadata = typeof rawMetadata === "string"
+      ? record(JSON.parse(rawMetadata))
+      : record(rawMetadata);
+  } catch {
+    return false;
+  }
+  return input.some(value => userRevision(value, turnId, metadata)?.turnId === turnId);
+}
+
 function checkpointContext(checkpoint: ChatGptLunaCheckpoint): string {
   return [
     "[Compressed Luna task history from the immediately preceding assistant response.]",
@@ -271,21 +371,41 @@ export class ChatGptLunaCheckpointStore {
   apply(parsed: CodexParsedRequest): { parsed: CodexParsedRequest; applied: boolean; reason?: string } {
     const identity = extractChatGptTurnIdentity(parsed);
     if (!identity.threadId || !identity.turnId) return { parsed, applied: false, reason: "missing native thread identity" };
-    const parent = parentAssistantAnswer(parsed, identity.turnId);
-    if (!parent) return { parsed, applied: false, reason: "no proven completed parent assistant answer" };
-
-    const parentHash = hashChatGptLunaAnswer(parent.answer);
-    const stored = this.get(identity.threadId, parentHash);
-    if (!stored) return { parsed, applied: false, reason: "no checkpoint for the exact parent answer" };
-    if (stored.sourceTurnId !== parent.turnId) {
-      return { parsed, applied: false, reason: "checkpoint source turn does not match the exact parent answer" };
-    }
-
-    const currentInput = currentTurnInput(parsed, identity.turnId);
     const body = record(parsed._rawBody);
+    const currentInput = currentTurnInput(parsed, identity.turnId);
     if (!currentInput || !body) {
       return { parsed, applied: false, reason: "current native turn boundary is unavailable" };
     }
+
+    const parent = parentAssistantAnswer(parsed, identity.turnId);
+    let stored: StoredChatGptLunaCheckpoint | undefined;
+    let reason = "no proven completed parent assistant answer";
+    if (parent) {
+      const exact = this.get(identity.threadId, hashChatGptLunaAnswer(parent.answer));
+      if (!exact) {
+        reason = "no checkpoint for the exact parent answer";
+      } else if (exact.sourceTurnId !== parent.turnId) {
+        reason = "checkpoint source turn does not match the exact parent answer";
+      } else {
+        stored = exact;
+      }
+    }
+
+    // A goal resume may omit the preceding assistant answer after native compaction.
+    // Recover the latest checkpoint only after authenticating the historical human task
+    // and current goal anchor against Codex's native rollout.
+    const goalSource = authenticatedGoalContinuationSource(parsed, identity.threadId, identity.turnId);
+    if (!goalSource && !hasCurrentTurnHumanInstruction(parsed, currentInput, identity.turnId)) {
+      return { parsed, applied: false, reason: "current turn has no authenticated human instruction" };
+    }
+    if (!stored && goalSource) {
+      const latest = this.latestForThread(identity.threadId);
+      if (latest && latest.sourceTurnId !== identity.turnId) {
+        stored = latest;
+        reason = "";
+      }
+    }
+    if (!stored) return { parsed, applied: false, reason };
 
     const checkpointItem = {
       type: "message",
@@ -298,17 +418,37 @@ export class ChatGptLunaCheckpointStore {
       ...bodyWithoutPrevious,
       input: [checkpointItem, ...currentInput],
     });
-    // `_rawBody.model` remains the public route slug while the server has already resolved the
-    // authoritative backend model and effort on `parsed`. Re-parsing the compacted input must not
-    // undo that binding.
+    // The raw body retains the public route slug; preserve the server-resolved backend model.
     compacted.modelId = parsed.modelId;
     compacted.options = { ...compacted.options, ...parsed.options };
+    if (goalSource) {
+      // This private witness is created only after exact native-rollout validation. It preserves
+      // task provenance without copying the full historical user message into model context.
+      compacted._trustedLunaCheckpointSource = {
+        threadId: identity.threadId,
+        turnId: identity.turnId,
+        modelId: parsed.modelId,
+        reasoning: parsed.options.reasoning,
+        revision: goalSource,
+      };
+    }
 
     // The transport optimization must never change which native user revision is being executed.
     if (JSON.stringify(extractChatGptTurnUserRevision(compacted)) !== JSON.stringify(extractChatGptTurnUserRevision(parsed))) {
       throw new Error("ChatGPT Luna rolling checkpoint changed the active native user revision");
     }
     return { parsed: compacted, applied: true };
+  }
+
+  private latestForThread(threadId: string): StoredChatGptLunaCheckpoint | undefined {
+    this.load();
+    this.prune();
+    let latest: StoredChatGptLunaCheckpoint | undefined;
+    for (const checkpoint of this.checkpoints.values()) {
+      if (checkpoint.threadId === threadId
+        && (!latest || checkpoint.updatedAt >= latest.updatedAt)) latest = checkpoint;
+    }
+    return latest;
   }
 
   commit(parsed: CodexParsedRequest, captured: CapturedChatGptLunaCheckpoint, answer: string): void {
