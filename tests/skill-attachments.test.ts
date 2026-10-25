@@ -298,3 +298,50 @@ test("native v2 compaction can restore selected skills from a durable per-thread
   });
   expect(inline.text).toContain("THREAD_SKILL_BODY");
 });
+
+
+test("a full skill still present in canonical history repairs a missing cache before the thread is compacted", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-selected-skill-repair-"));
+  temporarySkillRoots.push(root);
+  const original = text("recoverable", "RECOVERABLE_SKILL_BODY Preserve the current repository conventions.");
+  const skill = {
+    type: "message",
+    role: "user",
+    id: "msg_recoverable_skill",
+    content: [{ type: "input_text", text: original }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_skill_old",
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  };
+  const store = new SelectedSkillFileStore(root);
+  store.rememberThreadSkills("thread_skill_repair", [skill]);
+  const reference = store.threadSkills("thread_skill_repair")[0]!;
+  rmSync(join(root, reference.name), { force: true });
+
+  // The original typed message is still authoritative and must remain usable.
+  const current = {
+    type: "message",
+    role: "user",
+    id: "msg_current_repair",
+    content: [{ type: "input_text", text: "Continue the task." }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_current",
+      content_item_kinds: ["user.text"],
+    },
+  };
+  expect(restoreSelectedSkillMessagesForThread(
+    "thread_skill_repair", [skill, current], "turn_current", store,
+  )).toEqual([skill, current]);
+
+  // Before the next compaction, the original skill body repopulates the content-addressed file.
+  store.rememberThreadSkills("thread_skill_repair", [skill, current]);
+  const coldStore = new SelectedSkillFileStore(root);
+  const restored = restoreSelectedSkillMessagesForThread(
+    "thread_skill_repair", [current], "turn_current", coldStore,
+  );
+  expect(selectedSkillFileReferenceForMessage(restored[0])).toMatchObject({
+    name: reference.name,
+    sha256: reference.sha256,
+  });
+});

@@ -229,9 +229,6 @@ export class SelectedSkillFileStore {
         ...(typeof item.itemId === "string" ? { itemId: item.itemId } : {}),
         ...(typeof item.sourceTurnId === "string" ? { sourceTurnId: item.sourceTurnId } : {}),
       };
-      if (!this.get(reference)) {
-        throw new Error("Selected-skill cache entry is missing or failed integrity validation; restore the referenced skill file before continuing");
-      }
       seen.add(reference.name);
       result.push(reference);
     }
@@ -350,6 +347,11 @@ export function restoreSelectedSkillMessagesForThread(
   }
   const missing = references.filter(reference => !present.has(reference.name));
   if (missing.length === 0) return items;
+  for (const reference of missing) {
+    if (!store.get(reference)) {
+      throw new Error("Selected-skill cache entry is missing or failed integrity validation; restore the referenced skill file before continuing");
+    }
+  }
 
   const existingIds = new Set(items.flatMap(value => {
     const item = record(value);
