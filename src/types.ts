@@ -24,6 +24,14 @@ export interface CodexParsedRequest {
     reasoning: CodexRequestOptions["reasoning"];
     revision: { content: unknown; turnId?: string; itemId?: string };
   };
+  /** Authenticated native /goal source preserved only on a locally compacted Luna request. */
+  _trustedLunaCheckpointSource?: {
+    threadId: string;
+    turnId: string;
+    modelId: string;
+    reasoning: CodexRequestOptions["reasoning"];
+    revision: { content: unknown; turnId?: string; itemId?: string };
+  };
   /**
    * True when Codex MultiAgent V2 delegated an agent_message as provider-private encrypted_content.
    * ChatGPT Web has no OpenAI backend key for that blob; the Responses HTTP boundary rejects it
