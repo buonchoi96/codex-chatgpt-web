@@ -1009,34 +1009,40 @@ test('an unknown native kind after the latest typed instruction still fails clos
 
 test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent answer was compacted away',()=>{
   const f=goalContinuationFixture();
-  const answer='The preceding goal turn completed its work.';
-  const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
-  const client=raw.client_metadata as Record<string,unknown>;
-  const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
-  client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
-  raw.input=[structuredClone(f.source),{
-    type:'message',role:'assistant',id:'msg_previous_goal_answer',
-    content:[{type:'output_text',text:answer}],
-    internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
-  }];
-  const prior=parseRequest(raw);
-  const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
-  store.commit(prior,{
-    checkpoint:{version:2,summary:'Objective: Complete the authorized repository task. Pending: verify the final change.'},
-    answerHash:hashChatGptLunaAnswer(answer),
-  },answer);
+  const previousHome=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try {
+    const answer='The preceding goal turn completed its work.';
+    const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
+    const client=raw.client_metadata as Record<string,unknown>;
+    const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
+    client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
+    raw.input=[structuredClone(f.source),{
+      type:'message',role:'assistant',id:'msg_previous_goal_answer',
+      content:[{type:'output_text',text:answer}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
+    }];
+    const prior=parseRequest(raw);
+    const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
+    store.commit(prior,{
+      checkpoint:{version:2,summary:'Objective: Complete the authorized repository task. Pending: verify the final change.'},
+      answerHash:hashChatGptLunaAnswer(answer),
+    },answer);
 
-  const applied=store.apply(f.parsed);
-  expect(applied.applied).toBe(true);
-  expect(applied.reason).toBeUndefined();
-  expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
-    .not.toContain('Finish the authorized repository change.');
-  expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
-    .toContain('Compressed Luna task history');
-  // The summary remains assistant-owned context; only the private, native-verified
-  // source witness keeps the original human task attached to this transformed request.
-  expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
-  expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
-  expect(JSON.stringify(applied.parsed.context.messages).length)
-    .toBeLessThan(JSON.stringify(f.parsed.context.messages).length);
+    const applied=store.apply(f.parsed);
+    expect(applied.applied).toBe(true);
+    expect(applied.reason).toBeUndefined();
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .not.toContain('Finish the authorized repository change.');
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .toContain('Compressed Luna task history');
+    // The summary remains assistant-owned context; only the private, native-verified
+    // source witness keeps the original human task attached to this transformed request.
+    expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
+    expect(extractChatGptTurnUserRevision(f.parsed)).toEqual(f.source.content);
+    expect(JSON.stringify(applied.parsed.context.messages).length)
+      .toBeLessThan(JSON.stringify(f.parsed.context.messages).length);
+  } finally {
+    if(previousHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousHome;
+  }
 });
