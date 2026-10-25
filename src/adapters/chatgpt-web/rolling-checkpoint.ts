@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { atomicWriteFile } from "../../config";
 import { estimateTokens } from "../../lib/token-estimate";
 import { parseRequest } from "../../responses/parser";
+import { recoverCompactionInstruction } from "./compaction-continuation";
 import type { CodexParsedRequest } from "../../types";
 import * as z from "zod/v4";
 import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds, userRevision, type ChatGptTurnUserRevision } from "./environment";
@@ -293,6 +294,18 @@ function authenticatedGoalContinuationSource(
     if (isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, historical)) {
       return historical;
     }
+  }
+
+  // Native compaction can remove the original human message from the current request while
+  // retaining its authenticated source in the installed replacement history. Use that recovered
+  // source only if the independent /goal continuation verifier also confirms the current rollout.
+  try {
+    const recovered = recoverCompactionInstruction(parsed, { threadId, turnId });
+    const source = recovered?.source;
+    if (source?.turnId && source.itemId && !aborted.has(source.turnId)
+      && isAuthenticatedNativeGoalContinuation(parsed, { threadId, turnId }, source)) return source;
+  } catch {
+    // Missing or stale compaction provenance is not permission to apply a rolling checkpoint.
   }
   return undefined;
 }
