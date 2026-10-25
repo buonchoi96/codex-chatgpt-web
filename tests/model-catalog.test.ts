@@ -266,6 +266,16 @@ describe("native /models augmentation", () => {
     });
   });
 
+  test("Compatibility V1 does not rank Free Luna routes above native model rows", () => {
+    const config = defaultConfig("full");
+    config.solAvailable = false;
+    config.subagentProtocol = "compatibility-v1";
+    const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
+    expect(models.find(model => model.slug === "gpt-5.6-sol")?.priority).toBe(2);
+    expect(models.find(model => model.slug === "chatgpt-web/gpt-6-luna-low")?.priority).toBe(3);
+    expect(models.find(model => model.slug === "chatgpt-web/gpt-6-luna-medium")?.priority).toBe(3);
+  });
+
   test("Zero Risk publishes exactly one generic model without capability inference", () => {
     const config = defaultConfig("full");
     config.browserInteractionMode = "manual";
