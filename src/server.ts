@@ -1148,7 +1148,13 @@ export async function compactRequest(
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
-  const input = Array.isArray(raw.input) ? raw.input : [];
+  const originalInput = Array.isArray(raw.input) ? raw.input : [];
+  const identity = extractCodexTurnIdentityFromBody(raw);
+  const input = identity.threadId
+    ? restoreSelectedSkillMessagesForThread(
+      identity.threadId, originalInput, identity.turnId, defaultSelectedSkillFileStore,
+    )
+    : originalInput;
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
   // The internal response uses identity JSON even when the incoming compact
