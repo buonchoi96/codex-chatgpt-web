@@ -320,6 +320,30 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   const identity = extractChatGptTurnIdentity(parsed);
   const latestIndex = input.findLastIndex(value => userRevision(value, expectedTurnId, metadata) !== undefined);
   const latest = latestIndex >= 0 ? userRevision(input[latestIndex], expectedTurnId, metadata) : undefined;
+  // The rolling-checkpoint adapter may remove bulky prior history only after proving the
+  // historical instruction and /goal anchor against the native rollout. Accept that private
+  // witness here only on the transformed input carrying both the exact goal and its assistant
+  // checkpoint; never infer it from caller-supplied JSON or a skill/context item.
+  const rolling = parsed._trustedLunaCheckpointSource;
+  if (!latest && rolling && rolling.threadId === identity.threadId && rolling.turnId === identity.turnId
+    && rolling.modelId === parsed.modelId && rolling.reasoning === parsed.options.reasoning
+    && rolling.revision.turnId !== undefined && rolling.revision.turnId !== expectedTurnId
+    && rolling.revision.itemId !== undefined
+    && !priorChatGptAbortedTurnIds(parsed).includes(rolling.revision.turnId)) {
+    const hasPrivateCheckpoint = input.some(value => {
+      const item = record(value);
+      return item?.type === "message" && item.role === "assistant"
+        && itemTurnId(item) === identity.turnId
+        && rawMessageText(item).startsWith("[Compressed Luna task history from the immediately preceding assistant response.]");
+    });
+    const hasCurrentGoal = input.some(value => {
+      const item = record(value);
+      return item?.type === "message" && item.role === "user"
+        && (itemTurnId(item) === identity.turnId || itemTurnId(item) === undefined)
+        && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(rawMessageText(item).trim());
+    });
+    if (hasPrivateCheckpoint && hasCurrentGoal) return rolling.revision;
+  }
   // Fresh human input (or a native-rollout-authenticated /goal continuation) supersedes a
   // stale checkpoint. Some native current user items have a server id but no item-level turn_id.
   // Accept those only when they occur after the last checkpoint in the canonical input.
