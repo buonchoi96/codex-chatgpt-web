@@ -741,7 +741,7 @@ export async function responseRequest(
   const rememberCompletedResponse = (response: Record<string, unknown>): void => {
     if (!compaction) {
       const identity = extractChatGptTurnIdentity(parsed);
-      if (config.experimentalSkillAttachments && identity.threadId) {
+      if (response.status === "completed" && config.experimentalSkillAttachments && identity.threadId) {
         const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
         defaultSelectedSkillFileStore.rememberThreadSkills(identity.threadId, input);
       }
