@@ -5,7 +5,8 @@ import { estimateTokens } from "../../lib/token-estimate";
 import { parseRequest } from "../../responses/parser";
 import type { CodexParsedRequest } from "../../types";
 import * as z from "zod/v4";
-import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision, isAuthenticatedNativeGoalContinuation, priorChatGptAbortedTurnIds, userRevision, type ChatGptTurnUserRevision } from "./environment";
+import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds, userRevision, type ChatGptTurnUserRevision } from "./environment";
+import { isAuthenticatedNativeGoalContinuation } from "./native-compaction-provenance";
 
 // Alphanumeric by design: ChatGPT's DOM-to-Markdown serializer escapes `_`, `*`, and brackets.
 export const CHATGPT_LUNA_CHECKPOINT_MARKER = "CODEXLUNAPRIVATECHECKPOINTV1A7F3C9D2";
