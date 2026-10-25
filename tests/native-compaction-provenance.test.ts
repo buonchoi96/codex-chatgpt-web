@@ -1059,3 +1059,48 @@ test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent
     if(previousHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousHome;
   }
 });
+
+
+test('Luna goal checkpoint recovers its authenticated source when native compaction removed the user item from request input',()=>{
+  const f=fixture();
+  const oldContext=f.records.find(record=>record.type==='turn_context')!;
+  const goal=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input[1]!;
+  f.records.splice(1,f.records.length-1,
+    f.ack,
+    {type:'response_item',payload:structuredClone(f.source)},
+    {type:'event_msg',payload:{type:'task_started',turn_id:f.turn}},
+    {type:'response_item',payload:structuredClone(goal)},
+    oldContext,
+  );
+  f.write();
+  const previousHome=process.env.CODEX_HOME;
+  process.env.CODEX_HOME=f.home;
+  try {
+    const answer='The preceding goal turn completed its work.';
+    const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
+    const client=raw.client_metadata as Record<string,unknown>;
+    const metadata=JSON.parse(client['x-codex-turn-metadata'] as string);
+    client['x-codex-turn-metadata']=JSON.stringify({...metadata,turn_id:f.oldTurn,request_kind:'turn'});
+    raw.input=[structuredClone(f.source),{
+      type:'message',role:'assistant',id:'msg_previous_goal_answer',
+      content:[{type:'output_text',text:answer}],
+      internal_chat_message_metadata_passthrough:{turn_id:f.oldTurn},
+    }];
+    const prior=parseRequest(raw);
+    const store=new ChatGptLunaCheckpointStore(undefined,()=>Date.now());
+    store.commit(prior,{
+      checkpoint:{version:2,summary:'Objective: Continue the authorized task. Pending: inspect the remaining changes.'},
+      answerHash:hashChatGptLunaAnswer(answer),
+    },answer);
+
+    const input=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input;
+    expect(input.some(item=>item.id===f.source.id)).toBe(false);
+    const applied=store.apply(f.parsed);
+    expect(applied.applied).toBe(true);
+    expect(JSON.stringify((applied.parsed._rawBody as {input:unknown[]}).input))
+      .toContain('Compressed Luna task history');
+    expect(extractChatGptTurnUserRevision(applied.parsed)).toEqual(f.source.content);
+  } finally {
+    if(previousHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousHome;
+  }
+});
