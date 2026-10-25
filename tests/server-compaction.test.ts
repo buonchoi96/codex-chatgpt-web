@@ -884,7 +884,7 @@ test("Luna accepts dedicated native compaction so Codex can reduce its own histo
     body: JSON.stringify({
       model: "chatgpt-web/luna",
       client_metadata: { "x-codex-turn-metadata": JSON.stringify({
-        thread_id: "thread_luna_compact_v1", turn_id: "turn_luna_compact_v1", request_kind: "compaction",
+        thread_id: "thread_luna_compact_v1", turn_id: "turn_luna_compact_v1", request_kind: "turn",
       }) },
       input: [{ type: "message", role: "user", id: "msg_luna_compact_source",
         internal_chat_message_metadata_passthrough: { turn_id: "turn_luna_compact_v1", content_item_kinds: ["user.text"] },
