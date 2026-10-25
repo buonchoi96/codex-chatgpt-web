@@ -206,7 +206,7 @@ function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnI
               && typeof record(item.content[0])?.text === "string"
               ? String(record(item.content[0])!.text).trim() : "",
         );
-    }) && authenticatedGoalContinuationSource(parsed, identity.threadId, turnId)) {
+    })) {
     return input.findIndex(value => {
       const item = record(value);
       const content = typeof item?.content === "string" ? item.content
@@ -308,6 +308,25 @@ function authenticatedGoalContinuationSource(
   return undefined;
 }
 
+function hasCurrentTurnHumanInstruction(
+  parsed: CodexParsedRequest,
+  input: unknown[],
+  turnId: string,
+): boolean {
+  const body = record(parsed._rawBody);
+  const client = record(body?.client_metadata);
+  const rawMetadata = client?.["x-codex-turn-metadata"];
+  let metadata: Record<string, unknown> | undefined;
+  try {
+    metadata = typeof rawMetadata === "string"
+      ? record(JSON.parse(rawMetadata))
+      : record(rawMetadata);
+  } catch {
+    return false;
+  }
+  return input.some(value => userRevision(value, turnId, metadata)?.turnId === turnId);
+}
+
 function checkpointContext(checkpoint: ChatGptLunaCheckpoint): string {
   return [
     "[Compressed Luna task history from the immediately preceding assistant response.]",
@@ -372,6 +391,9 @@ export class ChatGptLunaCheckpointStore {
     // Recover the latest checkpoint only after authenticating the historical human task
     // and current goal anchor against Codex's native rollout.
     const goalSource = authenticatedGoalContinuationSource(parsed, identity.threadId, identity.turnId);
+    if (!goalSource && !hasCurrentTurnHumanInstruction(parsed, currentInput, identity.turnId)) {
+      return { parsed, applied: false, reason: "current turn has no authenticated human instruction" };
+    }
     if (!stored && goalSource) {
       const latest = this.latestForThread(identity.threadId);
       if (latest && latest.sourceTurnId !== identity.turnId) {
