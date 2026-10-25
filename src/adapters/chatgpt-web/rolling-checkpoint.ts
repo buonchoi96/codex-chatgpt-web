@@ -250,6 +250,9 @@ function authenticatedGoalContinuationSource(
   }
   if (!input || metadata?.thread_id !== threadId || metadata?.turn_id !== turnId
     || metadata?.request_kind !== "turn") return undefined;
+  // Ordinary turns with their own current human instruction do not need the goal-only
+  // recovery path; avoid native-rollout scans on the common case.
+  if (input.some(value => userRevision(value, turnId, metadata)?.turnId === turnId)) return undefined;
 
   const candidates = input.flatMap(value => {
     const revision = userRevision(value, turnId, metadata);
