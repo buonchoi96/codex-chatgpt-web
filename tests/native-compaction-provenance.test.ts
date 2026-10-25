@@ -1012,6 +1012,17 @@ test('Luna rolling checkpoint repairs an authenticated /goal resume whose parent
   const previousHome=process.env.CODEX_HOME;
   process.env.CODEX_HOME=f.home;
   try {
+    const longInstruction='Finish the authorized repository change. '+('Preserve all verified task details and pending actions. '.repeat(3000));
+    f.source.content=[{type:'input_text',text:longInstruction}];
+    const sourceRecord=f.records.find(record=>{
+      const payload=record.payload as Record<string,unknown>|undefined;
+      return record.type==='response_item'&&payload?.id===f.source.id;
+    })!;
+    (sourceRecord.payload as Record<string,unknown>).content=structuredClone(f.source.content);
+    const existingInput=(f.parsed._rawBody as {input:Record<string,unknown>[]}).input;
+    existingInput[0]!.content=structuredClone(f.source.content);
+    f.write();
+
     const answer='The preceding goal turn completed its work.';
     const raw=structuredClone(f.parsed._rawBody) as Record<string,unknown>;
     const client=raw.client_metadata as Record<string,unknown>;
