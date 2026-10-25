@@ -34,7 +34,6 @@ import {
   type CodexModelContextOverride,
 } from "./codex-integration";
 import {
-  CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
   type ChatGptWebModelRoute,
@@ -55,6 +54,7 @@ import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
 import { estimateTokens } from "./lib/token-estimate";
 import { restoreSameRequestAdditionalTools } from "./responses/compaction-retry-tools";
+import { defaultSelectedSkillFileStore, externalizeSelectedSkillMessages, restoreSelectedSkillMessagesForThread } from "./adapters/chatgpt-web/skill-attachments";
 
 type HttpTrackedEndpoint = "models" | "responses" | "compact" | "search" | "unspecified" | NativeImageEndpoint;
 
@@ -670,7 +670,31 @@ export async function responseRequest(
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
-  const expanded = expandPreviousResponseInput(raw);
+  let expanded = expandPreviousResponseInput(raw);
+  const previousResponseExpansionUnavailable = typeof requestedPreviousResponseId === "string" && expanded === raw;
+  if (!previousResponseExpansionUnavailable
+    && typeof requestedModel === "string" && isChatGptWebModelSlug(requestedModel)) {
+    try {
+      const identity = extractCodexTurnIdentityFromBody(raw);
+      if (identity.threadId) {
+        const expandedBody = expanded && typeof expanded === "object" && !Array.isArray(expanded)
+          ? expanded as Record<string, unknown>
+          : undefined;
+        const input = Array.isArray(expandedBody?.input) ? expandedBody.input : [];
+        const restored = restoreSelectedSkillMessagesForThread(
+          identity.threadId, input, identity.turnId, defaultSelectedSkillFileStore,
+        );
+        if (expandedBody && restored.length !== input.length) {
+          expanded = { ...expandedBody, input: restored };
+        }
+      }
+    } catch (error) {
+      return formatErrorResponse(
+        409, "invalid_request_error",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   const prediction = isCodexComposerPrediction(raw);
   let executionConfig = config;
   let parsed: CodexParsedRequest;
@@ -694,7 +718,7 @@ export async function responseRequest(
         + "Start a new Compatibility V1 task, or delegate from a Web model whose collaboration call uses the plaintext-delivery marker.",
     );
   }
-  if (typeof requestedPreviousResponseId === "string" && expanded === raw) {
+  if (previousResponseExpansionUnavailable) {
     return formatErrorResponse(
       409,
       "invalid_request_error",
@@ -716,6 +740,11 @@ export async function responseRequest(
   const compactionItem = compaction && parsed._compactionResponseFormat !== "message";
   const rememberCompletedResponse = (response: Record<string, unknown>): void => {
     if (!compaction) {
+      const identity = extractChatGptTurnIdentity(parsed);
+      if (response.status === "completed" && config.experimentalSkillAttachments && identity.threadId) {
+        const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+        defaultSelectedSkillFileStore.rememberThreadSkills(identity.threadId, input);
+      }
       if (options.rememberState !== false) rememberResponseState(parsed._rawBody, response, { force: true });
       return;
     }
@@ -733,6 +762,10 @@ export async function responseRequest(
         : null);
     if (!summary) return;
     const source = extractChatGptCompactionSourceRevision(parsed);
+    if (config.experimentalSkillAttachments) {
+      const body = parsed._rawBody as { input?: unknown[] };
+      defaultSelectedSkillFileStore.rememberThreadSkills(identity.threadId, body.input);
+    }
     const body = parsed._rawBody as { input?: unknown[] };
     // v1 installs the bounded user-message output, whereas v2 retains the original source.
     // Authenticate both exact producer-defined representations, never arbitrary rewrites.
@@ -742,17 +775,12 @@ export async function responseRequest(
     // instruction classifier: retained user-role content need not contain a human source.
     const v1Source = findChatGptCompactionSourceRevision({
       ...parsed,
-      _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
+      _rawBody: { ...body, input: buildCompactV1Output(
+         externalizeSelectedSkillMessages(extractCompactUserMessages(body.input), config.experimentalSkillAttachments), summary,
+       ) },
     }, { recoverCheckpoint: false });
     rememberCompactionContinuation(parsed, identity, v1Source ? [source, v1Source] : [source], summary);
   };
-  if (compaction && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
-    return formatErrorResponse(
-      409,
-      "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
-    );
-  }
   if (compaction) {
     try {
       // Resolve source provenance before changing the compact input or retiring any live
@@ -1120,14 +1148,13 @@ export async function compactRequest(
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
-  if (route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
-    return formatErrorResponse(
-      409,
-      "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
-    );
-  }
-  const input = Array.isArray(raw.input) ? raw.input : [];
+  const originalInput = Array.isArray(raw.input) ? raw.input : [];
+  const identity = extractCodexTurnIdentityFromBody(raw);
+  const input = identity.threadId
+    ? restoreSelectedSkillMessagesForThread(
+      identity.threadId, originalInput, identity.turnId, defaultSelectedSkillFileStore,
+    )
+    : originalInput;
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
   // The internal response uses identity JSON even when the incoming compact
@@ -1179,7 +1206,9 @@ export async function compactRequest(
   if (!summary?.trim()) {
     return formatErrorResponse(502, "invalid_response_error", "Compaction turn produced an empty summary");
   }
-  return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
+  return Response.json({ output: buildCompactV1Output(
+    externalizeSelectedSkillMessages(extractCompactUserMessages(input), config.experimentalSkillAttachments), summary,
+  ) });
 }
 
 export function startServer(

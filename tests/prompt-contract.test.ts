@@ -569,14 +569,40 @@ test("Web compaction rebuilds attachments after trimming an oversized oldest ima
   expect(compiled.text).toContain("preserve-latest-checkpoint");
 });
 
-test("Luna rejects a separate compaction prompt because continuity is already rolling", () => {
+test("Luna supports Codex history compaction in addition to its per-turn rolling checkpoint", () => {
   const compact = request("low");
   compact.modelId = CHATGPT_WEB_LUNA_MODEL_ID;
   compact._compactionRequest = true;
-  expect(() => compileChatGptWebPrompt(
+  const compiled = compileChatGptWebPrompt(
     compact,
     { localToolsEnabled: false, solAvailable: false, extraHighAvailable: false, proAvailable: false },
-  )).toThrow("does not accept a separate compaction turn");
+  );
+  expect(compiled.text).toContain("This is a Codex history-compaction checkpoint");
+  expect(compiled.text).toContain("Return only the checkpoint summary that the next model needs to resume the task.");
+  expect(compiled.text).not.toContain("Append the exact marker");
+});
+
+test("Luna may use a validated history archive when a rolling-checkpoint turn exceeds inline transport", () => {
+  const large = request("low");
+  large.modelId = CHATGPT_WEB_LUNA_MODEL_ID;
+  large.context.messages.push({
+    role: "toolResult",
+    toolCallId: "call_luna_large",
+    toolName: "exec_command",
+    content: "luna-canonical-history ".repeat(30_000),
+    isError: false,
+    timestamp: 3,
+  });
+  const compiled = compileChatGptWebPrompt(
+    large,
+    { localToolsEnabled: true, solAvailable: false, extraHighAvailable: false, proAvailable: false },
+    "turn_12345678901234567890123456789012",
+    { contextArchive: true, captureLunaCheckpoint: true },
+  );
+  expect(compiled.transportDecision?.choice).toBe("ZIP_SINGLE_MESSAGE");
+  expect(compiled.contextArchive).toBeDefined();
+  expect(compiled.text).toContain("Append the exact marker");
+  expect(compiled.contextArchive!.contextText).toContain("luna-canonical-history");
 });
 
 test("Web compaction fails closed when its final instruction alone exceeds the transport budget", () => {

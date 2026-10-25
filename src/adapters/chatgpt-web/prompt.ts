@@ -2,7 +2,7 @@ import { nativeCommandSurface } from "./native-command-surface";
 import { createHash } from "node:crypto";
 import { buildContextArchive } from './context-archive';
 import { CHATGPT_CONNECTOR_NAME, ZERO_RISK_CHATGPT_CONNECTOR_NAME } from "../../config";
-import { selectedSkillFile, skillFileTokens, type ChatGptSkillFile } from "./skill-attachments";
+import { selectedSkillFile, resolveSelectedSkillMessage, skillFileTokens, type ChatGptSkillFile, type SelectedSkillFileStore } from "./skill-attachments";
 import {
   CHATGPT_WEB_PLATFORM_RESERVE_TOKENS,
   CHATGPT_WEB_GPT6_INSTANT_BIGGER_CONTEXT_ERROR,
@@ -71,6 +71,8 @@ export interface CompileChatGptWebPromptOptions {
   appName?: string;
   captureLunaCheckpoint?: boolean;
   experimentalSkillAttachments?: boolean;
+  /** Injectable private cache for compacted selected-skill references; defaults to the per-user store. */
+  skillFileStore?: SelectedSkillFileStore;
   experimentalMultipartParts?: ChatGptWebMultipartPartCount;
   /**
    * Manual Zero Risk transport keeps ChatGPT model/effort selection and prompt submission under the
@@ -525,9 +527,6 @@ export function compileChatGptWebPrompt(
   if (multipartEnabled && !supportsChatGptWebBiggerContext(parsed.modelId, mode.effort, parsed._chatgptModelFamily)) {
     throw new Error(CHATGPT_WEB_GPT6_INSTANT_BIGGER_CONTEXT_ERROR);
   }
-  if (parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && parsed._compactionRequest && !multipartEnabled) {
-    throw new Error("ChatGPT Luna uses rolling checkpoints and does not accept a separate compaction turn");
-  }
   if (captureLunaCheckpoint && (parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID || parsed._compactionRequest)) {
     throw new Error("Rolling checkpoints are supported only for normal ChatGPT Luna turns");
   }
@@ -705,10 +704,15 @@ export function compileChatGptWebPrompt(
     };
     const skillFiles: ChatGptSkillFile[] = [];
     const messages = sourceMessages.map(message => {
-      if (attachSkills && message.role === "user" && message.origin === "codex_skill") {
-        const file = selectedSkillFile(message);
-        if (!skillFiles.some(existing => existing.name === file.name)) skillFiles.push(file);
-        return { role: "user", origin: "codex_skill", content: [{ type: "skill_attachment", filename: file.name }] };
+      if (message.role === "user" && message.origin === "codex_skill") {
+        if (attachSkills) {
+          const file = selectedSkillFile(message, options?.skillFileStore);
+          if (!skillFiles.some(existing => existing.name === file.name)) skillFiles.push(file);
+          return { role: "user", origin: "codex_skill", content: [{ type: "skill_attachment", filename: file.name }] };
+        }
+        // A compacted pointer must be expanded again when attachment transport is disabled;
+        // never send the pointer string to the model as though it were the skill instructions.
+        return messageEnvelope(resolveSelectedSkillMessage(message, options?.skillFileStore), images, budget);
       }
       return messageEnvelope(message, images, budget);
     });

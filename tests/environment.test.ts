@@ -81,6 +81,22 @@ function currentWire(
   };
 }
 
+test("a selected-skill attachment or compact reference cannot authorize browser-session replay by itself", () => {
+  const parsed = currentWire();
+  const body = parsed._rawBody as { input: Array<Record<string, unknown>> };
+  body.input = [{
+    type: "message",
+    id: "msg_only_selected_skill",
+    role: "user",
+    content: [{ type: "input_text", text: "CODEX_SKILL_FILE_REF_V1:testing--0123456789abcdef.txt:" + "a".repeat(64) }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_current",
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  }];
+  expect(() => extractChatGptTurnUserRevision(parsed)).toThrow("requires a current-turn user message");
+});
+
 describe("trusted current Codex environment envelope", () => {
   describe("native open-page context", () => {
     let originalCodexHome: string | undefined;
