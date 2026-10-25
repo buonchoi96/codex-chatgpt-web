@@ -184,7 +184,6 @@ function startCatalogVerificationMonitor({ logger, stateStore }) {
         });
         return;
       }
-      const config = runtimeSupervisor.readConfig();
       if (config?.browserInteractionMode !== "manual" && config?.solAvailable === false) {
         const inspectedCatalog = health?.last_successful_model_catalog;
         const inspectedModels = Array.isArray(inspectedCatalog?.models) ? inspectedCatalog.models : [];
