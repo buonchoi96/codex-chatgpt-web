@@ -187,7 +187,39 @@ function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnI
   const replayPrefix = Math.min(parsed._replayPrefixLen ?? 0, input.length);
   if (replayPrefix > 0) return replayPrefix;
   const firstCurrentItem = input.findIndex(item => itemTurnId(item) === turnId);
-  return firstCurrentItem >= 0 ? firstCurrentItem : undefined;
+  if (firstCurrentItem >= 0) return firstCurrentItem;
+
+  // Native Codex can replay the authenticated /goal anchor without item-level turn metadata.
+  // It is a valid boundary only when the historical human task and current goal are proven
+  // against the owning rollout; never use an arbitrary ownerless user fragment as a boundary.
+  const identity = extractChatGptTurnIdentity(parsed);
+  if (identity.threadId && identity.turnId === turnId
+    && input.some(value => {
+      const item = record(value);
+      return item?.type === "message" && item.role === "user"
+        && typeof item.id === "string" && item.id.length > 0
+        && itemTurnId(item) === undefined
+        && /^<codex_internal_context source="goal">[\\s\\S]+<\\/codex_internal_context>$/.test(
+          typeof item.content === "string" ? item.content.trim()
+            : Array.isArray(item.content) && item.content.length === 1
+              && record(item.content[0])?.type === "input_text"
+              && typeof record(item.content[0])?.text === "string"
+              ? String(record(item.content[0])!.text).trim() : "",
+        );
+    }) && authenticatedGoalContinuationSource(parsed, identity.threadId, turnId)) {
+    return input.findIndex(value => {
+      const item = record(value);
+      const content = typeof item?.content === "string" ? item.content
+        : Array.isArray(item?.content) && item.content.length === 1
+          && record(item.content[0])?.type === "input_text"
+          && typeof record(item.content[0])?.text === "string"
+          ? String(record(item.content[0])!.text) : "";
+      return item?.type === "message" && item.role === "user"
+        && typeof item.id === "string" && itemTurnId(item) === undefined
+        && /^<codex_internal_context source="goal">[\\s\\S]+<\\/codex_internal_context>$/.test(content.trim());
+    });
+  }
+  return undefined;
 }
 
 function assistantItemText(value: unknown): string | undefined {
