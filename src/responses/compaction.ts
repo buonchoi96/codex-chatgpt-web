@@ -1,5 +1,6 @@
 import { isNativeAgentsMdContext } from "./native-context";
 import { estimateTokens } from "../lib/token-estimate";
+import { selectedSkillFileReferenceForMessage } from "../adapters/chatgpt-web/skill-attachments";
 
 /**
  * Remote compaction v2 support for ROUTED providers.
@@ -200,10 +201,10 @@ function imageBlock(block: CompactContentBlock): boolean {
 /**
  * Build the v1 compact replacement history.
  *
- * Text follows Codex's 20k-token retained-user-message budget. Image history is independently
- * bounded to ChatGPT's ten-attachment limit, newest first. This prevents an old image corpus from
- * immediately refilling Codex's context window after a successful compact while still preserving
- * the visual context the browser model can actually receive.
+ * Text follows Codex's 20k-token retained-user-message budget. Historical images are independently
+ * bounded to ChatGPT's ten-image history budget, newest first. Selected skills are retained as
+ * content-addressed local references instead of copying their full bodies into native history.
+ * Their complete text is hash-verified from the private skill store when the next prompt is built.
  */
 export function buildCompactV1Output(
   userMessages: CompactMessageItem[],
@@ -211,10 +212,21 @@ export function buildCompactV1Output(
   maxImages = 10,
 ): CompactMessageItem[] {
   const selected: CompactMessageItem[] = [];
+  const retainedSkillNames = new Set<string>();
   let remaining = COMPACT_V1_RETAINED_TOKEN_BUDGET;
   let retainedImages = 0;
-  for (let i = userMessages.length - 1; i >= 0 && (remaining > 0 || retainedImages < maxImages); i--) {
+  for (let i = userMessages.length - 1; i >= 0; i--) {
     const message = structuredClone(userMessages[i]!);
+    const skillReference = selectedSkillFileReferenceForMessage(message);
+    if (skillReference) {
+      // Skill references are tiny native history records, not browser attachment uploads. Keep
+      // every distinct skill reference so compaction never silently deletes selected instructions.
+      if (!retainedSkillNames.has(skillReference.name)) {
+        retainedSkillNames.add(skillReference.name);
+        selected.push(message);
+      }
+      continue;
+    }
     const blocks = compactContentBlocks(message);
     const retainedReversed: CompactContentBlock[] = [];
     for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
@@ -240,8 +252,7 @@ export function buildCompactV1Output(
     }
   }
   selected.reverse();
-  // codex-rs compact.rs uses "{SUMMARY_PREFIX}\n{summary}" (single newline) and detects stored
-  // summaries by that exact prefix — keep the same shape.
-  const summaryText = summary.trim().length > 0 ? `${SUMMARY_PREFIX}\n${summary}` : "(no summary available)";
+  // codex-rs compact.rs uses one newline after the prefix; keep that exact summary shape.
+  const summaryText = summary.trim().length > 0 ? SUMMARY_PREFIX + "\n" + summary : "(no summary available)";
   return [...selected, compactUserMessageItem(summaryText)];
 }

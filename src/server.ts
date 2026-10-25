@@ -34,7 +34,6 @@ import {
   type CodexModelContextOverride,
 } from "./codex-integration";
 import {
-  CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
   type ChatGptWebModelRoute,
@@ -55,6 +54,7 @@ import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
 import { estimateTokens } from "./lib/token-estimate";
 import { restoreSameRequestAdditionalTools } from "./responses/compaction-retry-tools";
+import { externalizeSelectedSkillMessages } from "./adapters/chatgpt-web/skill-attachments";
 
 type HttpTrackedEndpoint = "models" | "responses" | "compact" | "search" | "unspecified" | NativeImageEndpoint;
 
@@ -742,17 +742,12 @@ export async function responseRequest(
     // instruction classifier: retained user-role content need not contain a human source.
     const v1Source = findChatGptCompactionSourceRevision({
       ...parsed,
-      _rawBody: { ...body, input: buildCompactV1Output(extractCompactUserMessages(body.input), summary) },
+      _rawBody: { ...body, input: buildCompactV1Output(
+         externalizeSelectedSkillMessages(extractCompactUserMessages(body.input), config.experimentalSkillAttachments), summary,
+       ) },
     }, { recoverCheckpoint: false });
     rememberCompactionContinuation(parsed, identity, v1Source ? [source, v1Source] : [source], summary);
   };
-  if (compaction && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
-    return formatErrorResponse(
-      409,
-      "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
-    );
-  }
   if (compaction) {
     try {
       // Resolve source provenance before changing the compact input or retiring any live
@@ -1120,13 +1115,6 @@ export async function compactRequest(
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
-  if (route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL && !config.experimentalBiggerContext) {
-    return formatErrorResponse(
-      409,
-      "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
-    );
-  }
   const input = Array.isArray(raw.input) ? raw.input : [];
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
@@ -1179,7 +1167,9 @@ export async function compactRequest(
   if (!summary?.trim()) {
     return formatErrorResponse(502, "invalid_response_error", "Compaction turn produced an empty summary");
   }
-  return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
+  return Response.json({ output: buildCompactV1Output(
+    externalizeSelectedSkillMessages(extractCompactUserMessages(input), config.experimentalSkillAttachments), summary,
+  ) });
 }
 
 export function startServer(

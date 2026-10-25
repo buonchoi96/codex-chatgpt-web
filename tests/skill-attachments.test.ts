@@ -1,12 +1,22 @@
 import { estimateChatGptWebUsage } from "../src/adapters/chatgpt-web/usage";
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { parseRequest } from "../src/responses/parser";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { chatGptPromptFilePayloads } from "../src/adapters/chatgpt-web/browser-worker";
 import { retainedConversationResumeRequest } from "../src/adapters/chatgpt-web/conversation-key";
 import { estimateCompiledChatGptWebInputTokens, estimateCompiledChatGptWebMessageTokens } from "../src/adapters/chatgpt-web/input-tokens";
-import { skillFileTokens } from "../src/adapters/chatgpt-web/skill-attachments";
+import {
+  externalizeSelectedSkillMessages,
+  SelectedSkillFileStore,
+  selectedSkillFile,
+  selectedSkillFileReferenceForMessage,
+  skillFileTokens,
+} from "../src/adapters/chatgpt-web/skill-attachments";
+import { buildCompactV1Output, extractCompactUserMessages } from "../src/responses/compaction";
 
 const capabilities = { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true };
 const token = "turn_12345678901234567890123456789012";
@@ -117,4 +127,112 @@ test("usage accounts for skills accumulated over many turns without applying a p
   const usage = estimateChatGptWebUsage(parsed, { answer: "done" }, capabilities, false, true);
   expect(usage.inputTokens).toBeGreaterThan(0);
   expect(usage.estimated).toBe(true);
+});
+
+
+const temporarySkillRoots: string[] = [];
+afterEach(() => {
+  for (const root of temporarySkillRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+test("selected skills survive native v1 compaction as durable references and rehydrate after a cold cache", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-selected-skill-store-"));
+  temporarySkillRoots.push(root);
+  const original = text("testing", "PERSISTED_SKILL_BODY " + "follow the exact repository instructions\n".repeat(500));
+  const skillItem = {
+    type: "message",
+    role: "user",
+    id: "msg_selected_skill",
+    content: [{ type: "input_text", text: original }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_before_compact",
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  };
+  const latestTask = {
+    type: "message",
+    role: "user",
+    id: "msg_current_task",
+    content: [{ type: "input_text", text: "Finish the implementation and verify the focused tests." }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_after_compact",
+      content_item_kinds: ["user.text"],
+    },
+  };
+  const rawInput = [skillItem, latestTask];
+  const writer = new SelectedSkillFileStore(root);
+  const externalized = externalizeSelectedSkillMessages(rawInput, true, writer);
+
+  expect(JSON.stringify(externalized)).not.toContain("PERSISTED_SKILL_BODY");
+  expect(selectedSkillFileReferenceForMessage(externalized[0])).toMatchObject({
+    name: expect.stringMatching(/^testing--[a-f0-9]{16}\.txt$/),
+    sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+  const compacted = buildCompactV1Output(
+    extractCompactUserMessages(externalized),
+    "The task is in progress; finish implementation and tests.",
+  );
+  expect(JSON.stringify(compacted)).not.toContain("PERSISTED_SKILL_BODY");
+  expect(compacted).toContainEqual(expect.objectContaining({
+    id: "msg_current_task",
+    content: [{ type: "input_text", text: "Finish the implementation and verify the focused tests." }],
+  }));
+  const compactedSkill = compacted.find(item => item.id === "msg_selected_skill")!;
+  expect(selectedSkillFileReferenceForMessage(compactedSkill)).toBeDefined();
+
+  // Construct a fresh store instance to emulate a restarted backend; only the on-disk cache survives.
+  const restartedStore = new SelectedSkillFileStore(root);
+  const reference = selectedSkillFileReferenceForMessage(compactedSkill)!;
+  const rehydrated = selectedSkillFile(
+    {
+      role: "user",
+      origin: "codex_skill",
+      content: [{ type: "text", text: "CODEX_SKILL_FILE_REF_V1:" + reference.name + ":" + reference.sha256 }],
+      timestamp: 1,
+    },
+    restartedStore,
+  );
+  expect(rehydrated.text).toBe(original);
+  expect(rehydrated.name).toBe(reference.name);
+
+  const parsedAfterCompact = parse(compacted as unknown[]);
+  const compiled = compileChatGptWebPrompt(parsedAfterCompact, capabilities, token, {
+    experimentalSkillAttachments: true,
+    skillFileStore: restartedStore,
+  });
+  expect(compiled.skillFiles).toContainEqual({ name: reference.name, text: original });
+  expect(compiled.text).not.toContain("PERSISTED_SKILL_BODY");
+  expect(chatGptPromptFilePayloads(compiled)).toContainEqual(expect.objectContaining({
+    name: reference.name,
+    mimeType: "text/plain",
+  }));
+});
+
+test("selected-skill references fail closed when their durable cache entry is missing or modified", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-selected-skill-corrupt-"));
+  temporarySkillRoots.push(root);
+  const original = text("durable", "Keep this exact skill content.");
+  const item = {
+    type: "message",
+    role: "user",
+    id: "msg_durable_skill",
+    content: [{ type: "input_text", text: original }],
+    internal_chat_message_metadata_passthrough: {
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  };
+  const [pointer] = externalizeSelectedSkillMessages([item], true, new SelectedSkillFileStore(root));
+  const reference = selectedSkillFileReferenceForMessage(pointer)!;
+  const refText = "CODEX_SKILL_FILE_REF_V1:" + reference.name + ":" + reference.sha256;
+  const missing = new SelectedSkillFileStore(join(root, "empty"));
+  expect(() => selectedSkillFile({
+    role: "user", origin: "codex_skill",
+    content: [{ type: "text", text: refText }], timestamp: 1,
+  }, missing)).toThrow("missing or failed integrity validation");
+
+  writeFileSync(join(root, reference.name), original + "tampered");
+  expect(() => selectedSkillFile({
+    role: "user", origin: "codex_skill",
+    content: [{ type: "text", text: refText }], timestamp: 1,
+  }, new SelectedSkillFileStore(root))).toThrow("missing or failed integrity validation");
 });

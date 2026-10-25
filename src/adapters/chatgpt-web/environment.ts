@@ -183,7 +183,14 @@ export function unattributedChatGptEnvironmentMessages(
 
 function contextualUserMessage(value: Record<string, unknown>): boolean {
   const text = rawMessageText(value).trim();
-  return hasEnvironmentContextFragment(value)
+  const kinds = record(value.internal_chat_message_metadata_passthrough)?.content_item_kinds;
+  // Selected skill envelopes and their compact file references are Codex-provided context,
+  // not a human task instruction. Treating them as instructions makes a skill alone authorize
+  // a replay and also causes cold-start recovery to reject a valid compacted task.
+  const selectedSkill = Array.isArray(kinds) && kinds.length === 1
+    && kinds[0] === "skills.selected_skill_instructions";
+  return selectedSkill
+    || hasEnvironmentContextFragment(value)
     || isNativeAgentsMdContext(value)
     || isNativeOpenPageContext(value)
     || /^<codex_internal_context\s+source="[a-z][a-z0-9_]*">[\s\S]*<\/codex_internal_context>$/.test(text)

@@ -602,7 +602,7 @@ export function createChatGptWebAdapter(
         appName: worker.appName,
         captureLunaCheckpoint,
         experimentalSkillAttachments,
-        contextArchive: input === checkpointInput.parsed && !manualRequest && !captureLunaCheckpoint,
+        contextArchive: input === checkpointInput.parsed && !manualRequest,
         retainedHistoryProven: resumeInput !== undefined && input === resumeInput,
         ...(experimentalMultipartParts !== undefined
           ? { experimentalMultipartParts }
