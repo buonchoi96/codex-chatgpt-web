@@ -122,7 +122,13 @@ test("Luna-only account exposes no paid ChatGPT Web routes", async () => {
   );
   const body = await response.json() as { models: Array<{ slug: string }> };
   expect(body.models.filter(model => model.slug.startsWith("chatgpt-web/")).map(model => model.slug))
-    .toEqual(["chatgpt-web/gpt-5.6-luna", "chatgpt-web/luna", "chatgpt-web/think"]);
+    .toEqual([
+      "chatgpt-web/gpt-6-luna-low",
+      "chatgpt-web/gpt-6-luna-medium",
+      "chatgpt-web/gpt-5.6-luna",
+      "chatgpt-web/luna",
+      "chatgpt-web/think",
+    ]);
 });
 
 test("Zero Risk returns one generic Web row without using scanned capabilities", async () => {
