@@ -5,6 +5,7 @@ import {
   CHATGPT_WEB_BACKEND_MODEL,
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
+  CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE,
   CHATGPT_WEB_LEGACY_LUNA_MODEL_ROUTE,
   CHATGPT_WEB_LEGACY_MODEL_ROUTES,
   CHATGPT_WEB_LUNA_MODEL_ROUTES,
@@ -50,7 +51,8 @@ describe("fixed ChatGPT Web model routes", () => {
       "GPT-6 Sol Instant (Web)", "GPT-6 Sol (Web)",
       "GPT-5.6 Sol Instant (Web)", "GPT-5.6 Sol (Web)", "GPT-5.6 Pro (Web)", "GPT-6 Pro (Web)",
     ]);
-    expect(CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName).toBe("Luna (Web)");
+    expect(CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName).toBe("GPT-6 Luna Low (Web)");
+    expect(CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE.displayName).toBe("GPT-6 Luna Medium (Web)");
   });
 
   test("exposes only Plus-eligible routes without the Pro account capability", () => {
@@ -84,9 +86,21 @@ describe("fixed ChatGPT Web model routes", () => {
       .toThrow("not available");
   });
 
-  test("exposes Luna and Think when the authenticated account has no Sol selector", () => {
+  test("exposes separate GPT-6 Luna low and medium routes when the account has no Sol selector", () => {
     const free = { solAvailable: false, extraHighAvailable: false, proAvailable: false };
     expect(availableChatGptWebModelRoutes(free)).toEqual(CHATGPT_WEB_LUNA_MODEL_ROUTES);
+    expect(CHATGPT_WEB_LUNA_MODEL_ROUTES.map(route => [route.slug, route.codexEffort, route.adapterEffort])).toEqual([
+      ["chatgpt-web/gpt-6-luna-low", "low", "low"],
+      ["chatgpt-web/gpt-6-luna-medium", "medium", "medium"],
+    ]);
+    const low = parsed("chatgpt-web/gpt-6-luna-low", "low");
+    const lowRoute = routeChatGptWebRequest(low, { ...defaultConfig("full"), ...free });
+    expect(lowRoute.backendModel).toBe(CHATGPT_WEB_LUNA_BACKEND_MODEL);
+    expect(low.options.reasoning).toBe("low");
+    const medium = parsed("chatgpt-web/gpt-6-luna-medium", "medium");
+    const mediumRoute = routeChatGptWebRequest(medium, { ...defaultConfig("full"), ...free });
+    expect(mediumRoute.backendModel).toBe(CHATGPT_WEB_LUNA_BACKEND_MODEL);
+    expect(medium.options.reasoning).toBe("medium");
     expect(requireChatGptWebModelRoute("chatgpt-web/luna", free).backendModel)
       .toBe(CHATGPT_WEB_LUNA_BACKEND_MODEL);
     expect(requireChatGptWebModelRoute("chatgpt-web/think", free))

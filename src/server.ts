@@ -1206,6 +1206,15 @@ export function startServer(
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
   let lastSuccessfulModelCatalogRequestAt: string | null = null;
+  let lastSuccessfulModelCatalog: {
+    at: string;
+    models: Array<{
+      slug: string;
+      visibility: string;
+      default_reasoning_level: string | null;
+      supported_reasoning_levels: string[];
+    }>;
+  } | null = null;
   let modelCatalogRequests = 0;
   let lastModelCatalogResult: {
     request: number; at: string; status: number; failure?: ModelCatalogFailure;
@@ -1250,6 +1259,7 @@ export function startServer(
           accepting_turns: !draining,
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
+          last_successful_model_catalog: lastSuccessfulModelCatalog,
           model_catalog_requests: modelCatalogRequests,
           last_model_catalog_result: lastModelCatalogResult,
           ...activity(),
@@ -1445,7 +1455,38 @@ export function startServer(
           );
           if (response.ok && !req.signal.aborted) {
             successfulModelCatalogRequests += 1;
-            lastSuccessfulModelCatalogRequestAt = new Date().toISOString();
+            const at = new Date().toISOString();
+            lastSuccessfulModelCatalogRequestAt = at;
+            try {
+              const payload = await response.clone().json() as { models?: unknown };
+              const routedModels = Array.isArray(payload?.models)
+                ? payload.models.filter((candidate): candidate is Record<string, unknown> =>
+                  Boolean(candidate)
+                  && typeof candidate === "object"
+                  && !Array.isArray(candidate)
+                  && typeof (candidate as Record<string, unknown>).slug === "string"
+                  && isChatGptWebModelSlug((candidate as Record<string, unknown>).slug as string))
+                : [];
+              lastSuccessfulModelCatalog = {
+                at,
+                models: routedModels.map(model => ({
+                  slug: model.slug as string,
+                  visibility: typeof model.visibility === "string" ? model.visibility : "unknown",
+                  default_reasoning_level: typeof model.default_reasoning_level === "string"
+                    ? model.default_reasoning_level : null,
+                  supported_reasoning_levels: Array.isArray(model.supported_reasoning_levels)
+                    ? model.supported_reasoning_levels.flatMap(level =>
+                      level && typeof level === "object" && !Array.isArray(level)
+                        && typeof (level as Record<string, unknown>).effort === "string"
+                        ? [(level as Record<string, unknown>).effort as string]
+                        : [])
+                    : [],
+                })),
+              };
+            } catch {
+              // Keep the health inspection fail-closed while preserving the successful HTTP response.
+              lastSuccessfulModelCatalog = { at, models: [] };
+            }
           }
           return recordResult(response, failure);
         }, req.signal, process.platform, "models");

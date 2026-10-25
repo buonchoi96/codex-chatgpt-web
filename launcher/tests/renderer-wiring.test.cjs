@@ -515,6 +515,65 @@ test("catalog verification reports a failed request instead of requesting anothe
   assert.equal(operations.at(-1)?.status, "completed");
 });
 
+test("Free-account catalog inspection requires both visible GPT-6 Luna reasoning rows", async () => {
+  const vm = require("node:vm");
+  const start = electronMain.indexOf("function startCatalogVerificationMonitor(");
+  const end = electronMain.indexOf("\nfunction ", start + 1);
+  const source = electronMain.slice(start, end);
+  const state = { coreSetupComplete: true, codexCatalogVerified: false, codexRestartRequired: true, language: "en" };
+  const operations = [];
+  const events = [];
+  let tick;
+  const config = { browserInteractionMode: "automatic", solAvailable: false };
+  const low = {
+    slug: "chatgpt-web/gpt-6-luna-low",
+    visibility: "list",
+    default_reasoning_level: "low",
+    supported_reasoning_levels: ["low"],
+  };
+  const medium = {
+    slug: "chatgpt-web/gpt-6-luna-medium",
+    visibility: "list",
+    default_reasoning_level: "medium",
+    supported_reasoning_levels: ["medium"],
+  };
+  let payload = {
+    pid: 11,
+    successful_model_catalog_requests: 1,
+    last_successful_model_catalog_request_at: "2026-10-25T00:00:00Z",
+    last_successful_model_catalog: { at: "2026-10-25T00:00:00Z", models: [low] },
+    model_catalog_requests: 1,
+    last_model_catalog_result: { request: 1, at: "2026-10-25T00:00:00Z", status: 200 },
+  };
+  vm.runInNewContext(source + "\nconst publishOperation = op => { lastOperation = op; recordOperation(op); };\nstartCatalogVerificationMonitor({ logger, stateStore });", {
+    catalogVerificationInFlight: false, catalogVerificationTimer: null, lastOperation: null,
+    stopCatalogVerificationMonitor() {},
+    runtimeSupervisor: { readConfig: () => config, proxyHealthPayload: async () => payload },
+    stateStore: { read: () => state, update: patch => Object.assign(state, patch) },
+    setInterval: callback => { tick = callback; return { unref() {} }; },
+    logger: { info: (...args) => events.push(args), warn: (...args) => events.push(args), debug() {} },
+    send() {}, recordOperation: op => operations.push(op),
+    nativeCopyFor: () => ({ catalogFailure: "Catalog failed (HTTP {status}; {reason}).", catalogReady: "Loaded." }),
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.codexCatalogVerified, false);
+  assert.equal(operations[0]?.status, "failed");
+  assert.match(operations[0].message, /200.*missing_required_models/);
+
+  payload = {
+    ...payload,
+    last_successful_model_catalog_request_at: "2026-10-25T00:01:00Z",
+    last_successful_model_catalog: { at: "2026-10-25T00:01:00Z", models: [low, medium] },
+    last_model_catalog_result: { request: 2, at: "2026-10-25T00:01:00Z", status: 200 },
+  };
+  await tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.codexCatalogVerified, true);
+  assert.equal(state.codexRestartRequired, false);
+  assert.equal(operations.at(-1)?.status, "completed");
+  assert.ok(events.some(([event]) => event === "codex.model_catalog_verified"));
+});
+
 test("browser preference IPC commits only after setup succeeds and refuses active browser work", async () => {
   const vm = require("node:vm");
   for (const [property, method, channel, nextChannel] of [

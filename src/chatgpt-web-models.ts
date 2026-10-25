@@ -408,6 +408,31 @@ export const CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE: ChatGptWebModelRoute = {
 };
 
 export const CHATGPT_WEB_LUNA_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
+  slug: "chatgpt-web/gpt-6-luna-low",
+  displayName: "GPT-6 Luna Low (Web)",
+  description: "GPT-6 Luna through ChatGPT Web with low reasoning effort.",
+  interactionMode: "automatic",
+  backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
+  codexEffort: "low",
+  adapterEffort: "low",
+  supportedCodexEfforts: ["low"],
+  requiresPro: false,
+};
+
+export const CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
+  slug: "chatgpt-web/gpt-6-luna-medium",
+  displayName: "GPT-6 Luna Medium (Web)",
+  description: "GPT-6 Luna through ChatGPT Web with medium reasoning effort (Think enabled).",
+  interactionMode: "automatic",
+  backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
+  codexEffort: "medium",
+  adapterEffort: "medium",
+  supportedCodexEfforts: ["medium"],
+  requiresPro: false,
+};
+
+/** Preserve the previous single-row Luna catalog identity for saved Codex tasks. */
+export const CHATGPT_WEB_LUNA_LEGACY_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
   slug: "chatgpt-web/gpt-5.6-luna",
   displayName: "Luna (Web)",
   description: "ChatGPT Luna. Light selects the ordinary mode; Medium enables Think.",
@@ -417,10 +442,12 @@ export const CHATGPT_WEB_LUNA_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
   adapterEffort: "low",
   supportedCodexEfforts: ["low", "medium"],
   requiresPro: false,
+  legacy: true,
 };
 
 export const CHATGPT_WEB_LUNA_MODEL_ROUTES: readonly ChatGptWebModelRoute[] = [
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
+  CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE,
 ];
 
 /**
@@ -568,6 +595,7 @@ const routesBySlug = new Map(
     CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE,
     ...CHATGPT_WEB_LUNA_MODEL_ROUTES,
     ...CHATGPT_WEB_MODEL_ROUTES,
+    CHATGPT_WEB_LUNA_LEGACY_MODEL_ROUTE,
     CHATGPT_WEB_LEGACY_LUNA_MODEL_ROUTE,
     CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE,
     ...CHATGPT_WEB_LEGACY_MODEL_ROUTES,
@@ -592,7 +620,7 @@ export function availableChatGptWebModelRoutes(
       : [CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE];
   }
   if (!capabilities.solAvailable) return includeLegacy
-    ? [...CHATGPT_WEB_LUNA_MODEL_ROUTES, CHATGPT_WEB_LEGACY_LUNA_MODEL_ROUTE, CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE]
+    ? [...CHATGPT_WEB_LUNA_MODEL_ROUTES, CHATGPT_WEB_LUNA_LEGACY_MODEL_ROUTE, CHATGPT_WEB_LEGACY_LUNA_MODEL_ROUTE, CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE]
     : CHATGPT_WEB_LUNA_MODEL_ROUTES;
   const candidates = includeLegacy
     ? [...CHATGPT_WEB_MODEL_ROUTES, ...CHATGPT_WEB_LEGACY_MODEL_ROUTES]

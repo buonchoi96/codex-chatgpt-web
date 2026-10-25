@@ -184,6 +184,44 @@ function startCatalogVerificationMonitor({ logger, stateStore }) {
         });
         return;
       }
+      const config = runtimeSupervisor.readConfig();
+      if (config?.browserInteractionMode !== "manual" && config?.solAvailable === false) {
+        const inspectedCatalog = health?.last_successful_model_catalog;
+        const inspectedModels = Array.isArray(inspectedCatalog?.models) ? inspectedCatalog.models : [];
+        const expectedModels = [
+          { slug: "chatgpt-web/gpt-6-luna-low", effort: "low" },
+          { slug: "chatgpt-web/gpt-6-luna-medium", effort: "medium" },
+        ];
+        const missingModels = expectedModels.filter(expected => !inspectedModels.some(model =>
+          model?.slug === expected.slug
+          && model.visibility === "list"
+          && model.default_reasoning_level === expected.effort
+          && Array.isArray(model.supported_reasoning_levels)
+          && model.supported_reasoning_levels.includes(expected.effort)));
+        if (missingModels.length > 0) {
+          const identity = [
+            health?.pid,
+            inspectedCatalog?.at ?? health?.last_successful_model_catalog_request_at ?? "unknown",
+            missingModels.map(model => model.slug).join(","),
+          ].join(":");
+          if (identity === reportedFailure) return;
+          reportedFailure = identity;
+          const state = stateStore.update({ codexCatalogVerified: false, codexRestartRequired: false });
+          send("launcher:state-changed", state);
+          logger.warn("codex.model_catalog_missing_expected_models", {
+            missing: missingModels.map(model => model.slug),
+            visible: inspectedModels.filter(model => model?.visibility === "list").map(model => model.slug),
+          });
+          publishOperation({
+            name: "catalog-verification",
+            status: "failed",
+            message: nativeCopyFor(current.language).catalogFailure
+              .replace("{status}", "200")
+              .replace("{reason}", "missing_required_models"),
+          });
+          return;
+        }
+      }
       const state = stateStore.update({
         codexCatalogVerified: true,
         codexRestartRequired: false,

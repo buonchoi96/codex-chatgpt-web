@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defaultConfig } from "../src/config";
 import {
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
+  CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE,
   CHATGPT_WEB_LUNA_MODEL_ROUTES,
   CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
   CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE,
@@ -234,19 +235,31 @@ describe("native /models augmentation", () => {
     ]);
   });
 
-  test("publishes Luna and Think routes when the account exposes no Sol selector", () => {
+  test("publishes separate GPT-6 Luna low and medium models for accounts without the Sol selector", () => {
     const config = defaultConfig("full");
     config.solAvailable = false;
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const web = models.filter(model => String(model.slug).startsWith("chatgpt-web/"));
-    expect(web).toHaveLength(3);
-    expect(web.filter(model => model.visibility === "list").map(model => model.slug)).toEqual(CHATGPT_WEB_LUNA_MODEL_ROUTES.map(route => route.slug));
-    expect(web.filter(model => model.visibility === "hide").map(model => model.slug)).toEqual(["chatgpt-web/luna", "chatgpt-web/think"]);
-    expect(web[0]).toMatchObject({
+    const visible = web.filter(model => model.visibility === "list");
+    expect(web).toHaveLength(5);
+    expect(visible.map(model => model.slug)).toEqual(CHATGPT_WEB_LUNA_MODEL_ROUTES.map(route => route.slug));
+    expect(web.filter(model => model.visibility === "hide").map(model => model.slug)).toEqual([
+      "chatgpt-web/gpt-5.6-luna", "chatgpt-web/luna", "chatgpt-web/think",
+    ]);
+    expect(visible[0]).toMatchObject({
       slug: CHATGPT_WEB_LUNA_MODEL_ROUTE.slug,
       display_name: CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName,
       default_reasoning_level: "low",
-      supported_reasoning_levels: [{ effort: "low", description: "Ordinary Luna" }, { effort: "medium", description: "Think" }],
+      supported_reasoning_levels: [{ effort: "low", description: CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName }],
+      context_window: 302_223,
+      effective_context_window_percent: 90,
+      auto_compact_token_limit: 258_400,
+    });
+    expect(visible[1]).toMatchObject({
+      slug: CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE.slug,
+      display_name: CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE.displayName,
+      default_reasoning_level: "medium",
+      supported_reasoning_levels: [{ effort: "medium", description: CHATGPT_WEB_LUNA_MEDIUM_MODEL_ROUTE.displayName }],
       context_window: 302_223,
       effective_context_window_percent: 90,
       auto_compact_token_limit: 258_400,
