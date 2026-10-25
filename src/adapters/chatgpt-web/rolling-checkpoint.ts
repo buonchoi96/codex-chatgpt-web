@@ -183,43 +183,32 @@ export class ChatGptLunaCheckpointStream {
   }
 }
 
+function goalControlItem(value: unknown, turnId: string): boolean {
+  const item = record(value);
+  const owner = itemTurnId(item);
+  if (item?.type !== "message" || item.role !== "user"
+    || typeof item.id !== "string" || item.id.length === 0
+    || (owner !== undefined && owner !== turnId)) return false;
+  const content = typeof item.content === "string" ? item.content
+    : Array.isArray(item.content) && item.content.length === 1
+      && record(item.content[0])?.type === "input_text"
+      && typeof record(item.content[0])?.text === "string"
+      ? String(record(item.content[0])!.text) : "";
+  return /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(content.trim());
+}
+
 function currentTurnBoundary(parsed: CodexParsedRequest, input: unknown[], turnId: string): number | undefined {
   const replayPrefix = Math.min(parsed._replayPrefixLen ?? 0, input.length);
   if (replayPrefix > 0) return replayPrefix;
-  const firstCurrentItem = input.findIndex(item => itemTurnId(item) === turnId);
-  if (firstCurrentItem >= 0) return firstCurrentItem;
 
-  // Native Codex can replay the authenticated /goal anchor without item-level turn metadata.
-  // It is a valid boundary only when the historical human task and current goal are proven
-  // against the owning rollout; never use an arbitrary ownerless user fragment as a boundary.
-  const identity = extractChatGptTurnIdentity(parsed);
-  if (identity.threadId && identity.turnId === turnId
-    && input.some(value => {
-      const item = record(value);
-      return item?.type === "message" && item.role === "user"
-        && typeof item.id === "string" && item.id.length > 0
-        && itemTurnId(item) === undefined
-        && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(
-          typeof item.content === "string" ? item.content.trim()
-            : Array.isArray(item.content) && item.content.length === 1
-              && record(item.content[0])?.type === "input_text"
-              && typeof record(item.content[0])?.text === "string"
-              ? String(record(item.content[0])!.text).trim() : "",
-        );
-    })) {
-    return input.findIndex(value => {
-      const item = record(value);
-      const content = typeof item?.content === "string" ? item.content
-        : Array.isArray(item?.content) && item.content.length === 1
-          && record(item.content[0])?.type === "input_text"
-          && typeof record(item.content[0])?.text === "string"
-          ? String(record(item.content[0])!.text) : "";
-      return item?.type === "message" && item.role === "user"
-        && typeof item.id === "string" && itemTurnId(item) === undefined
-        && /^<codex_internal_context source="goal">[\s\S]+<\/codex_internal_context>$/.test(content.trim());
-    });
-  }
-  return undefined;
+  const firstCurrentItem = input.findIndex(item => itemTurnId(item) === turnId);
+  // Include a native /goal control anchor even when item-level ownership is omitted. It can
+  // precede assistant/tool items that do carry the current turn id, so choose the earlier
+  // goal boundary. The caller still authenticates the historical task before applying any
+  // checkpoint; this structural boundary alone never grants replay authority.
+  const goalIndex = input.findIndex(item => goalControlItem(item, turnId));
+  if (goalIndex >= 0 && (firstCurrentItem < 0 || goalIndex < firstCurrentItem)) return goalIndex;
+  return firstCurrentItem >= 0 ? firstCurrentItem : undefined;
 }
 
 function assistantItemText(value: unknown): string | undefined {
