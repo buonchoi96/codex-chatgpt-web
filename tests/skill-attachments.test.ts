@@ -14,6 +14,7 @@ import {
   SelectedSkillFileStore,
   selectedSkillFile,
   selectedSkillFileReferenceForMessage,
+  restoreSelectedSkillMessagesForThread,
   skillFileTokens,
 } from "../src/adapters/chatgpt-web/skill-attachments";
 import { buildCompactV1Output, extractCompactUserMessages } from "../src/responses/compaction";
@@ -235,4 +236,65 @@ test("selected-skill references fail closed when their durable cache entry is mi
     role: "user", origin: "codex_skill",
     content: [{ type: "text", text: refText }], timestamp: 1,
   }, new SelectedSkillFileStore(root))).toThrow("missing or failed integrity validation");
+});
+
+
+test("native v2 compaction can restore selected skills from a durable per-thread manifest", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-selected-skill-thread-"));
+  temporarySkillRoots.push(root);
+  const original = text("long-lived", "THREAD_SKILL_BODY Keep the project conventions after remote compaction.");
+  const originalSkill = {
+    type: "message",
+    role: "user",
+    id: "msg_thread_skill",
+    content: [{ type: "input_text", text: original }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_skill_selected",
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  };
+  const store = new SelectedSkillFileStore(root);
+  store.rememberThreadSkills("thread_survives_v2", [originalSkill]);
+  const restoredStore = new SelectedSkillFileStore(root);
+  const compactedHistory = [{
+    type: "message",
+    role: "user",
+    id: "msg_after_remote_compact",
+    content: [{ type: "input_text", text: "Continue after remote compaction." }],
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_current",
+      content_item_kinds: ["user.text"],
+    },
+  }];
+  const restored = restoreSelectedSkillMessagesForThread(
+    "thread_survives_v2", compactedHistory, "turn_current", restoredStore,
+  );
+
+  expect(restored).toHaveLength(2);
+  expect(restored[0]).toMatchObject({
+    type: "message",
+    role: "user",
+    id: "msg_thread_skill",
+    internal_chat_message_metadata_passthrough: {
+      turn_id: "turn_skill_selected",
+      content_item_kinds: ["skills.selected_skill_instructions"],
+    },
+  });
+  expect(selectedSkillFileReferenceForMessage(restored[0])).toMatchObject({
+    name: expect.stringMatching(/^long-lived--[a-f0-9]{16}\.txt$/),
+    sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+  const parsed = parse(restored);
+  const attached = compileChatGptWebPrompt(parsed, capabilities, token, {
+    experimentalSkillAttachments: true,
+    skillFileStore: restoredStore,
+  });
+  expect(attached.skillFiles?.[0]?.text).toBe(original);
+  expect(attached.text).not.toContain("THREAD_SKILL_BODY");
+
+  const inline = compileChatGptWebPrompt(parsed, capabilities, token, {
+    experimentalSkillAttachments: false,
+    skillFileStore: restoredStore,
+  });
+  expect(inline.text).toContain("THREAD_SKILL_BODY");
 });

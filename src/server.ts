@@ -54,7 +54,7 @@ import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
 import { estimateTokens } from "./lib/token-estimate";
 import { restoreSameRequestAdditionalTools } from "./responses/compaction-retry-tools";
-import { externalizeSelectedSkillMessages } from "./adapters/chatgpt-web/skill-attachments";
+import { defaultSelectedSkillFileStore, externalizeSelectedSkillMessages, restoreSelectedSkillMessagesForThread } from "./adapters/chatgpt-web/skill-attachments";
 
 type HttpTrackedEndpoint = "models" | "responses" | "compact" | "search" | "unspecified" | NativeImageEndpoint;
 
@@ -670,7 +670,31 @@ export async function responseRequest(
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
-  const expanded = expandPreviousResponseInput(raw);
+  let expanded = expandPreviousResponseInput(raw);
+  const previousResponseExpansionUnavailable = typeof requestedPreviousResponseId === "string" && expanded === raw;
+  if (!previousResponseExpansionUnavailable
+    && typeof requestedModel === "string" && isChatGptWebModelSlug(requestedModel)) {
+    try {
+      const identity = extractCodexTurnIdentityFromBody(raw);
+      if (identity.threadId) {
+        const expandedBody = expanded && typeof expanded === "object" && !Array.isArray(expanded)
+          ? expanded as Record<string, unknown>
+          : undefined;
+        const input = Array.isArray(expandedBody?.input) ? expandedBody.input : [];
+        const restored = restoreSelectedSkillMessagesForThread(
+          identity.threadId, input, identity.turnId, defaultSelectedSkillFileStore,
+        );
+        if (expandedBody && restored.length !== input.length) {
+          expanded = { ...expandedBody, input: restored };
+        }
+      }
+    } catch (error) {
+      return formatErrorResponse(
+        409, "invalid_request_error",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   const prediction = isCodexComposerPrediction(raw);
   let executionConfig = config;
   let parsed: CodexParsedRequest;
@@ -694,7 +718,7 @@ export async function responseRequest(
         + "Start a new Compatibility V1 task, or delegate from a Web model whose collaboration call uses the plaintext-delivery marker.",
     );
   }
-  if (typeof requestedPreviousResponseId === "string" && expanded === raw) {
+  if (previousResponseExpansionUnavailable) {
     return formatErrorResponse(
       409,
       "invalid_request_error",
@@ -716,6 +740,11 @@ export async function responseRequest(
   const compactionItem = compaction && parsed._compactionResponseFormat !== "message";
   const rememberCompletedResponse = (response: Record<string, unknown>): void => {
     if (!compaction) {
+      const identity = extractChatGptTurnIdentity(parsed);
+      if (config.experimentalSkillAttachments && identity.threadId) {
+        const input = (parsed._rawBody as { input?: unknown[] } | undefined)?.input;
+        defaultSelectedSkillFileStore.rememberThreadSkills(identity.threadId, input);
+      }
       if (options.rememberState !== false) rememberResponseState(parsed._rawBody, response, { force: true });
       return;
     }
@@ -733,6 +762,10 @@ export async function responseRequest(
         : null);
     if (!summary) return;
     const source = extractChatGptCompactionSourceRevision(parsed);
+    if (config.experimentalSkillAttachments) {
+      const body = parsed._rawBody as { input?: unknown[] };
+      defaultSelectedSkillFileStore.rememberThreadSkills(identity.threadId, body.input);
+    }
     const body = parsed._rawBody as { input?: unknown[] };
     // v1 installs the bounded user-message output, whereas v2 retains the original source.
     // Authenticate both exact producer-defined representations, never arbitrary rewrites.

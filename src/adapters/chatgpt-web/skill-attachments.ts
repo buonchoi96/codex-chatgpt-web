@@ -15,6 +15,17 @@ export interface SelectedSkillFileReference {
   sha256: string;
 }
 
+export interface StoredThreadSkillReference extends SelectedSkillFileReference {
+  itemId?: string;
+  sourceTurnId?: string;
+}
+
+interface ThreadSkillManifest {
+  version: 1;
+  threadIdHash: string;
+  skills: StoredThreadSkillReference[];
+}
+
 const SKILL_REFERENCE_PREFIX = "CODEX_SKILL_FILE_REF_V1:";
 const MAX_SKILL_FILE_BYTES = 20_000_000;
 const MAX_SKILL_CACHE_BYTES = 512_000_000;
@@ -137,6 +148,95 @@ export class SelectedSkillFileStore {
     }
     return file;
   }
+
+  /** Persist selected-skill ownership for a native thread before its history is compacted. */
+  rememberThreadSkills(threadId: string, input: unknown): void {
+    if (!threadId.trim()) throw new Error("Selected-skill persistence requires a native thread id");
+    const skills = new Map<string, StoredThreadSkillReference>(this.readThreadSkills(threadId).map(reference => [reference.name, reference] as const));
+    if (Array.isArray(input)) {
+      for (const value of input) {
+        if (!isSelectedSkillInstructionItem(value)) continue;
+        const item = record(value)!;
+        const text = responseItemText(item);
+        const reference = parseSelectedSkillFileReference(text);
+        const file = reference ? this.resolveReference(text) : deriveSkillFile(text);
+        if (!file) throw new Error("Selected-skill file could not be restored");
+        const cached = this.put(file);
+        const next: StoredThreadSkillReference = {
+          name: cached.name,
+          sha256: createHash("sha256").update(cached.text).digest("hex"),
+          ...(typeof item.id === "string" && item.id ? { itemId: item.id } : {}),
+          ...(typeof record(item.internal_chat_message_metadata_passthrough)?.turn_id === "string"
+            ? { sourceTurnId: record(item.internal_chat_message_metadata_passthrough)!.turn_id as string }
+            : {}),
+        };
+        skills.set(next.name, next);
+        if (skills.size > 128) {
+          throw new Error("Selected-skill thread manifest exceeds 128 entries; no prior reference was evicted");
+        }
+      }
+    }
+    if (skills.size === 0) return;
+    const threadIdHash = createHash("sha256").update(threadId).digest("hex");
+    const manifest: ThreadSkillManifest = {
+      version: 1,
+      threadIdHash,
+      skills: [...skills.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    };
+    atomicWriteFile(this.threadManifestPath(threadId), JSON.stringify(manifest, null, 2) + "\n", {
+      mode: 0o600, protectDirectory: true,
+    });
+  }
+
+  threadSkills(threadId: string): StoredThreadSkillReference[] {
+    return this.readThreadSkills(threadId).map(reference => ({ ...reference }));
+  }
+
+  private threadManifestPath(threadId: string): string {
+    const digest = createHash("sha256").update(threadId).digest("hex");
+    return join(this.directory, "threads", digest + ".json");
+  }
+
+  private readThreadSkills(threadId: string): StoredThreadSkillReference[] {
+    const path = this.threadManifestPath(threadId);
+    if (!existsSync(path)) return [];
+    const threadIdHash = createHash("sha256").update(threadId).digest("hex");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      throw new Error("Selected-skill thread manifest is unreadable; refusing to discard skill context");
+    }
+    const manifest = record(parsed);
+    if (!manifest || manifest.version !== 1 || manifest.threadIdHash !== threadIdHash
+      || !Array.isArray(manifest.skills) || manifest.skills.length > 128) {
+      throw new Error("Selected-skill thread manifest failed integrity validation");
+    }
+    const seen = new Set<string>();
+    const result: StoredThreadSkillReference[] = [];
+    for (const value of manifest.skills) {
+      const item = record(value);
+      if (!item || typeof item.name !== "string" || !selectedSkillNamePattern.test(item.name)
+        || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256)
+        || (item.itemId !== undefined && (typeof item.itemId !== "string" || item.itemId.length > 512))
+        || (item.sourceTurnId !== undefined && (typeof item.sourceTurnId !== "string" || item.sourceTurnId.length > 512))
+        || seen.has(item.name)) {
+        throw new Error("Selected-skill thread manifest contains an invalid reference");
+      }
+      const reference: StoredThreadSkillReference = {
+        name: item.name,
+        sha256: item.sha256,
+        ...(typeof item.itemId === "string" ? { itemId: item.itemId } : {}),
+        ...(typeof item.sourceTurnId === "string" ? { sourceTurnId: item.sourceTurnId } : {}),
+      };
+      if (!this.get(reference)) {
+        throw new Error("Selected-skill cache entry is missing or failed integrity validation; restore the referenced skill file before continuing");
+      }
+      seen.add(reference.name);
+      result.push(reference);
+    }
+    return result;
+  }
 }
 
 export const defaultSelectedSkillFileStore = new SelectedSkillFileStore();
@@ -222,6 +322,67 @@ export function externalizeSelectedSkillMessages<T extends Record<string, unknow
       content: [{ type: "input_text", text: selectedSkillFileReference(cached) }],
     } as T;
   });
+}
+
+/**
+ * Recover selected skills after native compaction removes their original user items. References
+ * remain contextual metadata and are inserted before the active user's message; they never become
+ * evidence of a current human instruction or permission.
+ */
+export function restoreSelectedSkillMessagesForThread(
+  threadId: string,
+  input: unknown,
+  currentTurnId?: string,
+  store: SelectedSkillFileStore = defaultSelectedSkillFileStore,
+): unknown[] {
+  const items = Array.isArray(input) ? input : [];
+  const references = store.threadSkills(threadId);
+  if (references.length === 0) return items;
+
+  const present = new Set<string>();
+  for (const value of items) {
+    if (!isSelectedSkillInstructionItem(value)) continue;
+    const itemText = responseItemText(record(value)!);
+    const parsedReference = parseSelectedSkillFileReference(itemText);
+    const file = parsedReference ? store.resolveReference(itemText) : deriveSkillFile(itemText);
+    if (!file) throw new Error("Selected-skill file could not be restored");
+    present.add(file.name);
+  }
+  const missing = references.filter(reference => !present.has(reference.name));
+  if (missing.length === 0) return items;
+
+  const existingIds = new Set(items.flatMap(value => {
+    const item = record(value);
+    return typeof item?.id === "string" ? [item.id] : [];
+  }));
+  const restored = missing.map(reference => {
+    const digest = createHash("sha256").update(threadId + "\u0000" + reference.name).digest("hex").slice(0, 24);
+    const itemId = reference.itemId && !existingIds.has(reference.itemId)
+      ? reference.itemId
+      : "msg_codex_skillfile_" + digest;
+    existingIds.add(itemId);
+    return {
+      type: "message",
+      role: "user",
+      id: itemId,
+      content: [{ type: "input_text", text: SKILL_REFERENCE_PREFIX + reference.name + ":" + reference.sha256 }],
+      internal_chat_message_metadata_passthrough: {
+        ...(reference.sourceTurnId ? { turn_id: reference.sourceTurnId } : {}),
+        content_item_kinds: ["skills.selected_skill_instructions"],
+      },
+    };
+  });
+
+  const insertionIndex = currentTurnId
+    ? items.findIndex(value => itemTurnId(value) === currentTurnId)
+    : -1;
+  const index = insertionIndex >= 0 ? insertionIndex : items.length;
+  return [...items.slice(0, index), ...restored, ...items.slice(index)];
+}
+
+function itemTurnId(value: unknown): string | undefined {
+  const turnId = record(record(value)?.internal_chat_message_metadata_passthrough)?.turn_id;
+  return typeof turnId === "string" ? turnId : undefined;
 }
 
 export function skillFileTokens(files: readonly ChatGptSkillFile[] | undefined, modelId?: string): number {
