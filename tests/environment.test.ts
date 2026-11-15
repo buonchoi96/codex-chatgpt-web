@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, toNamespacedPath } from "node:path";
-import { chatGptTurnUserRevisionHistory, extractChatGptCompactionSourceRevision, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, isChatGptCompactionContinuation } from "../src/adapters/chatgpt-web/environment";
+import { chatGptTurnUserRevisionHistory, extractChatGptCompactionSourceRevision, extractChatGptTurnEnvironment, extractChatGptTurnEnvironmentClaim, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, isChatGptCompactionContinuation } from "../src/adapters/chatgpt-web/environment";
 import { chatGptTurnExecutionKey } from "../src/adapters/chatgpt-web/turn-execution";
 import { rememberCompactionContinuation } from "../src/adapters/chatgpt-web/compaction-continuation";
 import { encodeCompactionSummary, SUMMARY_PREFIX } from "../src/responses/compaction";
@@ -98,6 +98,58 @@ test("a selected-skill attachment or compact reference cannot authorize browser-
 });
 
 describe("trusted current Codex environment envelope", () => {
+  test("native goal edits belong to the running instruction, including after tool output", () => {
+    const request = currentWire();
+    const body = request._rawBody as { input: Array<Record<string, unknown>> };
+    body.input.at(-1)!.internal_chat_message_metadata_passthrough = { turn_id: "turn_current" };
+    const originalKey = chatGptTurnExecutionKey(request);
+    const edit = {
+      type: "message", role: "user", id: "msg_goal_clear",
+      content: [{ type: "input_text", text: '<codex_internal_context source="user_goal">\nUser cleared the goal.\n</codex_internal_context>' }],
+      internal_chat_message_metadata_passthrough: { turn_id: "auto-compact-3", content_item_kinds: ["user.goal"] },
+    };
+    body.input.push(edit, { type: "function_call_output", call_id: "pending", output: "command finished" });
+    expect(extractChatGptTurnUserRevision(request)).toEqual(edit.content);
+    expect(chatGptTurnExecutionKey(request)).not.toBe(originalKey);
+    expect(chatGptTurnUserRevisionHistory(request).at(-1)).toMatchObject({ turnId: "turn_current", itemId: edit.id });
+    expect(extractChatGptCompactionSourceRevision({ ...request, _compactionRequest: true }).turnId).toBe("turn_current");
+    expect(edit.internal_chat_message_metadata_passthrough.turn_id).toBe("auto-compact-3");
+    expect(extractChatGptTurnEnvironment(request).cwd).toBe(root);
+
+    // A host-proven edit is still an instruction; neither its text nor its meaning is dropped.
+    edit.content[0]!.text = '<codex_internal_context source="user_goal">User set the goal: "inspect only"</codex_internal_context>';
+    edit.internal_chat_message_metadata_passthrough.content_item_kinds = ["user.goal.omitted"];
+    expect(extractChatGptTurnUserRevision(request)).toEqual(edit.content);
+    // A goal edit does not authorize ignoring a newer filesystem update.
+    body.input.push({ type: "message", role: "user", id: "msg_bad_environment",
+      content: [{ type: "input_text", text: "<environment_context><cwd>" }],
+      internal_chat_message_metadata_passthrough: { turn_id: "turn_current", content_item_kinds: ["environments.environment_context"] } });
+    expect(() => extractChatGptTurnEnvironment(request)).toThrow();
+  });
+
+  test("goal text cannot lend the running turn to unproven or historical instructions", () => {
+    const request = currentWire();
+    const body = request._rawBody as { input: Array<Record<string, unknown>> };
+    body.input.at(-1)!.internal_chat_message_metadata_passthrough = { turn_id: "turn_current" };
+    const edit = {
+      type: "message", role: "user", id: "msg_goal_clear",
+      content: [{ type: "input_text", text: '<codex_internal_context source="user_goal">User cleared the goal.</codex_internal_context>' }],
+      internal_chat_message_metadata_passthrough: { turn_id: "auto-compact-3", content_item_kinds: ["user.goal"] },
+    };
+    for (const mutation of [
+      { id: undefined },
+      { internal_chat_message_metadata_passthrough: { turn_id: "auto-compact-3", content_item_kinds: ["user.text"] } },
+      { internal_chat_message_metadata_passthrough: { turn_id: "auto-compact-3", content_item_kinds: ["user.goal", "user.text"] } },
+      { internal_chat_message_metadata_passthrough: { turn_id: "turn_other", content_item_kinds: ["user.goal"] } },
+    ]) {
+      const changed = { ...request, _rawBody: { ...body, input: [...body.input, { ...edit, ...mutation }] } };
+      expect(() => extractChatGptTurnUserRevision(changed)).toThrow("conflicts with native Codex turn_id");
+    }
+    body.input.at(-1)!.internal_chat_message_metadata_passthrough = { turn_id: "turn_previous" };
+    body.input.push(edit);
+    expect(() => extractChatGptTurnUserRevision(request)).toThrow("conflicts with native Codex turn_id");
+  });
+
   describe("native open-page context", () => {
     let originalCodexHome: string | undefined;
     const visualizationRoot = join(homedir(), ".codex", "visualizations", "2026", "10", "12", "thread_current");
@@ -439,7 +491,7 @@ describe("trusted current Codex environment envelope", () => {
     });
   });
 
-  test("recovers the primary cwd from a Codex 0.150 filesystem-only multi-folder diff", () => {
+  test("a filesystem-only multi-folder diff does not declare cwd", () => {
     const primary = resolve(root, "workspace-primary");
     const additional = resolve(root, "workspace-additional");
     const cwdlessEnvironment = `<environment_context>
@@ -448,19 +500,20 @@ describe("trusted current Codex environment envelope", () => {
   <filesystem><workspace_roots><root>${primary}</root><root>${additional}</root></workspace_roots>${dangerFullAccessProfileXml}</filesystem>
 </environment_context>`;
 
-    expect(extractChatGptTurnEnvironment(currentWire({
+    const request = currentWire({
       workspace: primary,
       environmentXml: cwdlessEnvironment,
-    }))).toEqual({
-      cwd: primary,
+    });
+    expect(extractChatGptTurnEnvironmentClaim(request).environment).toEqual({
       roots: [primary, additional],
       writableRoots: [primary, additional],
       sandboxPolicy: { type: "dangerFullAccess" },
       tools: [],
     });
+    expect(() => extractChatGptTurnEnvironment(request)).toThrow("missing cwd");
   });
 
-  test("recovers a projectless Codex 0.150 cwd when git workspace metadata is empty", () => {
+  test("a single projectless workspace root does not declare cwd either", () => {
     const primary = resolve(root, "projectless-primary");
     const cwdlessEnvironment = `<environment_context>
   <filesystem><workspace_roots><root>${primary}</root></workspace_roots>${dangerFullAccessProfileXml}</filesystem>
@@ -474,7 +527,8 @@ describe("trusted current Codex environment envelope", () => {
       workspaces: {},
     });
 
-    expect(extractChatGptTurnEnvironment(request).cwd).toBe(primary);
+    expect(extractChatGptTurnEnvironmentClaim(request).environment).toMatchObject({ roots: [primary] });
+    expect(() => extractChatGptTurnEnvironment(request)).toThrow("missing cwd");
   });
 
   test("does not hide malformed cwd markup behind workspace-root recovery", () => {
@@ -1898,6 +1952,11 @@ describe("trusted Codex task environment continuity", () => {
     expect(resolved).toThrow("Steering environment conflicts");
     environment.content[1]!.text = unstated;
     expect(resolved().sandboxPolicy).toMatchObject({ networkAccess: false });
+    environment.content[1]!.text = unstated.replace(
+      "</workspace_roots>", `<root>${join(codexHome, "unproven-output")}</root></workspace_roots>`,
+    );
+    expect(resolved).toThrow("workspace_roots");
+    environment.content[1]!.text = unstated;
     // Unstated permissions require current evidence, even when a cache already exists.
     rmSync(rolloutPath);
     expect(() => store.resolve(beforeSteering)).toThrow("missing network access");
@@ -2118,11 +2177,21 @@ describe("trusted Codex task environment continuity", () => {
     }
     expect(store.resolve(request).cwd).toBe(root);
     const valid = delta.content[0]!.text;
+    for (const subagents of [
+      "<subagents>\n    - 00000000-0000-0000-0000-000000000001\n    - 00000000-0000-0000-0000-000000000002: Worker\n  </subagents>",
+      "<subagents>- 00000000-0000-0000-0000-000000000001</subagents>",
+      "<subagents></subagents>",
+    ]) {
+      delta.content[0]!.text = valid.replace(/<subagents>[\s\S]*?<\/subagents>/, subagents);
+      expect(store.resolve(request).cwd).toBe(root);
+    }
     for (const malformed of [
       valid.replaceAll(root, resolve(root, "ungranted")),
       valid.replace(dangerFullAccessProfileXml, readOnlyProfileXml),
       valid.replace("</environment_context>", "<cwd>/unexpected</cwd></environment_context>"),
       valid.replace("</subagents>", '<agent name="bad" cwd="/unexpected" /></subagents>'),
+      valid.replace(/<subagents>[\s\S]*?<\/subagents>/, "<subagents>\n    - not-a-uuid: Worker\n  </subagents>"),
+      valid.replace(/<subagents>[\s\S]*?<\/subagents>/, "<subagents>\n    - 00000000-0000-0000-0000-000000000001 <cwd>/unexpected</cwd>\n  </subagents>"),
     ]) {
       delta.content[0]!.text = malformed;
       expect(() => store.resolve(request)).toThrow();
@@ -2256,10 +2325,10 @@ describe("trusted Codex task environment continuity", () => {
       expect(resolveCurrent).toThrow("environment conflicts");
     }
     environmentPart.text = currentEnvironment;
-    // An explicitly declared root set must still match, even with full access.
-    payload.workspace_roots = [root];
+    // A current envelope cannot omit an explicitly declared native project.
+    payload.workspace_roots = [root, auxiliary, join(codexHome, "missing-project")];
     writeContext();
-    expect(resolveCurrent).toThrow("workspace_roots, writable_roots");
+    expect(resolveCurrent).toThrow("workspace_roots");
     payload.workspace_roots = null;
     writeContext();
     expect(resolveCurrent).toThrow();
@@ -2267,6 +2336,82 @@ describe("trusted Codex task environment continuity", () => {
     payload.turn_id = oldTurnId;
     writeContext();
     expect(resolveCurrent).toThrow("current turn");
+  });
+
+  for (const shared of [false, true]) for (const format of ["v1", "v2"])
+  for (const rootSource of ["session", "turn"]) test(`${format} full-access compaction keeps declared ${rootSource} projects when Codex adds an output root (#933, shared=${shared})`, () => {
+    const { codexHome, request, rolloutPath } = resumedRootFixture();
+    const bridgeHome = shared ? mkdtempSync(join(tmpdir(), "codex-shared-added-root-")) : codexHome;
+    if (shared) temporaryRoots.push(bridgeHome);
+    const body = request._rawBody as { input: Array<Record<string, unknown>>; client_metadata: Record<string, string> };
+    const oldTurnId = "01a06c66-0000-75c6-a0df-318f890ef6de";
+    body.input[0]!.internal_chat_message_metadata_passthrough = { turn_id: oldTurnId };
+    const summary = `Added workspace checkpoint ${format} ${rootSource} shared=${shared}`;
+    rememberCompactionContinuation({ ...request, _compactionRequest: true }, extractChatGptTurnIdentity(request), [
+      { turnId: oldTurnId, content: body.input[0]!.content },
+    ], summary);
+    const auxiliary = join(codexHome, "second-project");
+    const output = join(codexHome, "visualizations", "2026", "10", "22", rolloutThreadId);
+    const roots = [root, auxiliary];
+    const currentEnvironment = (claimedRoots: string[]) => environmentXml.replace(
+      /<workspace_roots>[\s\S]*?<\/workspace_roots>/,
+      `<workspace_roots>${claimedRoots.map(path => `<root>${path}</root>`).join("")}</workspace_roots>`,
+    );
+    // The native project order remains stable even when the current envelope adds
+    // a visualization directory first. No directory name grants special access.
+    const environmentPart = { type: "input_text", text: currentEnvironment([output, auxiliary, root]) };
+    body.input.unshift({
+      type: "message", role: "user", id: "msg_current_environment", content: [environmentPart],
+      internal_chat_message_metadata_passthrough: { turn_id: rolloutTurnId },
+    });
+    body.input.push(format === "v2"
+      ? { type: "compaction", encrypted_content: encodeCompactionSummary(summary) }
+      : { type: "message", role: "user", content: [{ type: "input_text", text: `${SUMMARY_PREFIX}\n${summary}` }] });
+    const metadata = JSON.parse(body.client_metadata["x-codex-turn-metadata"]!);
+    metadata.workspaces = Object.fromEntries(roots.map(path => [path, {}]));
+    body.client_metadata["x-codex-turn-metadata"] = JSON.stringify(metadata);
+    const session = { type: "session_meta", payload: {
+      id: rolloutThreadId, source: "vscode", ...(rootSource === "session" ? { runtime_workspace_roots: roots } : {}),
+    } };
+    const native = childTurnContext(rolloutTurnId, {
+      workspace_roots: rootSource === "turn" ? roots : undefined,
+    });
+    const payload = native.payload as Record<string, unknown>;
+    const writeContext = () => writeFileSync(rolloutPath,
+      [session, native].map(value => JSON.stringify(value)).join("\n") + "\n");
+    const state = join(bridgeHome, "thread-environments.json");
+    const resolveCurrent = () => new ChatGptThreadEnvironmentStore(
+      state, Date.now, bridgeHome, undefined, shared ? [codexHome] : [],
+    ).resolve(request);
+    writeContext();
+    const expected = {
+      cwd: root, roots: [...roots, output], writableRoots: [...roots, output],
+      sandboxPolicy: { type: "dangerFullAccess" as const }, tools: request.context.tools ?? [],
+    };
+    expect(resolveCurrent()).toEqual(expected);
+    expect(resolveCurrent()).toEqual(expected);
+
+    for (const claimed of [[root, output], [root, join(codexHome, "replacement-project"), output]]) {
+      environmentPart.text = currentEnvironment(claimed);
+      expect(resolveCurrent).toThrow("workspace_roots");
+    }
+    environmentPart.text = currentEnvironment([output, auxiliary, root]).replace(
+      `<cwd>${root}</cwd>`, `<cwd>${auxiliary}</cwd>`,
+    );
+    expect(resolveCurrent).toThrow("cwd");
+    environmentPart.text = currentEnvironment([output, auxiliary, root]).replace(
+      dangerFullAccessProfileXml, readOnlyProfileXml,
+    );
+    expect(resolveCurrent).toThrow("sandbox_policy");
+    environmentPart.text = currentEnvironment([output, auxiliary, root]);
+    payload.turn_id = oldTurnId;
+    writeContext();
+    expect(resolveCurrent).toThrow("current turn");
+    payload.turn_id = rolloutTurnId;
+    writeContext();
+    expect(resolveCurrent()).toEqual(expected);
+    rmSync(rolloutPath);
+    expect(resolveCurrent).toThrow();
   });
 
   test("compaction keeps current native output-directory grants omitted from workspace roots", () => {
@@ -2310,6 +2455,7 @@ describe("trusted Codex task environment continuity", () => {
     const original = environmentPart.text;
     for (const conflicting of [
       original.replaceAll(root, join(codexHome, "unproven-project")),
+      original.replace("</workspace_roots>", `<root>${join(codexHome, "unproven-output")}</root></workspace_roots>`),
       original.replace("<filesystem>", "<network_access>restricted</network_access><filesystem>"),
       filesystemEnvironmentXml(readOnlyProfileXml),
     ]) {

@@ -1,8 +1,9 @@
+import { chatGptStopButton } from "../src/chatgpt-ui/composer";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright-core";
 import { SameTabRecovery, type RecoveryObservation } from "../src/adapters/chatgpt-web/same-tab-recovery";
-import { chatGptStopButton, throwIfChatGptTerminalErrorAlert, chatGptInterruptedNetworkVisible, chatGptMessageDeliveryTimeoutVisible } from "../src/adapters/chatgpt-web/browser-worker";
+import { throwIfChatGptTerminalErrorAlert, chatGptInterruptedNetworkVisible, chatGptMessageDeliveryTimeoutVisible } from "../src/adapters/chatgpt-web/browser-worker";
 import {ChatGptRecoveryWatchdog} from '../src/adapters/chatgpt-web/recovery-watchdog';
 
 const fixture = readFileSync(new URL("./fixtures/same-tab-recovery.html", import.meta.url), "utf8");

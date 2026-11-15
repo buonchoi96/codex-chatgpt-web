@@ -384,8 +384,27 @@ function replayEvents(events: AdapterEvent[], emit: (event: AdapterEvent) => voi
   for (const event of events) emit(event);
 }
 
-export function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
+export function submittedTurnFailure(session: ChatGptTurnSession, error: unknown, parsed?: CodexParsedRequest): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
+  if (normalized instanceof ChatGptWebAdapterError && normalized.code === "chatgpt_delivery_timeout"
+    && session.runtime.mode === "tools") {
+    // Retiring the old MCP binding cannot undo commands already dispatched to Codex.
+    // A result may arrive after the browser has failed. Its canonical native record proves
+    // completion without forwarding it to the retired browser or replaying the command.
+    const results = (parsed?.context.messages ?? []).filter((message): message is CodexToolResultMessage =>
+      message.role === "toolResult" && session.hasOutstanding(message.toolCallId));
+    const returnedIds = new Set(results.map(result => result.toolCallId));
+    const unresolved = session.outstanding().some(call => !returnedIds.has(call.callId))
+      || session.runtime.externalProgress.snapshot().activeToolCalls > returnedIds.size
+      || results.length !== returnedIds.size;
+    if (unresolved) {
+      return new ChatGptWebAdapterError(
+        "ChatGPT reported that message delivery timed out while a tool result was still pending. "
+        + "Check the running command and its result before continuing.",
+        { status: normalized.status, errorType: normalized.errorType, code: normalized.code, retryable: false, cause: normalized },
+      );
+    }
+  }
   if (normalized instanceof ChatGptWebAdapterError) return normalized;
   // A completed broker retirement can cancel the out-of-process browser with
   // a generic AbortError. Preserve the authoritative, same-turn native-tool
@@ -600,6 +619,7 @@ export function createChatGptWebAdapter(
       return {
         ...review,
         appName: worker.appName,
+        includeContextTokenBreakdown: true,
         captureLunaCheckpoint,
         experimentalSkillAttachments,
         contextArchive: input === checkpointInput.parsed && !manualRequest,
@@ -1916,7 +1936,7 @@ export function createChatGptWebAdapter(
           // Validation and result-delivery failures never enter this branch.
           const settled = awaitingRuntime ? session.settledOutcome() : undefined;
           if (settled?.type === "error") error = settled.error;
-          const turnError = submittedTurnFailure(session, error);
+          const turnError = submittedTurnFailure(session, error, parsed);
           const autoCompactTransportFailure = turnError instanceof ChatGptWebAdapterError
             && (turnError.code === "browser_prompt_too_long"
               || turnError.code === "message_length_exceeds_limit");

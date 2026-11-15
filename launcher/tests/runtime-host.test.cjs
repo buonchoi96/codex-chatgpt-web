@@ -1141,7 +1141,7 @@ test("failed terminal migration verifies the unchanged previous runtime instead 
   ]);
 });
 
-test("failed fresh-conversation setting restores every mutable setup file before restarting the previous runtime", async () => {
+for (const setting of ["setFreshConversationPerTurn", "setTemporaryChats"]) test(`failed ${setting} restores every mutable setup file before restarting the previous runtime`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-setup-checkpoint-"));
   const coreHome = path.join(root, "core");
   const codexHome = path.join(root, "codex");
@@ -1222,7 +1222,7 @@ test("failed fresh-conversation setting restores every mutable setup file before
 
   try {
     await assert.rejects(
-      host.setFreshConversationPerTurn(true),
+      host[setting](true),
       /synthetic updated runtime startup failure$/,
     );
     assert.equal(startAttempts, 2);
@@ -1453,6 +1453,35 @@ test("tool approvals opt in and out through setup without refreshing models or c
   }
 });
 
+test("Temporary Chat uses transactional setup in both profiles and interaction modes", async () => {
+  for (const makeHost of [hostFor, devHostFor]) {
+    for (const mode of ["browser-only", "full"]) {
+      for (const browserInteractionMode of ["automatic", "manual"]) {
+        const existing = { mode, browserInteractionMode, useTemporaryChats: false, experimentalFreshConversationPerTurn: true, autoApproveToolCalls: true };
+        const fixture = makeHost(existing);
+        for (const enabled of [true, false]) {
+          assert.equal((await fixture.host.setTemporaryChats(enabled)).enabled, enabled);
+          const { name, args } = fixture.invocation();
+          assert.equal(name, "temporary-chats");
+          assert.deepEqual(args.slice(0, makeHost === devHostFor ? 2 : 1), makeHost === devHostFor ? ["dev", "setup"] : ["setup"]);
+          assert.equal(args.includes(`--${mode}`), true);
+          assert.equal(args.includes(enabled ? "--temporary-chats" : "--ordinary-chats"), true);
+          assert.equal(args.includes(enabled ? "--ordinary-chats" : "--temporary-chats"), false);
+          assert.equal(args.includes("--restart-service"), makeHost === hostFor);
+          assert.equal(args.includes("--auto-approve-tool-calls"), makeHost === hostFor);
+          assert.equal(existing.useTemporaryChats, false, "setup owns persistence and rollback");
+          assert.equal(existing.experimentalFreshConversationPerTurn, true);
+        }
+      }
+    }
+    const missing = makeHost(null);
+    await assert.rejects(() => missing.host.setTemporaryChats(true), /Initialize/);
+    const valid = makeHost({ mode: "browser-only" });
+    await assert.rejects(() => valid.host.setTemporaryChats("true"), /boolean/);
+    assert.equal(valid.invocation(), undefined);
+  }
+});
+
 test("fresh-conversation preference uses production and DEV setup without forcing mode or other preferences", async () => {
   for (const makeHost of [hostFor, devHostFor]) {
     for (const mode of ["browser-only", "full"]) {
@@ -1479,16 +1508,6 @@ test("fresh-conversation preference uses production and DEV setup without forcin
       await assert.rejects(() => fixture.host.setFreshConversationPerTurn(true), /Initialize|Zero Risk/);
       await assert.rejects(() => fixture.host.setFreshConversationPerTurn(false), /Initialize|Zero Risk/);
       assert.equal(fixture.invocation(), undefined);
-    }
-    for (const interaction of ["automatic", "manual"]) {
-      const saved = makeHost({ mode: "full", browserInteractionMode: interaction }, interaction);
-      for (const enabled of [true, false]) {
-        await saved.host.setUseSavedChats(enabled);
-        assert.equal(saved.invocation().args.includes(enabled ? "--saved-chats" : "--temporary-chats"), true);
-        assert.equal(saved.invocation().args.includes("--full"), true);
-        assert.equal(saved.invocation().args.includes("--fresh-conversation"), false);
-      }
-      await assert.rejects(() => saved.host.setUseSavedChats("true"), /boolean/);
     }
     const fixture = makeHost({ mode: "browser-only", browserInteractionMode: "automatic" });
     await assert.rejects(() => fixture.host.setFreshConversationPerTurn("true"), /boolean/);

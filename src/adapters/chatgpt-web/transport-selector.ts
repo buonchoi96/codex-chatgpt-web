@@ -28,6 +28,8 @@ export interface ChatGptWebTransportSelectionInput {
   maxAttachmentBytes: number;
   retainedHistoryProven?: boolean;
   requiredMultipart?: boolean;
+  /** Prepare a complete multipart payload; the browser must still enforce its measured transaction ceiling before Send. */
+  deferMultipartPreflight?: boolean;
   archive?: {
     eligible: boolean;
     mediaType: "application/zip";
@@ -104,6 +106,9 @@ export function selectChatGptWebTransport(
   input: ChatGptWebTransportSelectionInput,
 ): ChatGptWebTransportDecision {
   const canonicalFits = input.canonicalTokens <= input.accountCanonicalTokenLimit;
+  const multipartBudgetDeferred = input.deferMultipartPreflight === true;
+  const multipartPrepared = input.multipart?.verified === true
+    && ((canonicalFits && input.canonicalTokens <= input.multipart.canonicalTokenLimit) || multipartBudgetDeferred);
   const inlineFits = input.composerChars <= (input.composerCharLimit ?? Number.POSITIVE_INFINITY)
     && input.messageTokens <= input.messageTokenLimit
     && input.attachmentCount <= input.maxAttachmentCount
@@ -112,8 +117,7 @@ export function selectChatGptWebTransport(
   const priorInlineFailure = input.priorFailure?.transport === "INLINE";
 
   if (input.requiredMultipart) {
-    if (canonicalFits && input.multipart?.verified
-      && input.canonicalTokens <= input.multipart.canonicalTokenLimit) {
+    if (multipartPrepared) {
       return decision(input, "VERIFIED_MULTIPART", "multipart is required for this history compaction request and was verified");
     }
     return decision(input, "BLOCK", "history compaction requires multipart, but no verified multipart transport fits");
@@ -126,8 +130,7 @@ export function selectChatGptWebTransport(
     if (inlineFits && !priorInlineFailure) {
       return decision(input, "RETAINED_DELTA", "retained history is proven and this delta fits the current message limits");
     }
-    if (canonicalFits && input.multipart?.verified
-      && input.canonicalTokens <= input.multipart.canonicalTokenLimit) {
+    if (multipartPrepared) {
       return decision(input, "VERIFIED_MULTIPART", "retained delta exceeded one message and verified multipart is available");
     }
     return decision(input, "BLOCK", "retained history is proven but this delta cannot be transported safely without rebootstrap");
@@ -161,8 +164,7 @@ export function selectChatGptWebTransport(
       : "inline text or attachments exceed measured limits; the complete archive fits one message and the account budget");
   }
 
-  if (canonicalFits && input.multipart?.verified
-    && input.canonicalTokens <= input.multipart.canonicalTokenLimit) {
+  if (multipartPrepared) {
     return decision(input, "VERIFIED_MULTIPART", "single-message inline and archive transports do not fit; multipart was verified for this request");
   }
 

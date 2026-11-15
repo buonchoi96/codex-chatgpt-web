@@ -29,6 +29,7 @@ export interface CodexRolloutEnvironment {
   workspaceRootsDeclared: boolean;
   /** Native model-visible projection; never used to grant execution permissions. */
   filesystemProfileXml?: string;
+  rolloutPath: string;
 }
 
 const CODEX_ID_SOURCE = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -201,7 +202,7 @@ function firstRolloutRecord(fd: number, size: number): Record<string, unknown> {
   throw new Error("Codex rollout has no complete session metadata record");
 }
 
-function latestRolloutRecord(fd: number, size: number, type: string, maxScanBytes = Number.MAX_SAFE_INTEGER): Record<string, unknown> | undefined {
+function latestRolloutPayload(fd: number, size: number, type: "turn_context" | "compacted" | "world_state", matches: (payload: Record<string, unknown> | undefined) => boolean = () => true, maxScanBytes = Number.MAX_SAFE_INTEGER): Record<string, unknown> | undefined {
   let position = size;
   let scanned = 0;
   let carry = Buffer.alloc(0);
@@ -233,7 +234,7 @@ function latestRolloutRecord(fd: number, size: number, type: string, maxScanByte
         throw new Error("Codex rollout JSONL record exceeds the bounded record size");
       }
       const item = parseJsonLine(line);
-      if (item.type === type) return record(item.payload);
+      if (item.type === type && matches(record(item.payload))) return record(item.payload);
     }
     carry = Buffer.from(data.subarray(0, lineEnd));
     if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
@@ -242,17 +243,39 @@ function latestRolloutRecord(fd: number, size: number, type: string, maxScanByte
   }
   if (carry.length === 0) return undefined;
   const item = parseJsonLine(carry);
-  return item.type === type ? record(item.payload) : undefined;
+  return item.type === type && matches(record(item.payload)) ? record(item.payload) : undefined;
+}
+
+/**
+ * The rendered filesystem of the primary environment, which holds its current workspace roots.
+ * Desktop rollouts record those roots nowhere else: turn_context omits them and session_meta keeps
+ * the ones the task started with. Codex renders the whole element into both the model-visible
+ * envelope and world_state, whose partial records are JSON merge patches; see
+ * codex-rs/core/src/context/world_state/environment.rs (rust-v0.166.0). Compared only, never parsed.
+ */
+export function latestCodexRolloutFilesystem(rolloutPath: string): string | undefined {
+  const fd = openSync(rolloutPath, "r");
+  try {
+    const latest = latestRolloutPayload(fd, fstatSync(fd).size, "world_state", payload => {
+      const environments = record(payload?.state)?.environments;
+      return payload?.full === true || environments === null
+        || (record(environments) !== undefined && "filesystem" in record(environments)!);
+    });
+    const filesystem = record(record(latest?.state)?.environments)?.filesystem;
+    return typeof filesystem === "string" ? filesystem : undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function latestTurnContext(fd:number,size:number):Record<string,unknown>|undefined {
-  return latestRolloutRecord(fd,size,'turn_context');
+  return latestRolloutPayload(fd,size,'turn_context');
 }
 
 /** Read the newest completed installation witness, never an older matching checkpoint.
  * A bounded backwards lookup avoids scanning a long-running task on every replay. */
 export function latestNativeCompactionRecord(fd:number,size:number):Record<string,unknown>|undefined {
-  return latestRolloutRecord(fd,size,'compacted',32*1024*1024);
+  return latestRolloutPayload(fd,size,'compacted',()=>true,32*1024*1024);
 }
 
 /**
@@ -461,7 +484,7 @@ export function verifyLatestNativeCompactionSource(
 }
 
 function verifyCompactedEnvironmentItems(fd: number, size: number, items: Record<string, unknown>[]): void {
-  const compacted = latestRolloutRecord(fd, size, "compacted");
+  const compacted = latestRolloutPayload(fd, size, "compacted");
   const history = Array.isArray(compacted?.replacement_history) ? compacted.replacement_history : [];
   let previousIndex = -1;
   for (const item of items) {
@@ -737,6 +760,7 @@ function environmentFromTurnContext(
   payload: Record<string, unknown>,
   expectedTurnId: string,
   tools: readonly CodexTool[] | undefined,
+  runtimeWorkspaceRoots?: string[],
 ): ChatGptTurnEnvironment {
   if (payload.turn_id !== expectedTurnId) {
     throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
@@ -746,15 +770,16 @@ function environmentFromTurnContext(
   }
   const cwd = resolve(payload.cwd);
   const declaredRoots = payload.workspace_roots === undefined
-    ? []
+    ? runtimeWorkspaceRoots ?? []
     : absolutePaths(payload.workspace_roots, "workspace_roots");
   const roots = declaredRoots.length > 0 ? declaredRoots : [cwd];
-  if (!roots.some(root => contains(root, cwd))) {
+  const permissionProfile = record(payload.permission_profile);
+  const sandbox = record(payload.sandbox_policy);
+  if (!roots.some(root => contains(root, cwd))
+    && !(permissionProfile?.type === "disabled" && sandbox?.type === "danger-full-access")) {
     throw new Error("Codex rollout cwd is outside its workspace roots");
   }
 
-  const permissionProfile = record(payload.permission_profile);
-  const sandbox = record(payload.sandbox_policy);
   if (!permissionProfile || !sandbox) {
     throw new Error("Codex rollout is missing its authoritative permission profile");
   }
@@ -884,9 +909,11 @@ function validateMetadataConsistency(
     throw new Error(`ChatGPT Web ${owner} workspace metadata does not contain its Codex rollout cwd`);
   }
   if ((workspaceRootsDeclared || environment.sandboxPolicy.type !== "dangerFullAccess")
-    && lineage.workspaceRoots.some(root => !environment.roots.some(rolloutRoot => (
-    contains(rolloutRoot, root) || contains(root, rolloutRoot)
-  )))) {
+    && lineage.workspaceRoots.some(root => (
+      !environment.roots.some(rolloutRoot => contains(rolloutRoot, root) || contains(root, rolloutRoot))
+      && !(environment.sandboxPolicy.type === "dangerFullAccess"
+        && pathIdentity(root) === pathIdentity(environment.cwd))
+    ))) {
     throw new Error(`ChatGPT Web ${owner} workspace metadata conflicts with its Codex rollout roots`);
   }
 }
@@ -912,7 +939,7 @@ export interface CurrentCodexRolloutOptions {
 /** The inspector runs synchronously while the exact authenticated file is open.
  * It must not retain the descriptor. No model-provided path is accepted. */
 export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions,
-  inspect:(snapshot:{fd:number;size:number;turn:Record<string,unknown>;environment:ChatGptTurnEnvironment;workspaceRootsDeclared:boolean})=>T,
+  inspect:(snapshot:{fd:number;size:number;turn:Record<string,unknown>;environment:ChatGptTurnEnvironment;workspaceRootsDeclared:boolean;rolloutPath:string})=>T,
   validateAppend?:(snapshot:{fd:number;size:number})=>void):T|undefined {
   const { codexHome, lineage, turnId, tools, compactionSourceTurnId } = options;
   const nativeRootOnly=options.nativeCurrentRootOnly===true;
@@ -954,7 +981,11 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
     try {
       const before=fstatSync(fd),size=before.size;
       if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Codex rollout is empty");
-      validateSessionMeta(firstRolloutRecord(fd, size), lineage);
+      const session = firstRolloutRecord(fd, size);
+      validateSessionMeta(session, lineage);
+      const sessionPayload = record(session.payload)!;
+      const runtimeWorkspaceRoots = sessionPayload.runtime_workspace_roots === undefined
+        ? undefined : absolutePaths(sessionPayload.runtime_workspace_roots, "runtime_workspace_roots");
       const latest = latestTurnContext(fd, size);
       if (!latest) throw new Error("Codex rollout has no complete turn context");
       if (latest.turn_id !== turnId && (compactionSourceTurnId === undefined || latest.turn_id !== compactionSourceTurnId)) {
@@ -979,8 +1010,8 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
           continue;
         }
       }
-      const environment = environmentFromTurnContext(latest, latest.turn_id as string, tools);
-      const workspaceRootsDeclared = latest.workspace_roots !== undefined;
+      const environment = environmentFromTurnContext(latest, latest.turn_id as string, tools, runtimeWorkspaceRoots);
+      const workspaceRootsDeclared = latest.workspace_roots !== undefined || runtimeWorkspaceRoots !== undefined;
       if (!nativeRootOnly) validateMetadataConsistency(lineage, environment, workspaceRootsDeclared);
       if (options.historicalEnvironmentMessages) {
         verifyHistoricalEnvironmentMessages(fd, size, turnId, options.historicalEnvironmentMessages);
@@ -988,7 +1019,7 @@ export function inspectCurrentCodexRollout<T>(options:CurrentCodexRolloutOptions
       if (options.compactedEnvironmentItems) {
         verifyCompactedEnvironmentItems(fd, size, options.compactedEnvironmentItems);
       }
-      const inspected=inspect({fd,size,turn:latest,environment,workspaceRootsDeclared});
+      const inspected=inspect({fd,size,turn:latest,environment,workspaceRootsDeclared,rolloutPath});
       const after=fstatSync(fd);
       if(after.size<size)throw new Error('Codex rollout shrank during provenance lookup');
       if(after.size===size&&after.mtimeMs!==before.mtimeMs)throw new Error('Codex rollout was rewritten during provenance lookup');
@@ -1042,5 +1073,5 @@ export function resolveExactNativeRootTurnEnvironment(options:{
 }
 
 export function resolveCurrentCodexRolloutEnvironment(options:CurrentCodexRolloutOptions):CodexRolloutEnvironment|undefined {
-  return inspectCurrentCodexRollout(options,({environment,workspaceRootsDeclared,turn})=>({environment,workspaceRootsDeclared,filesystemProfileXml:renderFilesystemProfile(turn.permission_profile,environment.roots)}));
+  return inspectCurrentCodexRollout(options,({environment,workspaceRootsDeclared,turn,rolloutPath})=>({environment,workspaceRootsDeclared,rolloutPath,filesystemProfileXml:renderFilesystemProfile(turn.permission_profile,environment.roots)}));
 }

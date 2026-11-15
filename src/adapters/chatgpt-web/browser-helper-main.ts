@@ -18,10 +18,10 @@ interface RunMessage {
     appName: string;
     expectedConnectorTunnelId?: string;
     browserHostDescriptorPath: string;
+    useTemporaryChats?: boolean;
     browserDiagnosticsPath?: string;
     turnTimeoutMs: number;
     autoApproveToolCalls: boolean;
-    useSavedChats?: boolean;
   };
   turn: {
     traceId: string;
@@ -49,7 +49,7 @@ interface VerifyMessage {
     appName: string;
     expectedConnectorTunnelId?: string;
     browserHostDescriptorPath: string;
-    useSavedChats?: boolean;
+    useTemporaryChats?: boolean;
   };
 }
 
@@ -220,7 +220,7 @@ async function run(message: RunMessage): Promise<void> {
       browserDiagnosticsPath: message.config.browserDiagnosticsPath,
       turnTimeoutMs: message.config.turnTimeoutMs,
       autoApproveToolCalls: message.config.autoApproveToolCalls,
-      useSavedChats: message.config.useSavedChats === true,
+      useTemporaryChats: message.config.useTemporaryChats !== false,
     },
   };
   const abortController = new AbortController();
@@ -409,7 +409,7 @@ function maintenanceWorker(message: MaintenanceMessage): ChatGptBrowserWorker {
   const appName = message.config.appName?.trim();
   const browserHostDescriptorPath = message.config.browserHostDescriptorPath?.trim();
   if (!appName || appName.length > 80 || !browserHostDescriptorPath
-    || (message.config.useSavedChats !== undefined && typeof message.config.useSavedChats !== "boolean")) {
+    || (message.config.useTemporaryChats !== undefined && typeof message.config.useTemporaryChats !== "boolean")) {
     throw new Error("Browser helper maintenance config is invalid");
   }
   const provider: CodexProviderConfig = {
@@ -418,7 +418,7 @@ function maintenanceWorker(message: MaintenanceMessage): ChatGptBrowserWorker {
     chatgptWeb: {
       appName, browserHost: "launcher", browserHostDescriptorPath,
       expectedConnectorTunnelId: message.config.expectedConnectorTunnelId,
-      useSavedChats: message.config.useSavedChats === true,
+      useTemporaryChats: message.config.useTemporaryChats !== false,
     },
   };
   return ChatGptBrowserWorker.forProvider(provider);
@@ -431,7 +431,7 @@ async function maintain(message: InspectMessage | SmokeMessage | LimitsMessage):
   try {
     const worker = maintenanceWorker(message);
     const value = message.type === "inspect"
-      ? await worker.inspectSession(message.detectCapabilities)
+      ? await worker.inspectSession(message.detectCapabilities, message.id)
       : message.type === "limits" ? await worker.inspectLimitsPlan()
       : await worker.smokeTest(abortController.signal);
     writeProtocol({ type: "result", id: message.id, value });
