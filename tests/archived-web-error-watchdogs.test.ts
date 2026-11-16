@@ -9,6 +9,7 @@ import {
   chatGptInterruptedNetworkVisible,
   chatGptMessageDeliveryTimeoutVisible,
   chatGptPageRetryErrorVisible,
+  chatGptOwnedMessageStreamErrorVisible,
 } from "../src/adapters/chatgpt-web/browser-worker";
 
 type BannerKind = "status" | "alert" | "plain" | "transcript";
@@ -89,6 +90,40 @@ test("hard red network errors and scoped red Retry are observed but never clicke
   expect(await chatGptPageRetryErrorVisible(bannerPage("Failure", "alert", true))).toBe(true);
   expect(await chatGptPageRetryErrorVisible(bannerPage("Failure", "alert", false))).toBe(false);
   expect(await chatGptPageRetryErrorVisible(bannerPage("Failure", "transcript", true))).toBe(false);
+});
+
+test("an owned message-stream error must belong to the bound turn and never clicks Retry", async () => {
+  const scenarios = [
+    { alert: true, textMatches: true, retry: true, expected: true },
+    { alert: true, textMatches: false, retry: true, expected: false },
+    { alert: true, textMatches: true, retry: false, expected: false },
+    { alert: false, textMatches: true, retry: true, expected: false },
+  ];
+  for (const scenario of scenarios) {
+    let activated = 0;
+    let matched = scenario.alert;
+    const scopedLocator = {
+      filter: ({ hasText }: { hasText?: RegExp }) => {
+        if (hasText) matched = matched && scenario.textMatches
+          && hasText.test("Error in message stream");
+        return scopedLocator;
+      },
+      getByRole: (role: string, options: { name: string }) => {
+        matched = matched && role === "button" && options.name === "Retry" && scenario.retry;
+        return scopedLocator;
+      },
+      last: () => scopedLocator,
+      isVisible: async () => matched,
+      click: async () => { activated++; },
+    };
+    const ownedTurn = { locator: (selector: string) => {
+      expect(selector).toBe('[role="alert"]');
+      return scopedLocator;
+    } };
+    expect(await chatGptOwnedMessageStreamErrorVisible(ownedTurn as never))
+      .toBe(scenario.expected);
+    expect(activated).toBe(0);
+  }
 });
 
 test("recovery watchdog includes restored archive labels in the original and fresh Stop observations", () => {

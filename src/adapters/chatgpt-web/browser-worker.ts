@@ -126,7 +126,7 @@ import {
 } from "./adapter-error";
 import { SameTabRecovery, type RecoveryObservation } from "./same-tab-recovery";
 import { RecoveryHistoryWait } from './recovery-history-wait';
-import { classifySameTabRecoveryTrigger, createSameTabRecoveryDelta, createSameTabRecoveryFallback, runSameTabRecoverySafely } from "./same-tab-recovery-policy";
+import { classifySameTabRecoveryTrigger, classifyBlockedOwnedStreamFailure, createSameTabRecoveryDelta, createSameTabRecoveryFallback, runSameTabRecoverySafely } from "./same-tab-recovery-policy";
 import { ChatGptRecoveryWatchdog, CHATGPT_FRONTEND_ERROR_STALL_MS, freshRecoveryStall, type RecoveryWatchdogObservation } from "./recovery-watchdog";
 import type {SteeringProgressReader} from './live-steering';
 import {
@@ -514,6 +514,18 @@ export async function chatGptHardNetworkErrorVisible(page: Page): Promise<boolea
 /** A Retry button alone cannot authorize an automatic click or replay. */
 export async function chatGptPageRetryErrorVisible(page: Page): Promise<boolean> {
   return page.locator('[role="alert"]')
+    .getByRole("button", { name: "Retry", exact: true })
+    .last().isVisible().catch(() => false);
+}
+
+/**
+ * Only an error inside the already bound assistant container can classify this
+ * accepted Send. A Retry button in another turn, a sidebar or quoted prose is
+ * never evidence; this detector is read-only and must not activate Retry.
+ */
+export async function chatGptOwnedMessageStreamErrorVisible(ownedTurn: Locator): Promise<boolean> {
+  return ownedTurn.locator('[role="alert"]')
+    .filter({ hasText: /Error in message stream/i })
     .getByRole("button", { name: "Retry", exact: true })
     .last().isVisible().catch(() => false);
 }
@@ -3409,9 +3421,18 @@ export class ChatGptBrowserWorker {
       if (observationPage.isClosed()) throw chatGptBrowserTabClosedError();
       let progress = externalProgress?.snapshot();
       if (progress?.lastProgressAt !== undefined) {
+        // After this Send has invoked a native tool, a missing/virtualized
+        // assistant group can outlive the ordinary 60s DOM grace while the model
+        // reasons between calls. The proven MCP activity is bounded by the same
+        // ten-minute silence ceiling as the main response loop; do not convert
+        // unproven pre-Send progress into a new ownership claim.
+        const brokeredTurn = observationBaseline.initialToolBatchRevision !== undefined
+          && progress.lastToolBatchRevision > observationBaseline.initialToolBatchRevision;
+        const inactivityGrace = brokeredTurn
+          ? CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS : graceMs;
         responseDeadline = Math.min(
           deadline ?? Number.POSITIVE_INFINITY,
-          Math.max(responseDeadline, progress.lastProgressAt + graceMs),
+          Math.max(responseDeadline, progress.lastProgressAt + inactivityGrace),
         );
       }
       if (deadline !== undefined && Date.now() >= deadline) {
@@ -3523,7 +3544,10 @@ export class ChatGptBrowserWorker {
       // The power UI can expose Stop for a long reasoning phase before mounting any assistant
       // node. Fresh generation evidence extends only DOM grace, never the caller's deadline.
       if (state.visibleStopButtonCount > 0 || generation?.active()) {
-        responseDeadline = Math.min(deadline ?? Number.POSITIVE_INFINITY, Date.now() + graceMs);
+        responseDeadline = Math.min(
+          deadline ?? Number.POSITIVE_INFINITY,
+          Math.max(responseDeadline, Date.now() + graceMs),
+        );
         generation?.progress();
       }
       // A delayed renderer wake can cross the grace while the assistant appears. Only a fresh
@@ -7090,7 +7114,31 @@ export class ChatGptBrowserWorker {
             "ChatGPT recovery watchdog expired without meaningful model or native-tool progress.",
             { status: 503, errorType: "server_error", code: "message_delivery_stalled", retryable: true },
           );
-          const recovered = await runSameTabRecoverySafely(()=>recoverSameTab(stallError),originalAbortSignal);
+          let recovered: string | undefined;
+          try {
+            recovered = await runSameTabRecoverySafely(() => recoverSameTab(stallError), originalAbortSignal);
+          } catch (error) {
+            if (error instanceof ChatGptWebAdapterError && error.code === "same_tab_recovery_blocked") {
+              // Preserve the fail-closed receipt/ownership gate. An upstream error
+              // shown inside this exact accepted turn is more useful to the user
+              // than an anonymous recovery exception, but it NEVER permits Retry.
+              const cause = error.cause;
+              console.warn("[chatgpt-web] recovery_blocked_diagnostic " + JSON.stringify({
+                traceId: turn.traceId, recoveryState: sameTabRecovery.state,
+                causeName: cause instanceof Error ? cause.name : "unknown",
+                causeCode: cause instanceof ChatGptWebAdapterError ? cause.code : undefined,
+                fallbackReason: sameTabRecovery.fallbackReason ?? "none",
+              }));
+              const ownedError = await chatGptOwnedMessageStreamErrorVisible(
+                page.locator(chatGptTurnContainerSelector(responseTurn.identity)),
+              );
+              if (ownedError) {
+                await diagnostics.capture(page, "owned-message-stream-error-recovery-blocked");
+                throw classifyBlockedOwnedStreamFailure(error, true);
+              }
+            }
+            throw error;
+          }
           if (recovered !== undefined) return recovered;
           if (recoveryHistoryPending || sameTabRecovery.state === "WAITING_TOOL" || sameTabRecovery.state === "WAITING_APPROVAL" || sameTabRecovery.state === "REVISION_QUEUED") {
             await new Promise(resolveSleep => setTimeout(resolveSleep, 250));

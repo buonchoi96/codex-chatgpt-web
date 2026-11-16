@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   classifySameTabRecoveryTrigger,
+  classifyBlockedOwnedStreamFailure,
   createSameTabRecoveryDelta,
   createSameTabRecoveryFallback,
   runSameTabRecoverySafely,
@@ -21,6 +22,24 @@ test('steering and watchdog reconciliation faults cannot authorize an outer retr
   const abort=new AbortController();abort.abort();let invoked=false;
   await expect(runSameTabRecoverySafely(async()=>{invoked=true;},abort.signal)).rejects.toMatchObject({name:'AbortError'});
   expect(invoked).toBe(false);
+});
+
+test("a bound upstream stream-error banner specializes the blocked recovery without authorizing Retry", async () => {
+  const cause = new Error("private transport observation failure");
+  const blocked = await runSameTabRecoverySafely(async () => { throw cause; }).catch(error => error);
+  expect(blocked).toMatchObject({ code: "same_tab_recovery_blocked", retryable: false });
+  const classified = classifyBlockedOwnedStreamFailure(blocked, true);
+  expect(classified).toMatchObject({
+    code: "chatgpt_message_stream_error_unreconciled",
+    status: 502,
+    retryable: false,
+    cause: blocked,
+  });
+  expect((classified as Error).message).toContain("Error in message stream");
+  expect(classifyBlockedOwnedStreamFailure(blocked, false)).toBe(blocked);
+  expect(classifyBlockedOwnedStreamFailure(cause, true)).toBe(cause);
+  expect(classifySameTabRecoveryTrigger(classified as {code: string; retryable: boolean},
+    false, true, true).eligible).toBe(false);
 });
 
 test("only retryable upstream response errors and verified delivery stalls qualify", () => {

@@ -12,6 +12,24 @@ export async function runSameTabRecoverySafely<T>(action:()=>Promise<T>,signal?:
   }
 }
 
+/**
+ * A rendered upstream message-stream error is useful when the conservative
+ * reconciliation guard already rejected the old generation. This changes only
+ * the diagnostic, not the retry policy or the authority to submit another Send.
+ */
+export function classifyBlockedOwnedStreamFailure(error: unknown, ownedStreamError: boolean): unknown {
+  if (!ownedStreamError || !(error instanceof ChatGptWebAdapterError)
+    || error.code !== "same_tab_recovery_blocked") return error;
+  return new ChatGptWebAdapterError(
+    "ChatGPT displayed 'Error in message stream' in the accepted turn. "
+    + "The old response and native-tool receipts could not be safely reconciled. "
+    + "Automatic Retry is disabled to avoid repeating commands; review the ChatGPT "
+    + "tab and completed native operations before retrying manually.",
+    { status: 502, errorType: "server_error",
+      code: "chatgpt_message_stream_error_unreconciled", retryable: false, cause: error },
+  );
+}
+
 export interface SameTabRecoveryError {
   code?: string;
   retryable?: boolean;

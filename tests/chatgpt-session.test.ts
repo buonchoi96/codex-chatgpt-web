@@ -185,6 +185,75 @@ test("effort activation retries one ghost click with a primary pointerdown", asy
   ]);
 });
 
+test("a timed-out stable-layout click falls back to the owned pointerdown menu", async () => {
+  let opened = false;
+  let pointerCalls = 0;
+  const ownedMenu = { isVisible: async () => opened };
+  const hiddenSurface = {
+    filter() { return this; }, last() { return this; }, locator() { return this; },
+    isVisible: async () => false,
+  };
+  const control = {
+    getAttribute: async (name: string) => name === "aria-controls" && opened
+      ? "owned-effort-menu" : name === "aria-expanded" ? String(opened)
+        : name === "data-state" ? opened ? "open" : "closed" : null,
+    click: async () => { throw Object.assign(new Error("unstable layout"), { name: "TimeoutError" }); },
+    dispatchEvent: async () => { pointerCalls++; opened = true; },
+  };
+  const page = {
+    locator: (selector: string) => selector === '[id="owned-effort-menu"]' ? ownedMenu : hiddenSurface,
+    keyboard: { press: async () => {} },
+  };
+  const activation = await activateChatGptEffortMenu(page as never, control as never, { settleMs: 0 });
+  expect(activation.method).toBe("pointerdown");
+  expect(activation.menu).toBe(ownedMenu as never);
+  expect(pointerCalls).toBe(1);
+});
+
+test("a timed-out click that already opened the owned effort menu is not repeated", async () => {
+  let opened = false;
+  let pointerCalls = 0;
+  const surface = { isVisible: async () => opened };
+  const hidden = {
+    filter() { return this; }, last() { return this; }, locator() { return this; },
+    isVisible: async () => false,
+  };
+  const control = {
+    getAttribute: async (name: string) => name === "aria-controls" && opened
+      ? "owned-effort-menu" : name === "aria-expanded" ? String(opened)
+        : name === "data-state" ? opened ? "open" : "closed" : null,
+    click: async () => {
+      opened = true;
+      throw Object.assign(new Error("command acknowledgement timed out"), { name: "TimeoutError" });
+    },
+    dispatchEvent: async () => { pointerCalls++; },
+  };
+  const page = {
+    locator: (selector: string) => selector === '[id="owned-effort-menu"]' ? surface : hidden,
+    keyboard: { press: async () => {} },
+  };
+  const activation = await activateChatGptEffortMenu(page as never, control as never, { settleMs: 0 });
+  expect(activation.method).toBe("click");
+  expect(pointerCalls).toBe(0);
+});
+
+test("effort activation does not mask unrelated click failures with synthetic pointer input", async () => {
+  let pointerCalls = 0;
+  const hidden = {
+    filter() { return this; }, last() { return this; }, locator() { return this; },
+    isVisible: async () => false,
+  };
+  const failure = new Error("page closed");
+  const control = {
+    getAttribute: async () => null,
+    click: async () => { throw failure; },
+    dispatchEvent: async () => { pointerCalls++; },
+  };
+  const page = { locator: () => hidden, keyboard: { press: async () => {} } };
+  await expect(activateChatGptEffortMenu(page as never, control as never, { settleMs: 0 })).rejects.toBe(failure);
+  expect(pointerCalls).toBe(0);
+});
+
 test("effort activation fails closed when neither event exposes a structural surface", async () => {
   const hiddenSurface = {
     filter() { return this; },

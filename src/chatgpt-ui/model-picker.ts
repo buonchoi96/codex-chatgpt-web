@@ -214,7 +214,16 @@ export async function activateChatGptEffortMenu(
   await clearGhostEffortState(page, control);
   // Let Playwright wait for stable layout and hit testing after navigation.
   // A forced click can be delivered before the new renderer's viewport is usable.
-  await control.click({ timeout: Math.max(1, settleMs) });
+  try {
+    await control.click({ timeout: Math.max(1, settleMs) });
+  } catch (error) {
+    // A slow React layout can defeat Playwright's stability check even when
+    // the visible trigger is enabled. Retain the original failure for anything
+    // other than a timed-out click; only the pre-Send menu can be retried.
+    if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
+  }
+  // The timed-out click may have opened the menu just before its command
+  // acknowledgement failed. Prove the owned surface before any fallback.
   const clickedSurface = await waitForEffortSurface(page, control, settleMs);
   if (clickedSurface) return { method: "click", ...clickedSurface };
 

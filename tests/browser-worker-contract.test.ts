@@ -193,6 +193,74 @@ test("a post-Send native MCP batch binds the unique new assistant when the user 
   )).toBe(false);
 });
 
+test("tool-proven missing assistant binding survives a 60s reasoning gap but expires after bounded inactivity", async () => {
+  const previousNow = Date.now;
+  let clock = 3_000;
+  Date.now = () => clock;
+  try {
+    for (const scenario of ["late-assistant", "stale-tool"] as const) {
+      clock = 3_000;
+      const progress = new ChatGptExternalTurnProgress();
+      progress.recordToolBatch(1, 1_000);
+      progress.recordToolResult(2_000);
+      const worker = ChatGptBrowserWorker.forProvider({
+        adapter: "chatgpt-web",
+        baseUrl: "test://missing-assistant-broker-grace-" + scenario,
+        chatgptWeb: { localToolsEnabled: true },
+      }) as any;
+      const old = ["group:user:old", "group:assistant:old"];
+      let observations = 0;
+      let waits = 0;
+      worker.submissionDomState = async () => {
+        observations++;
+        const newAssistant = scenario === "late-assistant" && observations >= 3;
+        return {
+          turnIdentities: newAssistant
+            ? [...old, "group:user:new", "group:assistant:new"] : old,
+          userIdentities: [],
+          responseIdentities: newAssistant ? ["group:assistant:new"] : [],
+          visibleStopButtonCount: 0,
+        };
+      };
+      worker.waitForTurnDomOrExternalProgress = async () => {
+        waits++;
+        clock = scenario === "stale-tool"
+          ? 2_000 + CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS + 1
+          : clock + (waits === 1 ? 61_000 : 1_000);
+      };
+      const baseline = {
+        initialTurnIdentities: old,
+        initialToolBatchRevision: 0,
+        domCache: {},
+      };
+      const hidden = {
+        filter() { return this; },
+        last() { return this; },
+        isVisible: async () => false,
+      };
+      const page = {
+        isClosed: () => false,
+        locator: (selector: string) => selector.startsWith('[role="')
+          ? hidden : ({ id: "assistant-locator" }),
+      } as unknown as Page;
+      const binding = worker.waitForNewAssistantTurn(
+        page, baseline, undefined, undefined, progress,
+      );
+      if (scenario === "late-assistant") {
+        await expect(binding).resolves.toMatchObject({ identity: "group:assistant:new" });
+        expect(waits).toBe(2);
+      } else {
+        await expect(binding).rejects.toThrow(
+          "ChatGPT accepted the message but did not expose its assistant turn in the DOM",
+        );
+        expect(waits).toBe(1);
+      }
+    }
+  } finally {
+    Date.now = previousNow;
+  }
+});
+
 test("submission DOM tracks logical identities and retains virtualized history in its baseline", async () => {
   type Turn = { id: string; index: number; role: "user" | "assistant"; mounted: boolean };
   let turns: Turn[] = [
