@@ -1196,6 +1196,30 @@ export function chatGptAssistantHasAcceptedAssistantReceipt(
     && newlyRenderedUsers.length === 0;
 }
 
+/**
+ * A native MCP batch from this exact Send proves execution even if ChatGPT
+ * virtualized the user bubble before its assistant role appeared. Only promote
+ * the single fresh assistant group; a pre-Send batch or a competing turn is
+ * never binding evidence. The response DOM still owns text and completion.
+ */
+export function chatGptAssistantHasBrokeredToolReceipt(
+  assistantIdentity: string,
+  initialToolBatchRevision: number | undefined,
+  latestToolBatchRevision: number | undefined,
+  candidateUserIdentity: string | undefined,
+  initialTurnIdentities: readonly string[],
+  state: Pick<ChatGptSubmissionDomState, "turnIdentities" | "userIdentities" | "responseIdentities">,
+): boolean {
+  return initialToolBatchRevision !== undefined
+    && latestToolBatchRevision !== undefined
+    && Number.isSafeInteger(initialToolBatchRevision)
+    && Number.isSafeInteger(latestToolBatchRevision)
+    && latestToolBatchRevision > initialToolBatchRevision
+    && chatGptAssistantHasAcceptedAssistantReceipt(
+      assistantIdentity, assistantIdentity, candidateUserIdentity, initialTurnIdentities, state,
+    );
+}
+
 /** Compare stable grouped roles only; legacy turn IDs have their own validation path. */
 export function chatGptAssistantBelongsToAcceptedUser(
   assistantIdentity: string,
@@ -1396,6 +1420,8 @@ interface ChatGptSubmissionBaseline {
   acceptedUserIdentity?: string;
   /** Exact assistant group observed as this Send's accepted assistant_turn receipt. */
   acceptedAssistantIdentity?: string;
+  /** Tool-batch revision sampled before pressing Send, never inferred from later DOM. */
+  initialToolBatchRevision?: number;
   acknowledgedStages?: readonly ChatGptAcknowledgedMultipartStage[];
 }
 
@@ -3458,18 +3484,32 @@ export class ChatGptBrowserWorker {
       // post-baseline user identity; never infer owner from Stop alone.
       const candidateUser = observationBaseline.acceptedUserIdentity
         ?? chatGptNewTurnIdentity(observationBaseline.initialTurnIdentities, state.userIdentities);
+      const brokeredToolReceipt = identity !== undefined && chatGptAssistantHasBrokeredToolReceipt(
+        identity,
+        observationBaseline.initialToolBatchRevision,
+        progress?.lastToolBatchRevision,
+        candidateUser,
+        observationBaseline.initialTurnIdentities,
+        state,
+      );
       if (identity && (chatGptAssistantHasUserGroupEvidence(identity, candidateUser)
+        || brokeredToolReceipt
         || chatGptAssistantHasAcceptedAssistantReceipt(
           identity,
           observationBaseline.acceptedAssistantIdentity,
           candidateUser,
           observationBaseline.initialTurnIdentities,
           state,
-        ))) return {
-        identity,
-        locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
-        acceptedTurnIdentities: state.turnIdentities,
-      };
+        ))) {
+        if (brokeredToolReceipt) {
+          console.info("[chatgpt-web] response_binding_brokered_tool_receipt");
+        }
+        return {
+          identity,
+          locator: observationPage.locator(chatGptAssistantTurnSelector(identity)),
+          acceptedTurnIdentities: state.turnIdentities,
+        };
+      }
       if (identity) {
         const bindingKey = `${identity}:${candidateUser ?? "missing-user"}`;
         const now = Date.now();
@@ -4412,6 +4452,7 @@ export class ChatGptBrowserWorker {
     }
     await captureDiagnostic?.("send-ready");
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
+    baseline.initialToolBatchRevision = initialToolBatchRevision;
     await submissionLifecycle?.onSendActivated?.();
     const sendAbort = new AbortController();
     const sendSignal = abortSignal

@@ -7,7 +7,7 @@ import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
 import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
-import { chatGptAssistantHasAcceptedAssistantReceipt } from "../src/adapters/chatgpt-web/browser-worker";
+import { chatGptAssistantHasAcceptedAssistantReceipt, chatGptAssistantHasBrokeredToolReceipt } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -134,6 +134,62 @@ test("assistant-only Send receipt binds one newly mounted group when the user bu
   expect(chatGptAssistantHasAcceptedAssistantReceipt(
     "group:assistant:new", "group:assistant:new", undefined, old,
     { ...state, responseIdentities: [...state.responseIdentities, "group:assistant:other"] },
+  )).toBe(false);
+});
+
+test("a post-Send native MCP batch binds the unique new assistant when the user bubble never mounts", async () => {
+  const old = ["group:user:old", "group:assistant:old"];
+  const state = {
+    turnIdentities: [...old, "group:user:new", "group:assistant:new"],
+    userIdentities: [],
+    responseIdentities: ["group:assistant:new"],
+    visibleStopButtonCount: 0,
+  };
+  const progress = new ChatGptExternalTurnProgress();
+  const initialToolBatchRevision = progress.snapshot().lastToolBatchRevision;
+  const worker = ChatGptBrowserWorker.forProvider({
+    adapter: "chatgpt-web",
+    baseUrl: "test://brokered-tool-user-virtualized",
+    chatgptWeb: { localToolsEnabled: true },
+  }) as any;
+  const hidden = { filter() { return this; }, last() { return this; }, isVisible: async () => false };
+  const assistant = { id: "brokered-assistant" };
+  const page = {
+    isClosed: () => false,
+    locator: (selector: string) => selector.includes("group\\:assistant\\:new")
+      || selector.includes("group:assistant:new") || selector.includes("data-turn-key")
+      ? assistant : hidden,
+  } as unknown as Page;
+  worker.submissionDomState = async () => state;
+  const baseline = { initialTurnIdentities: old, domCache: {}, initialToolBatchRevision };
+  progress.recordToolBatch(1);
+  const binding = await worker.waitForNewAssistantTurn(
+    page, baseline, Date.now() + 10_000, undefined, progress,
+  );
+  expect(binding.identity).toBe("group:assistant:new");
+  expect(binding.locator).toBe(assistant);
+
+  const latest = progress.snapshot().lastToolBatchRevision;
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:new", initialToolBatchRevision, latest, undefined, old, state,
+  )).toBe(true);
+  // Stale MCP activity from before Send, no broker proof, a foreign user,
+  // and competing groups must never bind an unacknowledged assistant.
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:new", latest, latest, undefined, old, state,
+  )).toBe(false);
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:new", undefined, latest, undefined, old, state,
+  )).toBe(false);
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:new", initialToolBatchRevision, latest, "group:user:other", old, state,
+  )).toBe(false);
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:new", initialToolBatchRevision, latest, undefined, old,
+    { ...state, turnIdentities: [...state.turnIdentities, "group:user:foreign", "group:assistant:foreign"] },
+  )).toBe(false);
+  expect(chatGptAssistantHasBrokeredToolReceipt(
+    "group:assistant:old", initialToolBatchRevision, latest, undefined, old, state,
   )).toBe(false);
 });
 
